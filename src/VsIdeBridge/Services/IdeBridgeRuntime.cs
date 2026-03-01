@@ -16,6 +16,7 @@ internal sealed class IdeBridgeRuntime
         SearchService searchService,
         DocumentService documentService,
         WindowService windowService,
+        VsCommandService vsCommandService,
         BreakpointService breakpointService,
         DebuggerService debuggerService,
         BuildService buildService,
@@ -27,6 +28,7 @@ internal sealed class IdeBridgeRuntime
         SearchService = searchService;
         DocumentService = documentService;
         WindowService = windowService;
+        VsCommandService = vsCommandService;
         BreakpointService = breakpointService;
         DebuggerService = debuggerService;
         BuildService = buildService;
@@ -44,6 +46,8 @@ internal sealed class IdeBridgeRuntime
     public DocumentService DocumentService { get; }
 
     public WindowService WindowService { get; }
+
+    public VsCommandService VsCommandService { get; }
 
     public BreakpointService BreakpointService { get; }
 
@@ -73,6 +77,7 @@ internal sealed class IdeBridgeRuntime
             searchService,
             documentService,
             new WindowService(),
+            new VsCommandService(),
             new BreakpointService(),
             new DebuggerService(),
             buildService,

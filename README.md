@@ -19,7 +19,8 @@ The first release includes:
 - IDE state snapshots
 - solution readiness waiting
 - file and text search with JSON output
-- document/window activation
+- document/tab/window activation
+- symbol actions through native Visual Studio commands
 - breakpoint management
 - debugger control and state capture
 - build and Error List capture
@@ -58,6 +59,14 @@ SuperSlicer validation used:
   - local VSIX installer entry point
 - `scripts/invoke_vs_ide_command.ps1`
   - attach/open/invoke wrapper for external automation
+- `scripts/invoke_active_vs_command.ps1`
+  - attach to an already-open Visual Studio 18 instance and execute one bridge command
+- `scripts/list_vs_commands.ps1`
+  - enumerate native Visual Studio command names from a live DTE instance
+- `scripts/read_bridge_result.bat`
+  - native JSON-to-`key=value` reader for shell clients and LLM tooling
+- `scripts/read_bridge_result.ps1`
+  - PowerShell entry point for the same native result reader
 - `scripts/smoke_test.ps1`
   - end-to-end validation flow
 - `scripts/vs_dte_probe.ps1`
@@ -113,7 +122,15 @@ Search and navigation:
 - `Tools.IdeFindFiles`
 - `Tools.IdeFindText`
 - `Tools.IdeOpenDocument`
+- `Tools.IdeListDocuments`
+- `Tools.IdeActivateDocument`
+- `Tools.IdeCloseDocument`
 - `Tools.IdeActivateWindow`
+- `Tools.IdeListWindows`
+- `Tools.IdeExecuteVsCommand`
+- `Tools.IdeFindAllReferences`
+- `Tools.IdeShowCallHierarchy`
+- `Tools.IdeGetDocumentSlice`
 
 Breakpoints:
 
@@ -170,8 +187,45 @@ Tools.IdeWaitForReady --out "C:\temp\ready.json" --timeout-ms 120000
 Tools.IdeFindFiles --query "VsIdeBridge.csproj" --out "C:\temp\files.json"
 Tools.IdeFindText --query "Tools.IdeGetState" --scope solution --out "C:\temp\find.json"
 Tools.IdeOpenDocument --file "C:\repo\src\foo.cpp" --line 42 --column 1 --out "C:\temp\open.json"
+Tools.IdeListDocuments --out "C:\temp\documents.json"
+Tools.IdeActivateDocument --query "foo.cpp" --out "C:\temp\activate-document.json"
+Tools.IdeCloseDocument --query "foo.cpp" --out "C:\temp\close-document.json"
+Tools.IdeListWindows --query "References" --out "C:\temp\windows.json"
+Tools.IdeExecuteVsCommand --command "View.SolutionExplorer" --out "C:\temp\execute-command.json"
+Tools.IdeFindAllReferences --file "C:\repo\src\foo.cpp" --line 42 --column 13 --out "C:\temp\references.json"
+Tools.IdeShowCallHierarchy --file "C:\repo\src\foo.cpp" --line 42 --column 13 --out "C:\temp\call-hierarchy.json"
+Tools.IdeGetDocumentSlice --file "C:\repo\src\foo.cpp" --line 42 --context-before 8 --context-after 24 --out "C:\temp\slice.json"
 Tools.IdeSetBreakpoint --file "C:\repo\src\foo.cpp" --line 42 --out "C:\temp\bp.json"
 Tools.IdeBuildAndCaptureErrors --out "C:\temp\build-errors.json" --timeout-ms 600000
+```
+
+`Tools.IdeFindAllReferences` and `Tools.IdeShowCallHierarchy` use the symbol at the active caret by default. Use `--file`, `--document`, `--line`, and `--column` when you want the bridge to position the editor first.
+
+Search and navigation results use normalized absolute file paths so an external tool can safely open or edit the same file in the background.
+
+Bridge automation is serialized through a shared mutex so overlapping wrapper calls do not open multiple Visual Studio instances against the same solution at the same time.
+
+## Large-File Workflow
+
+For large C++ files, the intended bridge flow is:
+
+1. Use `Tools.IdeFindText` to get the exact match location from Visual Studio.
+2. Use `Tools.IdeGetDocumentSlice` to fetch only the lines around that hit.
+
+Example:
+
+```text
+Tools.IdeFindText --query "choose_app_dir" --scope solution --out "C:\temp\find.json"
+Tools.IdeGetDocumentSlice --file "C:\repo\src\GUI_App.cpp" --line 1045 --context-before 6 --context-after 20 --out "C:\temp\slice.json"
+```
+
+This keeps the bridge useful on large codebases without repeatedly rescanning full source files outside Visual Studio.
+
+For symbol-heavy work, the next step after a slice is usually a native Visual Studio command:
+
+```text
+Tools.IdeFindAllReferences --file "C:\repo\src\GUI_App.cpp" --line 1045 --column 12 --out "C:\temp\references.json"
+Tools.IdeShowCallHierarchy --file "C:\repo\src\GUI_App.cpp" --line 1045 --column 12 --out "C:\temp\call-hierarchy.json"
 ```
 
 ## JSON Output
@@ -195,10 +249,28 @@ Each command writes a JSON envelope. Current implementation uses these top-level
 
 Failure results keep the same envelope and populate `Error`.
 
+If a shell client or LLM does not want to parse JSON directly, use the native result reader:
+
+```bat
+scripts\read_bridge_result.bat C:\temp\ide-state.json
+```
+
+Example output:
+
+```text
+command=Tools.IdeGetState
+success=true
+summary=IDE state captured.
+```
+
 ## Scripts
 
 - `scripts\invoke_vs_ide_command.ps1`
   Launch or attach to Visual Studio and invoke an IDE Bridge command.
+- `scripts\invoke_active_vs_command.ps1`
+  Attach to an already-open Visual Studio 18 instance and execute one command without solution-launch logic.
+- `scripts\list_vs_commands.ps1`
+  Enumerate Visual Studio command names so bridge wrappers can target native IDE actions accurately.
 - `scripts\smoke_test.ps1`
   Run a small end-to-end validation against the extension.
 - `scripts\vs_dte_probe.ps1`
@@ -223,6 +295,7 @@ Key wrapper behavior:
 - only closes Visual Studio when `-CloseVisualStudio` is passed
 - waits for the output JSON file to be written before returning
 - resolves the internal `Tools.Tools.Ide*` registration quirk so callers can use `Tools.Ide*`
+- supports `-ResultFormat summary|keyvalue|json` so callers can choose human summary text, shell-friendly `key=value`, or raw JSON
 
 Run the smoke test with:
 
@@ -250,6 +323,9 @@ Validated locally:
   - readiness wait
   - state capture
   - file search for `GUI_App.cpp`
+  - tab open/activate/close flow across `GUI_App.cpp` and `GUI_App.hpp`
+  - native `View.CallHierarchy` against `choose_app_dir`
+  - native `Edit.FindAllReferences` against `choose_app_dir`
   - Error List export
 
 Example generated artifacts:
@@ -258,6 +334,10 @@ Example generated artifacts:
 - `output\superslicer-ready.json`
 - `output\superslicer-state.json`
 - `output\superslicer-find-files.json`
+- `output\superslicer-list-documents.json`
+- `output\superslicer-list-windows.json`
+- `output\superslicer-call-hierarchy.json`
+- `output\superslicer-find-all-references.json`
 - `output\superslicer-errors.json`
 
 ## Notes
@@ -266,4 +346,5 @@ Example generated artifacts:
 - Build and Error List commands reuse the same Error List extraction logic that worked in `vs-errorlist-export`.
 - The extension is command-first. The only visible menu items are `Help` and `Smoke Test`.
 - Search currently scans files on disk; unsaved in-memory editor changes are not yet part of search results.
+- Symbol commands intentionally rely on Visual Studio's own language services rather than bridge-side parsing.
 - `Tools.Ide*` is the public contract even though Visual Studio internally registers these commands as `Tools.Tools.Ide*`.

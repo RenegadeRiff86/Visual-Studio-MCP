@@ -48,6 +48,22 @@ internal sealed class CommandArguments
         return value;
     }
 
+    public int? GetNullableInt32(string name)
+    {
+        var raw = GetString(name);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+        {
+            throw new CommandErrorException("invalid_arguments", $"Argument --{name} must be an integer.");
+        }
+
+        return value;
+    }
+
     public bool GetBoolean(string name, bool defaultValue)
     {
         var raw = GetString(name);

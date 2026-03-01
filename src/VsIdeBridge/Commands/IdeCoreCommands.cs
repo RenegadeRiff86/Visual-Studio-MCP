@@ -11,6 +11,93 @@ namespace VsIdeBridge.Commands;
 
 internal static class IdeCoreCommands
 {
+    private static Task<CommandExecutionResult> GetHelpResultAsync()
+    {
+        var commands = new JArray(
+            "Tools.IdeGetState",
+            "Tools.IdeWaitForReady",
+            "Tools.IdeFindText",
+            "Tools.IdeFindFiles",
+            "Tools.IdeOpenDocument",
+            "Tools.IdeListDocuments",
+            "Tools.IdeActivateDocument",
+            "Tools.IdeCloseDocument",
+            "Tools.IdeActivateWindow",
+            "Tools.IdeListWindows",
+            "Tools.IdeExecuteVsCommand",
+            "Tools.IdeFindAllReferences",
+            "Tools.IdeShowCallHierarchy",
+            "Tools.IdeGetDocumentSlice",
+            "Tools.IdeSetBreakpoint",
+            "Tools.IdeListBreakpoints",
+            "Tools.IdeRemoveBreakpoint",
+            "Tools.IdeClearAllBreakpoints",
+            "Tools.IdeDebugGetState",
+            "Tools.IdeDebugStart",
+            "Tools.IdeDebugStop",
+            "Tools.IdeDebugBreak",
+            "Tools.IdeDebugContinue",
+            "Tools.IdeDebugStepOver",
+            "Tools.IdeDebugStepInto",
+            "Tools.IdeDebugStepOut",
+            "Tools.IdeBuildSolution",
+            "Tools.IdeGetErrorList",
+            "Tools.IdeBuildAndCaptureErrors");
+
+        return Task.FromResult(new CommandExecutionResult(
+            "Command catalog written.",
+            new JObject
+            {
+                ["commands"] = commands,
+                ["example"] = @"Tools.IdeGetState --out ""C:\temp\ide-state.json""",
+                ["documentSliceExample"] = @"Tools.IdeGetDocumentSlice --file ""C:\repo\src\foo.cpp"" --start-line 120 --end-line 180 --out ""C:\temp\slice.json""",
+                ["referencesExample"] = @"Tools.IdeFindAllReferences --file ""C:\repo\src\foo.cpp"" --line 42 --column 13 --out ""C:\temp\references.json""",
+                ["callHierarchyExample"] = @"Tools.IdeShowCallHierarchy --file ""C:\repo\src\foo.cpp"" --line 42 --column 13 --out ""C:\temp\call-hierarchy.json""",
+            }));
+    }
+
+    private static async Task<CommandExecutionResult> GetSmokeTestResultAsync(IdeCommandContext context)
+    {
+        var state = await context.Runtime.IdeStateService.GetStateAsync(context.Dte).ConfigureAwait(true);
+        return new CommandExecutionResult(
+            "Smoke test captured IDE state.",
+            new JObject
+            {
+                ["success"] = true,
+                ["state"] = state,
+            });
+    }
+
+    internal sealed class IdeHelpMenuCommand : IdeCommandBase
+    {
+        public IdeHelpMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x0102, acceptsParameters: false)
+        {
+        }
+
+        protected override string CanonicalName => "Tools.VsIdeBridgeHelpMenu";
+
+        protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            return GetHelpResultAsync();
+        }
+    }
+
+    internal sealed class IdeSmokeTestMenuCommand : IdeCommandBase
+    {
+        public IdeSmokeTestMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x0103, acceptsParameters: false)
+        {
+        }
+
+        protected override string CanonicalName => "Tools.VsIdeBridgeSmokeTestMenu";
+
+        protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            return GetSmokeTestResultAsync(context);
+        }
+    }
+
     internal sealed class IdeHelpCommand : IdeCommandBase
     {
         public IdeHelpCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
@@ -22,36 +109,7 @@ internal static class IdeCoreCommands
 
         protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var commands = new JArray(
-                "Tools.IdeGetState",
-                "Tools.IdeWaitForReady",
-                "Tools.IdeFindText",
-                "Tools.IdeFindFiles",
-                "Tools.IdeOpenDocument",
-                "Tools.IdeActivateWindow",
-                "Tools.IdeSetBreakpoint",
-                "Tools.IdeListBreakpoints",
-                "Tools.IdeRemoveBreakpoint",
-                "Tools.IdeClearAllBreakpoints",
-                "Tools.IdeDebugGetState",
-                "Tools.IdeDebugStart",
-                "Tools.IdeDebugStop",
-                "Tools.IdeDebugBreak",
-                "Tools.IdeDebugContinue",
-                "Tools.IdeDebugStepOver",
-                "Tools.IdeDebugStepInto",
-                "Tools.IdeDebugStepOut",
-                "Tools.IdeBuildSolution",
-                "Tools.IdeGetErrorList",
-                "Tools.IdeBuildAndCaptureErrors");
-
-            return Task.FromResult(new CommandExecutionResult(
-                "Command catalog written.",
-                new JObject
-                {
-                    ["commands"] = commands,
-                    ["example"] = @"Tools.IdeGetState --out ""C:\temp\ide-state.json""",
-                }));
+            return GetHelpResultAsync();
         }
     }
 
@@ -66,14 +124,7 @@ internal static class IdeCoreCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var state = await context.Runtime.IdeStateService.GetStateAsync(context.Dte).ConfigureAwait(true);
-            return new CommandExecutionResult(
-                "Smoke test captured IDE state.",
-                new JObject
-                {
-                    ["success"] = true,
-                    ["state"] = state,
-                });
+            return await GetSmokeTestResultAsync(context).ConfigureAwait(true);
         }
     }
 

@@ -165,7 +165,7 @@ internal sealed class SearchService
         }
 
         await Task.CompletedTask;
-        return (activeDocument.FullName, activeDocument.ProjectItem?.ContainingProject?.UniqueName ?? string.Empty);
+        return (PathNormalization.NormalizeFilePath(activeDocument.FullName), activeDocument.ProjectItem?.ContainingProject?.UniqueName ?? string.Empty);
     }
 
     private static IEnumerable<(string Path, string ProjectUniqueName)> EnumerateSolutionFiles(DTE2 dte)
@@ -231,7 +231,7 @@ internal sealed class SearchService
                 var fileName = item.FileNames[i];
                 if (!string.IsNullOrWhiteSpace(fileName))
                 {
-                    yield return (fileName, projectUniqueName);
+                    yield return (PathNormalization.NormalizeFilePath(fileName), projectUniqueName);
                 }
             }
         }

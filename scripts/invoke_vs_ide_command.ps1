@@ -14,10 +14,55 @@ param(
 
     [bool]$ReuseVisualStudio = $true,
 
+    [ValidateSet("summary", "keyvalue", "json")]
+    [string]$ResultFormat = "summary",
+
     [switch]$CloseVisualStudio
 )
 
 $ErrorActionPreference = "Stop"
+
+function Acquire-BridgeMutex {
+    param(
+        [int]$TimeoutSeconds = 120
+    )
+
+    $mutex = New-Object System.Threading.Mutex($false, "Global\VsIdeBridge.VisualStudio18.Automation")
+    $acquired = $false
+
+    try {
+        $acquired = $mutex.WaitOne([TimeSpan]::FromSeconds($TimeoutSeconds))
+    }
+    catch [System.Threading.AbandonedMutexException] {
+        $acquired = $true
+    }
+
+    if (-not $acquired) {
+        $mutex.Dispose()
+        throw "Timed out waiting for the VS IDE Bridge automation lock."
+    }
+
+    return $mutex
+}
+
+function Release-BridgeMutex {
+    param(
+        $Mutex
+    )
+
+    if ($null -eq $Mutex) {
+        return
+    }
+
+    try {
+        $Mutex.ReleaseMutex()
+    }
+    catch {
+    }
+    finally {
+        $Mutex.Dispose()
+    }
+}
 
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     $safeName = ($CommandName -replace "[^A-Za-z0-9._-]", "_")
@@ -475,9 +520,235 @@ function Wait-ForOutputFile {
     throw "Timed out waiting for output file: $Path"
 }
 
+function Get-JsonProbePath {
+    $candidates = @(
+        (Join-Path $PSScriptRoot "..\src\IdeBridgeJsonProbe\bin\x64\Debug\IdeBridgeJsonProbe.exe"),
+        (Join-Path $PSScriptRoot "..\src\IdeBridgeJsonProbe\bin\x64\Release\IdeBridgeJsonProbe.exe")
+    )
+
+    foreach ($candidate in $candidates) {
+        $resolved = [System.IO.Path]::GetFullPath($candidate)
+        if (Test-Path -LiteralPath $resolved) {
+            return $resolved
+        }
+    }
+
+    return $null
+}
+
+function Convert-ProbeValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Value
+    )
+
+    return $Value.Replace('\r', "`r").Replace('\n', "`n").Replace('\t', "`t").Replace('\\', '\')
+}
+
+function Read-CommandEnvelopeWithProbe {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if ($env:VS_IDE_BRIDGE_USE_NATIVE_PROBE -ne "1") {
+        return $null
+    }
+
+    $probePath = Get-JsonProbePath
+    if ([string]::IsNullOrWhiteSpace($probePath)) {
+        return $null
+    }
+
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $probePath
+    $startInfo.Arguments = "--input `"$Path`""
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    [void]$process.Start()
+
+    if (-not $process.WaitForExit(2000)) {
+        try {
+            $process.Kill()
+        }
+        catch {
+        }
+
+        return $null
+    }
+
+    $stdout = $process.StandardOutput.ReadToEnd()
+    $stderr = $process.StandardError.ReadToEnd()
+
+    $probeExitCode = $process.ExitCode
+    if ($probeExitCode -eq 2) {
+        return $null
+    }
+
+    $values = @{}
+    foreach ($line in ($stdout -split "`r?`n")) {
+        $text = [string]$line
+        $separator = $text.IndexOf('=')
+        if ($separator -lt 0) {
+            continue
+        }
+
+        $key = $text.Substring(0, $separator)
+        $value = $text.Substring($separator + 1)
+        $values[$key] = Convert-ProbeValue -Value $value
+    }
+
+    if ($values.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($stderr)) {
+        return $null
+    }
+
+    return [PSCustomObject]@{
+        Success = ($values["success"] -eq "true")
+        Summary = $values["summary"]
+        Error = [PSCustomObject]@{
+            Code = $values["error_code"]
+        }
+        Data = [PSCustomObject]@{
+            count = $values["count"]
+            hasErrors = $values["has_errors"]
+            hasWarnings = $values["has_warnings"]
+        }
+    }
+}
+
+function Read-CommandEnvelope {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [int]$TimeoutSeconds
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $lastException = $null
+
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $probeEnvelope = Read-CommandEnvelopeWithProbe -Path $Path
+            if ($null -ne $probeEnvelope) {
+                return $probeEnvelope
+            }
+
+            return Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+        }
+        catch {
+            $lastException = $_.Exception
+            Start-Sleep -Milliseconds 250
+        }
+    }
+
+    if ($null -ne $lastException) {
+        throw "Timed out reading command output '$Path'. Last error: $($lastException.Message)"
+    }
+
+    throw "Timed out reading command output '$Path'."
+}
+
+function Get-EnvelopeDataValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Envelope,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    if ($null -eq $Envelope -or $null -eq $Envelope.Data) {
+        return $null
+    }
+
+    $property = $Envelope.Data.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+
+    return $property.Value
+}
+
+function Write-EnvelopeOutput {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Envelope,
+
+        [Parameter(Mandatory = $true)]
+        [string]$OutputPath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$CommandName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ResultFormat
+    )
+
+    switch ($ResultFormat) {
+        "json" {
+            Get-Content -LiteralPath $OutputPath -Raw -Encoding UTF8 | Write-Output
+            return
+        }
+        "keyvalue" {
+            $lines = @(
+                "command=$CommandName",
+                "success=$($Envelope.Success.ToString().ToLowerInvariant())",
+                "summary=$([string]$Envelope.Summary)",
+                "output_path=$OutputPath"
+            )
+
+            $errorCode = if ($null -ne $Envelope.Error -and $null -ne $Envelope.Error.Code) { [string]$Envelope.Error.Code } else { "" }
+            if (-not [string]::IsNullOrWhiteSpace($errorCode)) {
+                $lines += "error_code=$errorCode"
+            }
+
+            $count = Get-EnvelopeDataValue -Envelope $Envelope -Name "count"
+            if ($null -ne $count -and -not [string]::IsNullOrWhiteSpace([string]$count)) {
+                $lines += "count=$count"
+            }
+
+            $hasErrors = Get-EnvelopeDataValue -Envelope $Envelope -Name "hasErrors"
+            if ($null -ne $hasErrors -and -not [string]::IsNullOrWhiteSpace([string]$hasErrors)) {
+                $lines += "has_errors=$([string]$hasErrors)".ToLowerInvariant()
+            }
+
+            $hasWarnings = Get-EnvelopeDataValue -Envelope $Envelope -Name "hasWarnings"
+            if ($null -ne $hasWarnings -and -not [string]::IsNullOrWhiteSpace([string]$hasWarnings)) {
+                $lines += "has_warnings=$([string]$hasWarnings)".ToLowerInvariant()
+            }
+
+            $lines | Write-Output
+            return
+        }
+        default {
+            if ($Envelope.Success) {
+                Write-Host "$CommandName OK - $($Envelope.Summary) -> $OutputPath"
+            }
+            else {
+                $errorCode = if ($null -ne $Envelope.Error -and -not [string]::IsNullOrWhiteSpace([string]$Envelope.Error.Code)) {
+                    [string]$Envelope.Error.Code
+                }
+                else {
+                    "unknown_error"
+                }
+
+                throw "$CommandName FAIL [$errorCode] $($Envelope.Summary) -> $OutputPath"
+            }
+        }
+    }
+}
+
 $startedVisualStudio = $false
+$bridgeMutex = $null
 
 try {
+    $bridgeMutex = Acquire-BridgeMutex -TimeoutSeconds ([Math]::Max($StartupTimeoutSeconds, $CommandTimeoutSeconds))
     [OleMessageFilter]::Register()
 
     $target = $null
@@ -513,8 +784,19 @@ try {
 
     Invoke-DteCommand -Dte $target.Dte -Name $CommandName -Arguments $fullCommandArgs -TimeoutSeconds $CommandTimeoutSeconds
     Wait-ForOutputFile -Path $outputFullPath -TimeoutSeconds $CommandTimeoutSeconds
+    $envelope = Read-CommandEnvelope -Path $outputFullPath -TimeoutSeconds ([Math]::Max(5, $CommandTimeoutSeconds))
+    Write-EnvelopeOutput -Envelope $envelope -OutputPath $outputFullPath -CommandName $CommandName -ResultFormat $ResultFormat
 
-    Write-Host "Wrote $outputFullPath"
+    if (-not $envelope.Success) {
+        $errorCode = if ($null -ne $envelope.Error -and -not [string]::IsNullOrWhiteSpace([string]$envelope.Error.Code)) {
+            [string]$envelope.Error.Code
+        }
+        else {
+            "unknown_error"
+        }
+
+        throw "$CommandName FAIL [$errorCode] $($envelope.Summary) -> $outputFullPath"
+    }
 }
 finally {
     try {
@@ -525,6 +807,7 @@ finally {
         }
     }
     finally {
+        Release-BridgeMutex -Mutex $bridgeMutex
         [OleMessageFilter]::Revoke()
     }
 }

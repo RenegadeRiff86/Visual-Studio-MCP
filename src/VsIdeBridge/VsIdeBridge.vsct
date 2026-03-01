@@ -24,21 +24,41 @@
     </Menus>
 
     <Buttons>
-      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeHelp" priority="0x0100" type="Button">
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeHelpMenu" priority="0x0100" type="Button">
         <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
-        <CommandFlag>AllowParams</CommandFlag>
         <Strings>
           <ButtonText>Help</ButtonText>
+          <CommandName>IdeHelpMenu</CommandName>
+          <CanonicalName>Tools.VsIdeBridgeHelpMenu</CanonicalName>
+          <LocCanonicalName>.Tools.VsIdeBridgeHelpMenu</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeSmokeTestMenu" priority="0x0110" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <Strings>
+          <ButtonText>Smoke Test</ButtonText>
+          <CommandName>IdeSmokeTestMenu</CommandName>
+          <CanonicalName>Tools.VsIdeBridgeSmokeTestMenu</CanonicalName>
+          <LocCanonicalName>.Tools.VsIdeBridgeSmokeTestMenu</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeHelp" priority="0x01F0" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Help</ButtonText>
           <CommandName>IdeHelp</CommandName>
           <CanonicalName>Tools.IdeHelp</CanonicalName>
           <LocCanonicalName>.Tools.IdeHelp</LocCanonicalName>
         </Strings>
       </Button>
-      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeSmokeTest" priority="0x0110" type="Button">
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeSmokeTest" priority="0x01F1" type="Button">
         <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
         <CommandFlag>AllowParams</CommandFlag>
         <Strings>
-          <ButtonText>Smoke Test</ButtonText>
+          <ButtonText>IDE Smoke Test</ButtonText>
           <CommandName>IdeSmokeTest</CommandName>
           <CanonicalName>Tools.IdeSmokeTest</CanonicalName>
           <LocCanonicalName>.Tools.IdeSmokeTest</LocCanonicalName>
@@ -100,6 +120,39 @@
           <LocCanonicalName>.Tools.IdeOpenDocument</LocCanonicalName>
         </Strings>
       </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeListDocuments" priority="0x0216" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE List Documents</ButtonText>
+          <CommandName>IdeListDocuments</CommandName>
+          <CanonicalName>Tools.IdeListDocuments</CanonicalName>
+          <LocCanonicalName>.Tools.IdeListDocuments</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeActivateDocument" priority="0x0217" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Activate Document</ButtonText>
+          <CommandName>IdeActivateDocument</CommandName>
+          <CanonicalName>Tools.IdeActivateDocument</CanonicalName>
+          <LocCanonicalName>.Tools.IdeActivateDocument</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeCloseDocument" priority="0x0218" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Close Document</ButtonText>
+          <CommandName>IdeCloseDocument</CommandName>
+          <CanonicalName>Tools.IdeCloseDocument</CanonicalName>
+          <LocCanonicalName>.Tools.IdeCloseDocument</LocCanonicalName>
+        </Strings>
+      </Button>
       <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeActivateWindow" priority="0x0205" type="Button">
         <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
         <CommandFlag>CommandWellOnly</CommandFlag>
@@ -109,6 +162,61 @@
           <CommandName>IdeActivateWindow</CommandName>
           <CanonicalName>Tools.IdeActivateWindow</CanonicalName>
           <LocCanonicalName>.Tools.IdeActivateWindow</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeListWindows" priority="0x0219" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE List Windows</ButtonText>
+          <CommandName>IdeListWindows</CommandName>
+          <CanonicalName>Tools.IdeListWindows</CanonicalName>
+          <LocCanonicalName>.Tools.IdeListWindows</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeExecuteVsCommand" priority="0x021A" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Execute VS Command</ButtonText>
+          <CommandName>IdeExecuteVsCommand</CommandName>
+          <CanonicalName>Tools.IdeExecuteVsCommand</CanonicalName>
+          <LocCanonicalName>.Tools.IdeExecuteVsCommand</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeFindAllReferences" priority="0x021B" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Find All References</ButtonText>
+          <CommandName>IdeFindAllReferences</CommandName>
+          <CanonicalName>Tools.IdeFindAllReferences</CanonicalName>
+          <LocCanonicalName>.Tools.IdeFindAllReferences</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeShowCallHierarchy" priority="0x021C" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Show Call Hierarchy</ButtonText>
+          <CommandName>IdeShowCallHierarchy</CommandName>
+          <CanonicalName>Tools.IdeShowCallHierarchy</CanonicalName>
+          <LocCanonicalName>.Tools.IdeShowCallHierarchy</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeGetDocumentSlice" priority="0x0215" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Get Document Slice</ButtonText>
+          <CommandName>IdeGetDocumentSlice</CommandName>
+          <CanonicalName>Tools.IdeGetDocumentSlice</CanonicalName>
+          <LocCanonicalName>.Tools.IdeGetDocumentSlice</LocCanonicalName>
         </Strings>
       </Button>
       <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeSetBreakpoint" priority="0x0206" type="Button">
@@ -289,12 +397,22 @@
       <IDSymbol name="BridgeCommandGroup" value="0x1020" />
       <IDSymbol name="cmdidIdeHelp" value="0x0100" />
       <IDSymbol name="cmdidIdeSmokeTest" value="0x0101" />
+      <IDSymbol name="cmdidIdeHelpMenu" value="0x0102" />
+      <IDSymbol name="cmdidIdeSmokeTestMenu" value="0x0103" />
       <IDSymbol name="cmdidIdeGetState" value="0x0200" />
       <IDSymbol name="cmdidIdeWaitForReady" value="0x0201" />
       <IDSymbol name="cmdidIdeFindText" value="0x0202" />
       <IDSymbol name="cmdidIdeFindFiles" value="0x0203" />
       <IDSymbol name="cmdidIdeOpenDocument" value="0x0204" />
+      <IDSymbol name="cmdidIdeListDocuments" value="0x0216" />
+      <IDSymbol name="cmdidIdeActivateDocument" value="0x0217" />
+      <IDSymbol name="cmdidIdeCloseDocument" value="0x0218" />
       <IDSymbol name="cmdidIdeActivateWindow" value="0x0205" />
+      <IDSymbol name="cmdidIdeListWindows" value="0x0219" />
+      <IDSymbol name="cmdidIdeExecuteVsCommand" value="0x021A" />
+      <IDSymbol name="cmdidIdeFindAllReferences" value="0x021B" />
+      <IDSymbol name="cmdidIdeShowCallHierarchy" value="0x021C" />
+      <IDSymbol name="cmdidIdeGetDocumentSlice" value="0x0215" />
       <IDSymbol name="cmdidIdeSetBreakpoint" value="0x0206" />
       <IDSymbol name="cmdidIdeListBreakpoints" value="0x0207" />
       <IDSymbol name="cmdidIdeRemoveBreakpoint" value="0x0208" />

@@ -16,16 +16,23 @@ internal abstract class IdeCommandBase
     private readonly VsIdeBridgePackage _package;
     private readonly IdeBridgeRuntime _runtime;
 
-    protected IdeCommandBase(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService, int commandId)
+    protected IdeCommandBase(
+        VsIdeBridgePackage package,
+        IdeBridgeRuntime runtime,
+        OleMenuCommandService commandService,
+        int commandId,
+        bool acceptsParameters = true)
     {
         _package = package;
         _runtime = runtime;
 
         var menuCommandId = new CommandID(CommandRegistrar.CommandSet, commandId);
-        var menuCommand = new OleMenuCommand(Execute, menuCommandId)
+        var menuCommand = new OleMenuCommand(Execute, menuCommandId);
+        if (acceptsParameters)
         {
-            ParametersDescription = "$",
-        };
+            menuCommand.ParametersDescription = "$";
+        }
+
         commandService.AddCommand(menuCommand);
     }
 

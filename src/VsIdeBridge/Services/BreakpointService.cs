@@ -48,10 +48,15 @@ internal sealed class BreakpointService
         return SerializeBreakpoint(existing);
     }
 
-    public async Task<JArray> ListBreakpointsAsync(DTE2 dte)
+    public async Task<JObject> ListBreakpointsAsync(DTE2 dte)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        return new JArray(dte.Debugger.Breakpoints.Cast<Breakpoint>().Select(SerializeBreakpoint));
+        var items = new JArray(dte.Debugger.Breakpoints.Cast<Breakpoint>().Select(SerializeBreakpoint));
+        return new JObject
+        {
+            ["count"] = items.Count,
+            ["items"] = items,
+        };
     }
 
     public async Task<JObject> RemoveBreakpointAsync(DTE2 dte, string filePath, int line)

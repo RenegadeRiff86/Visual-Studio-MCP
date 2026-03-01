@@ -45,7 +45,7 @@ internal static class BreakpointCommands
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
             var data = await context.Runtime.BreakpointService.ListBreakpointsAsync(context.Dte).ConfigureAwait(true);
-            return new CommandExecutionResult($"Enumerated {data.Count} breakpoint(s).", data);
+            return new CommandExecutionResult($"Enumerated {data["count"]} breakpoint(s).", data);
         }
     }
 
