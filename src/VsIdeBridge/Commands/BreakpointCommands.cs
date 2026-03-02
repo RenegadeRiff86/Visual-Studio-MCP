@@ -98,4 +98,76 @@ internal static class BreakpointCommands
             return new CommandExecutionResult($"Removed {data["removedCount"]} breakpoint(s).", data);
         }
     }
+
+    internal sealed class IdeEnableBreakpointCommand : IdeCommandBase
+    {
+        public IdeEnableBreakpointCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x0229)
+        {
+        }
+
+        protected override string CanonicalName => "Tools.IdeEnableBreakpoint";
+
+        protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            var data = await context.Runtime.BreakpointService.EnableBreakpointAsync(
+                context.Dte,
+                args.GetRequiredString("file"),
+                args.GetInt32("line", 1)).ConfigureAwait(true);
+
+            return new CommandExecutionResult("Breakpoint enabled.", data);
+        }
+    }
+
+    internal sealed class IdeDisableBreakpointCommand : IdeCommandBase
+    {
+        public IdeDisableBreakpointCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x022A)
+        {
+        }
+
+        protected override string CanonicalName => "Tools.IdeDisableBreakpoint";
+
+        protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            var data = await context.Runtime.BreakpointService.DisableBreakpointAsync(
+                context.Dte,
+                args.GetRequiredString("file"),
+                args.GetInt32("line", 1)).ConfigureAwait(true);
+
+            return new CommandExecutionResult("Breakpoint disabled.", data);
+        }
+    }
+
+    internal sealed class IdeEnableAllBreakpointsCommand : IdeCommandBase
+    {
+        public IdeEnableAllBreakpointsCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x022B)
+        {
+        }
+
+        protected override string CanonicalName => "Tools.IdeEnableAllBreakpoints";
+
+        protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            var data = await context.Runtime.BreakpointService.EnableAllBreakpointsAsync(context.Dte).ConfigureAwait(true);
+            return new CommandExecutionResult($"Enabled {data["enabledCount"]} breakpoint(s).", data);
+        }
+    }
+
+    internal sealed class IdeDisableAllBreakpointsCommand : IdeCommandBase
+    {
+        public IdeDisableAllBreakpointsCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x022C)
+        {
+        }
+
+        protected override string CanonicalName => "Tools.IdeDisableAllBreakpoints";
+
+        protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            var data = await context.Runtime.BreakpointService.DisableAllBreakpointsAsync(context.Dte).ConfigureAwait(true);
+            return new CommandExecutionResult($"Disabled {data["disabledCount"]} breakpoint(s).", data);
+        }
+    }
 }

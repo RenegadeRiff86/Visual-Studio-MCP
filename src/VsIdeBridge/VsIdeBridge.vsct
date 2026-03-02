@@ -483,6 +483,83 @@
           <LocCanonicalName>.Tools.IdeBatchCommands</LocCanonicalName>
         </Strings>
       </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeSearchSymbols" priority="0x0226" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Search Symbols</ButtonText>
+          <CommandName>IdeSearchSymbols</CommandName>
+          <CanonicalName>Tools.IdeSearchSymbols</CanonicalName>
+          <LocCanonicalName>.Tools.IdeSearchSymbols</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeGetQuickInfo" priority="0x0227" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Get Quick Info</ButtonText>
+          <CommandName>IdeGetQuickInfo</CommandName>
+          <CanonicalName>Tools.IdeGetQuickInfo</CanonicalName>
+          <LocCanonicalName>.Tools.IdeGetQuickInfo</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeGetDocumentSlices" priority="0x0228" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Get Document Slices</ButtonText>
+          <CommandName>IdeGetDocumentSlices</CommandName>
+          <CanonicalName>Tools.IdeGetDocumentSlices</CanonicalName>
+          <LocCanonicalName>.Tools.IdeGetDocumentSlices</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeEnableBreakpoint" priority="0x0229" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Enable Breakpoint</ButtonText>
+          <CommandName>IdeEnableBreakpoint</CommandName>
+          <CanonicalName>Tools.IdeEnableBreakpoint</CanonicalName>
+          <LocCanonicalName>.Tools.IdeEnableBreakpoint</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeDisableBreakpoint" priority="0x022A" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Disable Breakpoint</ButtonText>
+          <CommandName>IdeDisableBreakpoint</CommandName>
+          <CanonicalName>Tools.IdeDisableBreakpoint</CanonicalName>
+          <LocCanonicalName>.Tools.IdeDisableBreakpoint</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeEnableAllBreakpoints" priority="0x022B" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Enable All Breakpoints</ButtonText>
+          <CommandName>IdeEnableAllBreakpoints</CommandName>
+          <CanonicalName>Tools.IdeEnableAllBreakpoints</CanonicalName>
+          <LocCanonicalName>.Tools.IdeEnableAllBreakpoints</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeDisableAllBreakpoints" priority="0x022C" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Disable All Breakpoints</ButtonText>
+          <CommandName>IdeDisableAllBreakpoints</CommandName>
+          <CanonicalName>Tools.IdeDisableAllBreakpoints</CanonicalName>
+          <LocCanonicalName>.Tools.IdeDisableAllBreakpoints</LocCanonicalName>
+        </Strings>
+      </Button>
     </Buttons>
   </Commands>
 
@@ -536,6 +613,13 @@
       <IDSymbol name="cmdidIdeBuildAndCaptureErrors" value="0x0214" />
       <IDSymbol name="cmdidIdeOpenSolution" value="0x0224" />
       <IDSymbol name="cmdidIdeBatchCommands" value="0x0225" />
+      <IDSymbol name="cmdidIdeSearchSymbols" value="0x0226" />
+      <IDSymbol name="cmdidIdeGetQuickInfo" value="0x0227" />
+      <IDSymbol name="cmdidIdeGetDocumentSlices" value="0x0228" />
+      <IDSymbol name="cmdidIdeEnableBreakpoint" value="0x0229" />
+      <IDSymbol name="cmdidIdeDisableBreakpoint" value="0x022A" />
+      <IDSymbol name="cmdidIdeEnableAllBreakpoints" value="0x022B" />
+      <IDSymbol name="cmdidIdeDisableAllBreakpoints" value="0x022C" />
     </GuidSymbol>
   </Symbols>
 </CommandTable>

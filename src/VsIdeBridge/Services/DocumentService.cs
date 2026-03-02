@@ -408,7 +408,90 @@ internal sealed class DocumentService
         };
     }
 
-    public async Task<JObject> GetFileOutlineAsync(DTE2 dte, string? filePath, int maxDepth)
+    public async Task<JObject> GetDocumentSlicesAsync(DTE2 dte, JArray ranges)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var results = new JArray();
+        foreach (var rangeToken in ranges)
+        {
+            if (rangeToken is not Newtonsoft.Json.Linq.JObject range) continue;
+            var file = range["file"]?.Value<string>();
+            var line = range["line"]?.Value<int>() ?? 1;
+            var before = range["contextBefore"]?.Value<int>() ?? 0;
+            var after = range["contextAfter"]?.Value<int>() ?? 0;
+            var startLine = Math.Max(1, line - before);
+            var endLine = line + after;
+
+            try
+            {
+                var slice = await GetDocumentSliceAsync(dte, file, startLine, endLine, includeLineNumbers: true)
+                    .ConfigureAwait(true);
+                results.Add(slice);
+            }
+            catch (Exception ex)
+            {
+                results.Add(new Newtonsoft.Json.Linq.JObject
+                {
+                    ["resolvedPath"] = file ?? string.Empty,
+                    ["error"] = ex.Message,
+                });
+            }
+        }
+
+        return new Newtonsoft.Json.Linq.JObject
+        {
+            ["count"] = results.Count,
+            ["slices"] = results,
+        };
+    }
+
+    public async Task<JObject> GetQuickInfoAsync(DTE2 dte, string? filePath, string? documentQuery, int? line, int? column, int contextLines)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        // Position cursor and get source context
+        var sourceLocation = await PositionTextSelectionAsync(dte, filePath, documentQuery, line, column, selectWord: true)
+            .ConfigureAwait(true);
+
+        var sourcePath = (string?)sourceLocation["resolvedPath"] ?? string.Empty;
+        var sourceLine = (int?)sourceLocation["line"] ?? 0;
+        var word = (string?)sourceLocation["selectedText"] ?? string.Empty;
+
+        // Navigate to definition
+        var defResult = await GoToDefinitionAsync(dte, sourcePath, null, sourceLine, (int?)sourceLocation["column"])
+            .ConfigureAwait(true);
+
+        var definitionFound = (bool?)defResult["definitionFound"] == true;
+        var defLocation = defResult["definitionLocation"] as JObject;
+        JObject? definitionSlice = null;
+
+        if (definitionFound && defLocation is not null)
+        {
+            var defPath = (string?)defLocation["resolvedPath"];
+            var defLine = (int?)defLocation["line"] ?? 0;
+            if (!string.IsNullOrEmpty(defPath) && defLine > 0)
+            {
+                definitionSlice = await GetDocumentSliceAsync(
+                    dte,
+                    defPath,
+                    Math.Max(1, defLine - 2),
+                    defLine + contextLines,
+                    includeLineNumbers: true).ConfigureAwait(true);
+            }
+        }
+
+        return new JObject
+        {
+            ["word"] = word,
+            ["sourceLocation"] = sourceLocation,
+            ["definitionFound"] = definitionFound,
+            ["definitionLocation"] = defLocation ?? (JToken)JValue.CreateNull(),
+            ["definitionContext"] = definitionSlice ?? (JToken)JValue.CreateNull(),
+        };
+    }
+
+    public async Task<JObject> GetFileOutlineAsync(DTE2 dte, string? filePath, int maxDepth, string? kindFilter = null)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
@@ -437,7 +520,7 @@ internal sealed class DocumentService
             {
                 foreach (CodeElement element in codeModel.CodeElements)
                 {
-                    try { CollectOutlineSymbols(element, symbols, 0, maxDepth); } catch { }
+                    try { CollectOutlineSymbols(element, symbols, 0, maxDepth, kindFilter); } catch { }
                 }
             }
             else
@@ -470,7 +553,7 @@ internal sealed class DocumentService
         vsCMElement.vsCMElementInterface,
     };
 
-    private static void CollectOutlineSymbols(CodeElement element, JArray symbols, int depth, int maxDepth)
+    private static void CollectOutlineSymbols(CodeElement element, JArray symbols, int depth, int maxDepth, string? kindFilter = null)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
         if (depth > maxDepth) return;
@@ -486,14 +569,21 @@ internal sealed class DocumentService
 
         if (s_outlineKinds.Contains(kind))
         {
-            symbols.Add(new JObject
+            var kindName = kind.ToString().Replace("vsCMElement", string.Empty);
+            var matchesFilter = string.IsNullOrWhiteSpace(kindFilter) ||
+                kindName.IndexOf(kindFilter, StringComparison.OrdinalIgnoreCase) >= 0;
+
+            if (matchesFilter)
             {
-                ["name"] = name,
-                ["kind"] = kind.ToString().Replace("vsCMElement", string.Empty),
-                ["startLine"] = startLine,
-                ["endLine"] = endLine,
-                ["depth"] = depth,
-            });
+                symbols.Add(new JObject
+                {
+                    ["name"] = name,
+                    ["kind"] = kindName,
+                    ["startLine"] = startLine,
+                    ["endLine"] = endLine,
+                    ["depth"] = depth,
+                });
+            }
         }
 
         CodeElements? children = null;
@@ -509,7 +599,7 @@ internal sealed class DocumentService
         if (children is null) return;
         foreach (CodeElement child in children)
         {
-            try { CollectOutlineSymbols(child, symbols, depth + 1, maxDepth); } catch { }
+            try { CollectOutlineSymbols(child, symbols, depth + 1, maxDepth, kindFilter); } catch { }
         }
     }
 

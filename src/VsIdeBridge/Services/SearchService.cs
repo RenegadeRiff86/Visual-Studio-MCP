@@ -77,7 +77,8 @@ internal sealed class SearchService
         bool wholeWord,
         bool useRegex,
         int resultsWindow,
-        string? projectUniqueName)
+        string? projectUniqueName,
+        string? pathFilter = null)
     {
         var searchData = await SearchTextMatchesAsync(
             context,
@@ -86,7 +87,8 @@ internal sealed class SearchService
             matchCase,
             wholeWord,
             useRegex,
-            projectUniqueName).ConfigureAwait(true);
+            projectUniqueName,
+            pathFilter).ConfigureAwait(true);
 
         await PopulateFindResultsAsync(context, searchData.GroupedMatches, query, resultsWindow).ConfigureAwait(true);
 
@@ -94,10 +96,107 @@ internal sealed class SearchService
         {
             ["query"] = query,
             ["scope"] = scope,
+            ["pathFilter"] = pathFilter ?? string.Empty,
             ["count"] = searchData.Matches.Count,
             ["resultsWindow"] = resultsWindow,
             ["matches"] = new JArray(searchData.Matches.Select(SerializeHit)),
         };
+    }
+
+    public async Task<JObject> SearchSymbolsAsync(
+        IdeCommandContext context,
+        string name,
+        string kind,
+        string scope,
+        bool matchCase,
+        string? pathFilter,
+        int max)
+    {
+        // Build a regex pattern targeting definition signatures for the requested kind.
+        var escaped = Regex.Escape(name);
+        string pattern;
+        string resolvedKind;
+        switch (kind.ToLowerInvariant())
+        {
+            case "function":
+                pattern = $@"\b{escaped}\s*\(";
+                resolvedKind = "function";
+                break;
+            case "class":
+                pattern = $@"\bclass\s+{escaped}\b";
+                resolvedKind = "class";
+                break;
+            case "struct":
+                pattern = $@"\bstruct\s+{escaped}\b";
+                resolvedKind = "struct";
+                break;
+            case "enum":
+                pattern = $@"\benum(?:\s+class)?\s+{escaped}\b";
+                resolvedKind = "enum";
+                break;
+            case "namespace":
+                pattern = $@"\bnamespace\s+{escaped}\b";
+                resolvedKind = "namespace";
+                break;
+            default:
+                // "all" — whole-word match; kind is inferred per-hit
+                pattern = $@"\b{escaped}\b";
+                resolvedKind = "all";
+                break;
+        }
+
+        var searchData = await SearchTextMatchesAsync(
+            context,
+            pattern,
+            scope,
+            matchCase,
+            wholeWord: false,
+            useRegex: true,
+            projectUniqueName: null,
+            pathFilter).ConfigureAwait(true);
+
+        // Annotate each hit with an inferred kind and cap at max
+        var hits = searchData.Matches
+            .Take(max)
+            .Select(hit =>
+            {
+                var inferredKind = resolvedKind == "all"
+                    ? InferSymbolKind(hit.Preview, name)
+                    : resolvedKind;
+                var obj = SerializeHit(hit);
+                obj["inferredKind"] = inferredKind;
+                return obj;
+            })
+            .ToArray();
+
+        return new JObject
+        {
+            ["query"] = name,
+            ["kind"] = kind,
+            ["scope"] = scope,
+            ["pathFilter"] = pathFilter ?? string.Empty,
+            ["count"] = hits.Length,
+            ["totalMatchCount"] = searchData.Matches.Count,
+            ["matches"] = new JArray(hits),
+        };
+    }
+
+    private static string InferSymbolKind(string lineText, string name)
+    {
+        var trimmed = lineText.TrimStart();
+        // Class/struct/enum/namespace — look for keyword immediately before name
+        if (Regex.IsMatch(trimmed, $@"\bclass\s+{Regex.Escape(name)}\b", RegexOptions.IgnoreCase))
+            return "class";
+        if (Regex.IsMatch(trimmed, $@"\bstruct\s+{Regex.Escape(name)}\b", RegexOptions.IgnoreCase))
+            return "struct";
+        if (Regex.IsMatch(trimmed, $@"\benum(?:\s+class)?\s+{Regex.Escape(name)}\b", RegexOptions.IgnoreCase))
+            return "enum";
+        if (Regex.IsMatch(trimmed, $@"\bnamespace\s+{Regex.Escape(name)}\b", RegexOptions.IgnoreCase))
+            return "namespace";
+        // Function: name followed by (
+        if (Regex.IsMatch(trimmed, $@"\b{Regex.Escape(name)}\s*\(", RegexOptions.IgnoreCase))
+            return "function";
+        return "unknown";
     }
 
     public async Task<JObject> GetSmartContextForQueryAsync(
@@ -221,11 +320,12 @@ internal sealed class SearchService
         bool matchCase,
         bool wholeWord,
         bool useRegex,
-        string? projectUniqueName)
+        string? projectUniqueName,
+        string? pathFilter = null)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
 
-        var files = scope switch
+        var allFiles = scope switch
         {
             "document" => new[] { await GetDocumentTargetAsync(context).ConfigureAwait(true) },
             "project" => EnumerateSolutionFiles(context.Dte)
@@ -233,6 +333,10 @@ internal sealed class SearchService
                 .ToArray(),
             _ => EnumerateSolutionFiles(context.Dte).ToArray(),
         };
+
+        var files = string.IsNullOrWhiteSpace(pathFilter)
+            ? allFiles
+            : allFiles.Where(f => f.Path.IndexOf(pathFilter, StringComparison.OrdinalIgnoreCase) >= 0).ToArray();
 
         var regex = BuildRegex(query, matchCase, wholeWord, useRegex);
         var hits = new List<SearchHit>();

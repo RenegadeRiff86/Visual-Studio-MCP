@@ -42,12 +42,19 @@ internal static class CommandRegistrar
         runtime.RegisterCommand(new SearchNavigationCommands.IdeGetSmartContextForQueryCommand(package, runtime, commandService));
         runtime.RegisterCommand(new SearchNavigationCommands.IdeGoToDefinitionCommand(package, runtime, commandService));
         runtime.RegisterCommand(new SearchNavigationCommands.IdeGetFileOutlineCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new SearchNavigationCommands.IdeSearchSymbolsCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new SearchNavigationCommands.IdeGetQuickInfoCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new SearchNavigationCommands.IdeGetDocumentSlicesCommand(package, runtime, commandService));
         runtime.RegisterCommand(new PatchCommands.IdeApplyUnifiedDiffCommand(package, runtime, commandService));
 
         runtime.RegisterCommand(new BreakpointCommands.IdeSetBreakpointCommand(package, runtime, commandService));
         runtime.RegisterCommand(new BreakpointCommands.IdeListBreakpointsCommand(package, runtime, commandService));
         runtime.RegisterCommand(new BreakpointCommands.IdeRemoveBreakpointCommand(package, runtime, commandService));
         runtime.RegisterCommand(new BreakpointCommands.IdeClearAllBreakpointsCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new BreakpointCommands.IdeEnableBreakpointCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new BreakpointCommands.IdeDisableBreakpointCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new BreakpointCommands.IdeEnableAllBreakpointsCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new BreakpointCommands.IdeDisableAllBreakpointsCommand(package, runtime, commandService));
 
         runtime.RegisterCommand(new DebugBuildCommands.IdeDebugGetStateCommand(package, runtime, commandService));
         runtime.RegisterCommand(new DebugBuildCommands.IdeDebugStartCommand(package, runtime, commandService));

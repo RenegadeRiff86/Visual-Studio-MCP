@@ -100,6 +100,72 @@ internal sealed class BreakpointService
         };
     }
 
+    public async Task<JObject> EnableBreakpointAsync(DTE2 dte, string filePath, int line)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var normalizedPath = PathNormalization.NormalizeFilePath(filePath);
+        var bp = FindBreakpoint(dte, normalizedPath, line);
+        if (bp is null)
+        {
+            throw new CommandErrorException("not_found", $"No breakpoint found at {normalizedPath}:{line}");
+        }
+
+        bp.Enabled = true;
+        return SerializeBreakpoint(bp);
+    }
+
+    public async Task<JObject> DisableBreakpointAsync(DTE2 dte, string filePath, int line)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var normalizedPath = PathNormalization.NormalizeFilePath(filePath);
+        var bp = FindBreakpoint(dte, normalizedPath, line);
+        if (bp is null)
+        {
+            throw new CommandErrorException("not_found", $"No breakpoint found at {normalizedPath}:{line}");
+        }
+
+        bp.Enabled = false;
+        return SerializeBreakpoint(bp);
+    }
+
+    public async Task<JObject> EnableAllBreakpointsAsync(DTE2 dte)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var count = 0;
+        foreach (Breakpoint bp in dte.Debugger.Breakpoints)
+        {
+            bp.Enabled = true;
+            count++;
+        }
+
+        return new JObject
+        {
+            ["enabledCount"] = count,
+            ["totalCount"] = dte.Debugger.Breakpoints.Count,
+        };
+    }
+
+    public async Task<JObject> DisableAllBreakpointsAsync(DTE2 dte)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var count = 0;
+        foreach (Breakpoint bp in dte.Debugger.Breakpoints)
+        {
+            bp.Enabled = false;
+            count++;
+        }
+
+        return new JObject
+        {
+            ["disabledCount"] = count,
+            ["totalCount"] = dte.Debugger.Breakpoints.Count,
+        };
+    }
+
     private static Breakpoint? FindBreakpoint(DTE2 dte, string normalizedPath, int line)
     {
         ThreadHelper.ThrowIfNotOnUIThread();

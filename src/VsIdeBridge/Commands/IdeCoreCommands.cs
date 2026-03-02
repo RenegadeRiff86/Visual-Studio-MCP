@@ -53,6 +53,13 @@ internal static class IdeCoreCommands
             "Tools.IdeOpenSolution",
             "Tools.IdeGoToDefinition",
             "Tools.IdeGetFileOutline",
+            "Tools.IdeSearchSymbols",
+            "Tools.IdeGetQuickInfo",
+            "Tools.IdeGetDocumentSlices",
+            "Tools.IdeEnableBreakpoint",
+            "Tools.IdeDisableBreakpoint",
+            "Tools.IdeEnableAllBreakpoints",
+            "Tools.IdeDisableAllBreakpoints",
             "Tools.IdeBatchCommands");
 
         return Task.FromResult(new CommandExecutionResult(
