@@ -131,6 +131,64 @@ internal static class SearchNavigationCommands
         }
     }
 
+    internal sealed class IdeListOpenTabsCommand : IdeCommandBase
+    {
+        public IdeListOpenTabsCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x021D)
+        {
+        }
+
+        protected override string CanonicalName => "Tools.IdeListOpenTabs";
+
+        protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            var data = await context.Runtime.DocumentService.ListOpenTabsAsync(context.Dte).ConfigureAwait(true);
+            return new CommandExecutionResult($"Listed {data["count"]} open tab(s).", data);
+        }
+    }
+
+    internal sealed class IdeCloseFileCommand : IdeCommandBase
+    {
+        public IdeCloseFileCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x021E)
+        {
+        }
+
+        protected override string CanonicalName => "Tools.IdeCloseFile";
+
+        protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            var data = await context.Runtime.DocumentService
+                .CloseFileAsync(
+                    context.Dte,
+                    args.GetString("file"),
+                    args.GetString("query"),
+                    args.GetBoolean("save", false))
+                .ConfigureAwait(true);
+
+            return new CommandExecutionResult($"Closed {data["count"]} file(s).", data);
+        }
+    }
+
+    internal sealed class IdeCloseAllExceptCurrentCommand : IdeCommandBase
+    {
+        public IdeCloseAllExceptCurrentCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x021F)
+        {
+        }
+
+        protected override string CanonicalName => "Tools.IdeCloseAllExceptCurrent";
+
+        protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            var data = await context.Runtime.DocumentService
+                .CloseAllExceptCurrentAsync(context.Dte, args.GetBoolean("save", false))
+                .ConfigureAwait(true);
+
+            return new CommandExecutionResult($"Closed {data["count"]} file(s).", data);
+        }
+    }
+
     internal sealed class IdeActivateWindowCommand : IdeCommandBase
     {
         public IdeActivateWindowCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
@@ -175,7 +233,16 @@ internal static class SearchNavigationCommands
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
             var data = await context.Runtime.VsCommandService
-                .ExecuteCommandAsync(context.Dte, args.GetRequiredString("command"), args.GetString("args"))
+                .ExecutePositionedCommandAsync(
+                    context.Dte,
+                    context.Runtime.DocumentService,
+                    args.GetRequiredString("command"),
+                    args.GetString("args"),
+                    args.GetString("file"),
+                    args.GetString("document"),
+                    args.GetNullableInt32("line"),
+                    args.GetNullableInt32("column"),
+                    args.GetBoolean("select-word", false))
                 .ConfigureAwait(true);
             return new CommandExecutionResult("Visual Studio command executed.", data);
         }
@@ -272,6 +339,84 @@ internal static class SearchNavigationCommands
             return new CommandExecutionResult(
                 $"Captured lines {data["actualStartLine"]}-{data["actualEndLine"]}.",
                 data);
+        }
+    }
+
+    internal sealed class IdeGetSmartContextForQueryCommand : IdeCommandBase
+    {
+        public IdeGetSmartContextForQueryCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x0220)
+        {
+        }
+
+        protected override string CanonicalName => "Tools.IdeGetSmartContextForQuery";
+
+        protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            var data = await context.Runtime.SearchService.GetSmartContextForQueryAsync(
+                context,
+                args.GetRequiredString("query"),
+                args.GetEnum("scope", "solution", "solution", "project", "document"),
+                args.GetBoolean("match-case", false),
+                args.GetBoolean("whole-word", false),
+                args.GetBoolean("regex", false),
+                args.GetString("project"),
+                args.GetInt32("max-contexts", 5),
+                args.GetInt32("context-before", 20),
+                args.GetInt32("context-after", 20),
+                args.GetBoolean("populate-results-window", true),
+                args.GetInt32("results-window", 1)).ConfigureAwait(true);
+
+            return new CommandExecutionResult(
+                $"Captured {data["contextCount"]} smart context(s) from {data["totalMatchCount"]} match(es).",
+                data);
+        }
+    }
+
+    internal sealed class IdeGoToDefinitionCommand : IdeCommandBase
+    {
+        public IdeGoToDefinitionCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x0222)
+        {
+        }
+
+        protected override string CanonicalName => "Tools.IdeGoToDefinition";
+
+        protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            var data = await context.Runtime.DocumentService.GoToDefinitionAsync(
+                    context.Dte,
+                    args.GetString("file"),
+                    args.GetString("document"),
+                    args.GetNullableInt32("line"),
+                    args.GetNullableInt32("column"))
+                .ConfigureAwait(true);
+
+            var found = (bool?)data["definitionFound"] == true;
+            return new CommandExecutionResult(
+                found ? "Navigated to definition." : "Go To Definition executed (location unchanged).",
+                data);
+        }
+    }
+
+    internal sealed class IdeGetFileOutlineCommand : IdeCommandBase
+    {
+        public IdeGetFileOutlineCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x0223)
+        {
+        }
+
+        protected override string CanonicalName => "Tools.IdeGetFileOutline";
+
+        protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            var data = await context.Runtime.DocumentService.GetFileOutlineAsync(
+                    context.Dte,
+                    args.GetString("file"),
+                    args.GetInt32("max-depth", 3))
+                .ConfigureAwait(true);
+
+            return new CommandExecutionResult($"Found {data["count"]} symbol(s).", data);
         }
     }
 }

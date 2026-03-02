@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using EnvDTE;
 using EnvDTE80;
@@ -13,6 +14,26 @@ namespace VsIdeBridge.Services;
 
 internal sealed class DocumentService
 {
+    public async Task<JObject> ListOpenTabsAsync(DTE2 dte)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var activePath = dte.ActiveDocument?.FullName;
+        var documents = EnumerateOpenDocuments(dte);
+        var items = new JArray();
+        for (var i = 0; i < documents.Count; i++)
+        {
+            items.Add(CreateDocumentInfo(documents[i], activePath, i + 1));
+        }
+
+        return new JObject
+        {
+            ["count"] = items.Count,
+            ["activePath"] = string.IsNullOrWhiteSpace(activePath) ? string.Empty : PathNormalization.NormalizeFilePath(activePath),
+            ["items"] = items,
+        };
+    }
+
     public async Task<JObject> ListOpenDocumentsAsync(DTE2 dte)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -20,7 +41,7 @@ internal sealed class DocumentService
         var activePath = dte.ActiveDocument?.FullName;
         var items = new JArray(
             EnumerateOpenDocuments(dte)
-                .Select(document => CreateDocumentInfo(document, activePath)));
+                .Select((document, index) => CreateDocumentInfo(document, activePath, index + 1)));
 
         return new JObject
         {
@@ -46,6 +67,7 @@ internal sealed class DocumentService
         {
             var selection = textDocument.Selection;
             selection.MoveToLineAndOffset(Math.Max(1, line), Math.Max(1, column), false);
+            TryShowActivePoint(selection);
         }
 
         return new JObject
@@ -107,9 +129,11 @@ internal sealed class DocumentService
         var targetLine = Math.Max(1, line ?? selection.ActivePoint.Line);
         var targetColumn = Math.Max(1, column ?? selection.ActivePoint.DisplayColumn);
         selection.MoveToLineAndOffset(targetLine, targetColumn, false);
+        TryShowActivePoint(selection);
         if (selectWord)
         {
             TrySelectCurrentWord(selection);
+            TryShowActivePoint(selection);
         }
 
         var activeLine = selection.ActivePoint.Line;
@@ -158,6 +182,56 @@ internal sealed class DocumentService
         {
             ["query"] = query ?? string.Empty,
             ["matchedBy"] = match.MatchedBy,
+            ["saveChanges"] = saveChanges,
+            ["count"] = closed.Count,
+            ["items"] = closed,
+        };
+    }
+
+    public async Task<JObject> CloseFileAsync(DTE2 dte, string? filePath, string? query, bool saveChanges)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        string resolvedQuery;
+        if (!string.IsNullOrWhiteSpace(filePath))
+        {
+            resolvedQuery = PathNormalization.NormalizeFilePath(filePath);
+        }
+        else if (!string.IsNullOrWhiteSpace(query))
+        {
+            resolvedQuery = query;
+        }
+        else
+        {
+            throw new CommandErrorException("invalid_arguments", "Specify --file or --query.");
+        }
+
+        return await CloseOpenDocumentsAsync(dte, resolvedQuery, closeAllMatches: false, saveChanges).ConfigureAwait(true);
+    }
+
+    public async Task<JObject> CloseAllExceptCurrentAsync(DTE2 dte, bool saveChanges)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var activeDocument = dte.ActiveDocument ?? throw new CommandErrorException("document_not_found", "There is no active document.");
+        var activePath = activeDocument.FullName;
+        var documentsToClose = EnumerateOpenDocuments(dte)
+            .Where(document => !string.Equals(
+                PathNormalization.NormalizeFilePath(document.FullName),
+                PathNormalization.NormalizeFilePath(activePath),
+                StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var closed = new JArray();
+        foreach (var document in documentsToClose)
+        {
+            closed.Add(CreateDocumentInfo(document, activePath));
+            document.Close(saveChanges ? vsSaveChanges.vsSaveChangesYes : vsSaveChanges.vsSaveChangesNo);
+        }
+
+        return new JObject
+        {
+            ["activePath"] = PathNormalization.NormalizeFilePath(activePath),
             ["saveChanges"] = saveChanges,
             ["count"] = closed.Count,
             ["items"] = closed,
@@ -239,6 +313,206 @@ internal sealed class DocumentService
         };
     }
 
+    public async Task<JObject> GoToDefinitionAsync(
+        DTE2 dte,
+        string? filePath,
+        string? documentQuery,
+        int? line,
+        int? column)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var sourceLocation = await PositionTextSelectionAsync(dte, filePath, documentQuery, line, column, selectWord: false)
+            .ConfigureAwait(true);
+
+        // Use IVsUIShell.PostExecCommand with the standard cmdidGotoDefn
+        // rather than dte.ExecuteCommand("Edit.GoToDefinition", ...).
+        // ExecuteCommand shows a modal "Command requires one argument" dialog
+        // for this command.  PostExecCommand posts through the shell command
+        // dispatcher — the same path as pressing F12.
+        //
+        // guidStandardCommandSet97 = {5efc7975-14bc-11cf-9b2b-00aa00573819}
+        // cmdidGotoDefn             = 935   (from stdidcmd.h)
+        try
+        {
+            var goToDefnGuid = new Guid("{5efc7975-14bc-11cf-9b2b-00aa00573819}");
+            const uint goToDefnId = 935;
+            object arg = null;
+            var shell = (Microsoft.VisualStudio.Shell.Interop.IVsUIShell)
+                Microsoft.VisualStudio.Shell.Package.GetGlobalService(
+                    typeof(Microsoft.VisualStudio.Shell.Interop.SVsUIShell));
+            if (shell is null)
+            {
+                throw new CommandErrorException("unsupported_operation", "IVsUIShell service not available.");
+            }
+
+            shell.PostExecCommand(ref goToDefnGuid, goToDefnId, 0, ref arg);
+            // PostExecCommand is asynchronous — give VS a moment to navigate.
+            await Task.Delay(500).ConfigureAwait(true);
+        }
+        catch (CommandErrorException)
+        {
+            throw;
+        }
+        catch (COMException ex)
+        {
+            throw new CommandErrorException(
+                "unsupported_operation",
+                $"GoToDefinition failed: {ex.Message}");
+        }
+
+        var activeDoc = dte.ActiveDocument;
+        if (activeDoc is null)
+        {
+            return new JObject
+            {
+                ["sourceLocation"] = sourceLocation,
+                ["definitionLocation"] = null,
+                ["definitionFound"] = false,
+            };
+        }
+
+        var definitionPath = PathNormalization.NormalizeFilePath(activeDoc.FullName);
+        int definitionLine = 0, definitionColumn = 0;
+        string selectedText = string.Empty, lineText = string.Empty;
+
+        if (activeDoc.Object("TextDocument") is TextDocument defTextDoc)
+        {
+            var selection = defTextDoc.Selection;
+            definitionLine = selection.ActivePoint.Line;
+            definitionColumn = selection.ActivePoint.DisplayColumn;
+            selectedText = selection.Text ?? string.Empty;
+            lineText = GetLineText(defTextDoc, definitionLine);
+        }
+
+        var definitionLocation = new JObject
+        {
+            ["resolvedPath"] = definitionPath,
+            ["name"] = activeDoc.Name ?? string.Empty,
+            ["line"] = definitionLine,
+            ["column"] = definitionColumn,
+            ["selectedText"] = selectedText,
+            ["lineText"] = lineText,
+        };
+
+        var sourcePath = (string?)sourceLocation["resolvedPath"] ?? string.Empty;
+        var sourceLine = (int?)sourceLocation["line"] ?? 0;
+        var definitionFound = !string.Equals(sourcePath, definitionPath, StringComparison.OrdinalIgnoreCase)
+            || sourceLine != definitionLine;
+
+        return new JObject
+        {
+            ["sourceLocation"] = sourceLocation,
+            ["definitionLocation"] = definitionLocation,
+            ["definitionFound"] = definitionFound,
+        };
+    }
+
+    public async Task<JObject> GetFileOutlineAsync(DTE2 dte, string? filePath, int maxDepth)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var resolvedPath = ResolveDocumentPath(dte, filePath);
+
+        ProjectItem? projectItem = null;
+        try { projectItem = dte.Solution.FindProjectItem(resolvedPath); } catch { }
+
+        if (projectItem is null)
+        {
+            return new JObject
+            {
+                ["resolvedPath"] = resolvedPath,
+                ["count"] = 0,
+                ["symbols"] = new JArray(),
+                ["note"] = "File is not part of any project or code model is unavailable.",
+            };
+        }
+
+        var symbols = new JArray();
+        string? note = null;
+        try
+        {
+            var codeModel = projectItem.FileCodeModel;
+            if (codeModel?.CodeElements is not null)
+            {
+                foreach (CodeElement element in codeModel.CodeElements)
+                {
+                    try { CollectOutlineSymbols(element, symbols, 0, maxDepth); } catch { }
+                }
+            }
+            else
+            {
+                note = "No code model available for this file type.";
+            }
+        }
+        catch (Exception ex)
+        {
+            note = $"Code model unavailable: {ex.Message}";
+        }
+
+        var result = new JObject
+        {
+            ["resolvedPath"] = resolvedPath,
+            ["count"] = symbols.Count,
+            ["symbols"] = symbols,
+        };
+        if (note is not null) result["note"] = note;
+        return result;
+    }
+
+    private static readonly HashSet<vsCMElement> s_outlineKinds = new HashSet<vsCMElement>
+    {
+        vsCMElement.vsCMElementFunction,
+        vsCMElement.vsCMElementClass,
+        vsCMElement.vsCMElementStruct,
+        vsCMElement.vsCMElementEnum,
+        vsCMElement.vsCMElementNamespace,
+        vsCMElement.vsCMElementInterface,
+    };
+
+    private static void CollectOutlineSymbols(CodeElement element, JArray symbols, int depth, int maxDepth)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        if (depth > maxDepth) return;
+
+        vsCMElement kind;
+        try { kind = element.Kind; } catch { return; }
+
+        string name = string.Empty;
+        int startLine = 0, endLine = 0;
+        try { name = element.Name ?? string.Empty; } catch { }
+        try { startLine = element.StartPoint?.Line ?? 0; } catch { }
+        try { endLine = element.EndPoint?.Line ?? 0; } catch { }
+
+        if (s_outlineKinds.Contains(kind))
+        {
+            symbols.Add(new JObject
+            {
+                ["name"] = name,
+                ["kind"] = kind.ToString().Replace("vsCMElement", string.Empty),
+                ["startLine"] = startLine,
+                ["endLine"] = endLine,
+                ["depth"] = depth,
+            });
+        }
+
+        CodeElements? children = null;
+        try
+        {
+            if (element is CodeNamespace ns) children = ns.Members;
+            else if (element is CodeClass cls) children = cls.Members;
+            else if (element is CodeStruct st) children = st.Members;
+            else if (element is CodeInterface iface) children = iface.Members;
+        }
+        catch { }
+
+        if (children is null) return;
+        foreach (CodeElement child in children)
+        {
+            try { CollectOutlineSymbols(child, symbols, depth + 1, maxDepth); } catch { }
+        }
+    }
+
     private static string ResolveDocumentPath(DTE2 dte, string? filePath)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
@@ -278,6 +552,20 @@ internal sealed class DocumentService
         if (string.IsNullOrWhiteSpace(selection.Text))
         {
             selection.MoveToLineAndOffset(originalLine, originalColumn, false);
+        }
+    }
+
+    private static void TryShowActivePoint(TextSelection selection)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        try
+        {
+            selection.ActivePoint.TryToShow(vsPaneShowHow.vsPaneShowCentered);
+        }
+        catch
+        {
+            // Some editor surfaces may not support viewport repositioning.
         }
     }
 
@@ -411,7 +699,7 @@ internal sealed class DocumentService
         return normalized.Split('\n').ToList();
     }
 
-    private static JObject CreateDocumentInfo(Document document, string? activePath)
+    private static JObject CreateDocumentInfo(Document document, string? activePath, int? tabIndex = null)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -423,6 +711,7 @@ internal sealed class DocumentService
         {
             ["name"] = document.Name ?? Path.GetFileName(fullName),
             ["path"] = normalizedPath,
+            ["tabIndex"] = tabIndex,
             ["isActive"] = !string.IsNullOrWhiteSpace(normalizedPath) &&
                 string.Equals(normalizedPath, normalizedActivePath, StringComparison.OrdinalIgnoreCase),
             ["saved"] = document.Saved,

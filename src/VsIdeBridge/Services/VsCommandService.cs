@@ -98,6 +98,46 @@ internal sealed class VsCommandService
         return data;
     }
 
+    public async Task<JObject> ExecutePositionedCommandAsync(
+        DTE2 dte,
+        DocumentService documentService,
+        string commandName,
+        string? commandArgs,
+        string? filePath,
+        string? documentQuery,
+        int? line,
+        int? column,
+        bool selectWord)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var location = (filePath is not null || documentQuery is not null || line is not null || column is not null)
+            ? await documentService
+                .PositionTextSelectionAsync(dte, filePath, documentQuery, line, column, selectWord)
+                .ConfigureAwait(true)
+            : null;
+
+        var command = ResolveCommand(dte, commandName);
+        try
+        {
+            dte.ExecuteCommand(command.Name, commandArgs ?? string.Empty);
+        }
+        catch (COMException ex)
+        {
+            throw new CommandErrorException(
+                "unsupported_operation",
+                $"Visual Studio command failed: {commandName}",
+                new { command = commandName, args = commandArgs, error = ex.Message, hresult = ex.HResult });
+        }
+
+        var data = CreateCommandInfo(command, commandArgs);
+        if (location is not null)
+        {
+            data["location"] = location;
+        }
+        return data;
+    }
+
     private static JObject CreateCommandInfo(Command command, string? commandArgs)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
@@ -141,7 +181,6 @@ internal sealed class VsCommandService
             .Cast<Command>()
             .FirstOrDefault(command => string.Equals(command.Name, commandName, StringComparison.OrdinalIgnoreCase));
     }
-
     private static string[] ToStringArray(object bindings)
     {
         if (bindings is object[] items)

@@ -1,6 +1,6 @@
 # VS IDE Bridge
 
-Local Visual Studio 2026 extension for scriptable IDE control through stable `Tools.*` commands.
+Visual Studio extension that exposes scriptable `Tools.Ide*` commands for external automation — wrapper scripts, agent tooling, and shell pipelines.
 
 ## Disclaimer
 
@@ -8,71 +8,14 @@ This project is experimental. Use it at your own risk.
 
 ## Purpose
 
-This repo exposes Visual Studio automation commands that are easy to call from:
+Lets you drive a running Visual Studio instance from outside the IDE: search code, navigate to symbols, slice documents, apply diffs, control the debugger, and capture build output — all without touching the keyboard.
 
-- the Visual Studio Command Window
-- DTE automation
-- wrapper scripts and agent tooling
-
-The first release includes:
-
-- IDE state snapshots
-- solution readiness waiting
-- file and text search with JSON output
-- document/tab/window activation
-- symbol actions through native Visual Studio commands
-- breakpoint management
-- debugger control and state capture
-- build and Error List capture
-
-It does not edit source text.
-
-## Status
-
-Current state:
-
-- VSIX builds and installs successfully on Visual Studio 2026 / 18
-- wrapper automation works against both this repo and SuperSlicer
-- validated commands:
-  - `Tools.IdeWaitForReady`
-  - `Tools.IdeGetState`
-  - `Tools.IdeFindFiles`
-  - `Tools.IdeFindText`
-  - `Tools.IdeGetErrorList`
-
-SuperSlicer validation used:
-
-- `C:\Users\elsto\source\repos\Stan-Elston\SuperSlicer\build\Slic3r.sln`
+Commands are invoked through stable `Tools.*` names, the same surface used by the VS Command Window and DTE automation. Results are written as JSON to a caller-specified output file.
 
 ## Requirements
 
-- Visual Studio 2026 / 18 Community, Pro, or Enterprise
+- Visual Studio 2026 / 18 Community, Professional, or Enterprise
 - Windows
-
-## Repo Layout
-
-- `src/VsIdeBridge`
-  - VSIX package, command registrations, services, and infrastructure
-- `scripts/build_vsix.bat`
-  - local build entry point
-- `scripts/install_vsix.bat`
-  - local VSIX installer entry point
-- `scripts/invoke_vs_ide_command.ps1`
-  - attach/open/invoke wrapper for external automation
-- `scripts/invoke_active_vs_command.ps1`
-  - attach to an already-open Visual Studio 18 instance and execute one bridge command
-- `scripts/list_vs_commands.ps1`
-  - enumerate native Visual Studio command names from a live DTE instance
-- `scripts/read_bridge_result.bat`
-  - native JSON-to-`key=value` reader for shell clients and LLM tooling
-- `scripts/read_bridge_result.ps1`
-  - PowerShell entry point for the same native result reader
-- `scripts/smoke_test.ps1`
-  - end-to-end validation flow
-- `scripts/vs_dte_probe.ps1`
-  - inspect live Visual Studio 18 DTE instances
-- `output/`
-  - local smoke-test and validation artifacts, ignored by git
 
 ## Build
 
@@ -80,157 +23,206 @@ SuperSlicer validation used:
 scripts\build_vsix.bat
 ```
 
+Builds the Debug configuration by default. Pass a configuration name as the first argument:
+
+```bat
+scripts\build_vsix.bat Release
+```
+
 ## Install
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install_vsix.ps1
+```
+
+Or via the batch shim (calls the same PS1):
 
 ```bat
 scripts\install_vsix.bat
 ```
 
-Installing the VSIX updates the extension in Visual Studio and may close `devenv.exe` if it is running.
+The installer:
+1. Builds the VSIX (skip with `-NoBuild`).
+2. Closes any running Visual Studio instances gracefully, then force-kills lingering `MSBuild.exe` workers that would otherwise block the installer.
+3. Runs `VSIXInstaller /quiet` without `/shutdownprocesses` (which hangs when VS has unsaved files).
+4. Relaunches Visual Studio with the solutions that were open before the install.
+
+Pass `-NoRelaunch` to skip step 4.
 
 ## Quick Start
 
-1. Build the VSIX.
-2. Install it into Visual Studio.
-3. Open a solution in Visual Studio, or let the wrapper open one for you.
-4. Invoke `Tools.Ide*` commands from the Command Window or the PowerShell wrapper.
+1. Build and install the VSIX.
+2. Open a solution in Visual Studio, or let the wrapper open one.
+3. Invoke `Tools.Ide*` commands from the Command Window or the PowerShell wrapper.
 
-Minimal external example:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\invoke_vs_ide_command.ps1 `
-  -SolutionPath C:\Users\elsto\source\repos\vs-ide-bridge\VsIdeBridge.sln `
-  -CommandName Tools.IdeGetState `
-  -OutputPath C:\temp\ide-state.json
-```
-
-Minimal Command Window example:
+**Command Window:**
 
 ```text
 Tools.IdeGetState --out "C:\temp\ide-state.json"
+```
+
+**PowerShell wrapper:**
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\invoke_vs_ide_command.ps1 `
+  -SolutionPath "C:\path\to\your.sln" `
+  -CommandName  Tools.IdeGetState `
+  -OutputPath   "C:\temp\ide-state.json"
 ```
 
 ## Command Surface
 
-Core:
+### Core
 
-- `Tools.IdeGetState`
-- `Tools.IdeWaitForReady`
+| Command | Description |
+|---------|-------------|
+| `Tools.IdeHelp` | List all registered commands |
+| `Tools.IdeGetState` | Snapshot of IDE state (solution path, active document, etc.) |
+| `Tools.IdeWaitForReady` | Block until IntelliSense is available |
+| `Tools.IdeOpenSolution` | Open a solution file |
+| `Tools.IdeBatchCommands` | Execute multiple commands in one wrapper round-trip |
 
-Search and navigation:
+### Search and Navigation
 
-- `Tools.IdeFindFiles`
-- `Tools.IdeFindText`
-- `Tools.IdeOpenDocument`
-- `Tools.IdeListDocuments`
-- `Tools.IdeActivateDocument`
-- `Tools.IdeCloseDocument`
-- `Tools.IdeActivateWindow`
-- `Tools.IdeListWindows`
-- `Tools.IdeExecuteVsCommand`
-- `Tools.IdeFindAllReferences`
-- `Tools.IdeShowCallHierarchy`
-- `Tools.IdeGetDocumentSlice`
+| Command | Description |
+|---------|-------------|
+| `Tools.IdeFindText` | Text search across solution or project |
+| `Tools.IdeFindFiles` | Find files by name |
+| `Tools.IdeGetDocumentSlice` | Fetch lines around a location |
+| `Tools.IdeGetFileOutline` | Symbol list for a file (functions, classes, etc.) |
+| `Tools.IdeGetSmartContextForQuery` | Multi-context gather for agent queries |
+| `Tools.IdeFindAllReferences` | Semantic find-all-references |
+| `Tools.IdeShowCallHierarchy` | Callers and callees |
+| `Tools.IdeGoToDefinition` | Navigate to definition (F12) |
+| `Tools.IdeOpenDocument` | Open a file at a line/column |
+| `Tools.IdeListDocuments` | List open documents |
+| `Tools.IdeListOpenTabs` | List open editor tabs |
+| `Tools.IdeActivateDocument` | Activate a document by name |
+| `Tools.IdeCloseDocument` | Close a document by name |
+| `Tools.IdeCloseFile` | Close a document by full path |
+| `Tools.IdeCloseAllExceptCurrent` | Close all tabs except the active one |
+| `Tools.IdeActivateWindow` | Activate a tool window |
+| `Tools.IdeListWindows` | List tool windows |
+| `Tools.IdeExecuteVsCommand` | Execute any native VS command by name |
+| `Tools.IdeApplyUnifiedDiff` | Apply a unified diff and reopen changed files |
 
-Breakpoints:
+### Breakpoints
 
-- `Tools.IdeSetBreakpoint`
-- `Tools.IdeListBreakpoints`
-- `Tools.IdeRemoveBreakpoint`
-- `Tools.IdeClearAllBreakpoints`
+| Command | Description |
+|---------|-------------|
+| `Tools.IdeSetBreakpoint` | Set a breakpoint at file/line |
+| `Tools.IdeListBreakpoints` | List all breakpoints |
+| `Tools.IdeRemoveBreakpoint` | Remove a breakpoint |
+| `Tools.IdeClearAllBreakpoints` | Remove all breakpoints |
 
-Debugger:
+### Debugger
 
-- `Tools.IdeDebugGetState`
-- `Tools.IdeDebugStart`
-- `Tools.IdeDebugStop`
-- `Tools.IdeDebugBreak`
-- `Tools.IdeDebugContinue`
-- `Tools.IdeDebugStepOver`
-- `Tools.IdeDebugStepInto`
-- `Tools.IdeDebugStepOut`
+| Command | Description |
+|---------|-------------|
+| `Tools.IdeDebugGetState` | Current debugger state |
+| `Tools.IdeDebugStart` | Start debugging |
+| `Tools.IdeDebugStop` | Stop debugging |
+| `Tools.IdeDebugBreak` | Break into the debugger |
+| `Tools.IdeDebugContinue` | Continue execution |
+| `Tools.IdeDebugStepOver` | Step over |
+| `Tools.IdeDebugStepInto` | Step into |
+| `Tools.IdeDebugStepOut` | Step out |
 
-Build and diagnostics:
+### Build and Diagnostics
 
-- `Tools.IdeBuildSolution`
-- `Tools.IdeGetErrorList`
-- `Tools.IdeBuildAndCaptureErrors`
-
-All operational commands accept an argument string and write a JSON result file.
-
-Example:
-
-```text
-Tools.IdeGetState --out "C:\temp\ide-state.json"
-```
-
-Every command writes:
-
-- a JSON envelope to the requested `--out` path
-- a one-line summary to the `IDE Bridge` Output pane
-- a status-bar summary
-
-If `--out` is omitted, the extension writes to `%TEMP%\vs-ide-bridge\*.json`.
+| Command | Description |
+|---------|-------------|
+| `Tools.IdeBuildSolution` | Build the solution |
+| `Tools.IdeGetErrorList` | Capture the Error List as JSON |
+| `Tools.IdeBuildAndCaptureErrors` | Build then capture the Error List in one call |
 
 ## Argument Contract
 
-- `--out "C:\path\result.json"`: preferred output path
-- `--request-id "abc123"`: optional correlation id
-- `--timeout-ms 120000`: optional on wait/build commands
-- booleans use `true` or `false`
-- enum values use lowercase kebab-case
+- `--out "C:\path\result.json"` — output path (falls back to `%TEMP%\vs-ide-bridge\<command>.json`)
+- `--request-id "abc123"` — optional correlation id echoed in the envelope
+- `--timeout-ms 120000` — timeout on wait/build commands
+- boolean flags: `--flag` (bare, implies `true`) or `--flag true` / `--flag false`
+- enum values: lowercase kebab-case
 
-Examples:
+## Command Examples
 
 ```text
-Tools.IdeWaitForReady --out "C:\temp\ready.json" --timeout-ms 120000
-Tools.IdeFindFiles --query "VsIdeBridge.csproj" --out "C:\temp\files.json"
-Tools.IdeFindText --query "Tools.IdeGetState" --scope solution --out "C:\temp\find.json"
-Tools.IdeOpenDocument --file "C:\repo\src\foo.cpp" --line 42 --column 1 --out "C:\temp\open.json"
-Tools.IdeListDocuments --out "C:\temp\documents.json"
-Tools.IdeActivateDocument --query "foo.cpp" --out "C:\temp\activate-document.json"
-Tools.IdeCloseDocument --query "foo.cpp" --out "C:\temp\close-document.json"
-Tools.IdeListWindows --query "References" --out "C:\temp\windows.json"
-Tools.IdeExecuteVsCommand --command "View.SolutionExplorer" --out "C:\temp\execute-command.json"
-Tools.IdeFindAllReferences --file "C:\repo\src\foo.cpp" --line 42 --column 13 --out "C:\temp\references.json"
-Tools.IdeShowCallHierarchy --file "C:\repo\src\foo.cpp" --line 42 --column 13 --out "C:\temp\call-hierarchy.json"
+Tools.IdeWaitForReady --timeout-ms 120000 --out "C:\temp\ready.json"
+Tools.IdeGetState --out "C:\temp\state.json"
+Tools.IdeOpenSolution --solution "C:\path\to\your.sln" --out "C:\temp\open.json"
+
+Tools.IdeFindFiles --query "GUI_App.cpp" --out "C:\temp\files.json"
+Tools.IdeFindText --query "OnInit" --scope solution --out "C:\temp\find.json"
 Tools.IdeGetDocumentSlice --file "C:\repo\src\foo.cpp" --line 42 --context-before 8 --context-after 24 --out "C:\temp\slice.json"
-Tools.IdeSetBreakpoint --file "C:\repo\src\foo.cpp" --line 42 --out "C:\temp\bp.json"
-Tools.IdeBuildAndCaptureErrors --out "C:\temp\build-errors.json" --timeout-ms 600000
+Tools.IdeGetFileOutline --file "C:\repo\src\foo.cpp" --max-depth 2 --out "C:\temp\outline.json"
+Tools.IdeGetSmartContextForQuery --query "where is OnInit called" --out "C:\temp\smart-context.json"
+Tools.IdeFindAllReferences --file "C:\repo\src\foo.cpp" --line 42 --column 13 --out "C:\temp\refs.json"
+Tools.IdeShowCallHierarchy --file "C:\repo\src\foo.cpp" --line 42 --column 13 --out "C:\temp\hierarchy.json"
+Tools.IdeGoToDefinition --file "C:\repo\src\foo.cpp" --line 42 --column 13 --out "C:\temp\goto.json"
+
+Tools.IdeOpenDocument --file "C:\repo\src\foo.cpp" --line 42 --column 1 --out "C:\temp\open-doc.json"
+Tools.IdeListDocuments --out "C:\temp\documents.json"
+Tools.IdeListOpenTabs --out "C:\temp\tabs.json"
+Tools.IdeActivateDocument --query "foo.cpp" --out "C:\temp\activate.json"
+Tools.IdeCloseDocument --query "foo.cpp" --out "C:\temp\close.json"
+Tools.IdeCloseFile --file "C:\repo\src\foo.cpp" --out "C:\temp\close-file.json"
+Tools.IdeCloseAllExceptCurrent --out "C:\temp\close-others.json"
+Tools.IdeListWindows --query "Error List" --out "C:\temp\windows.json"
+Tools.IdeExecuteVsCommand --command "View.SolutionExplorer" --out "C:\temp\exec.json"
+Tools.IdeApplyUnifiedDiff --patch-file "C:\temp\change.diff" --out "C:\temp\apply.json"
+
+Tools.IdeSetBreakpoint --file "C:\repo\src\foo.cpp" --line 42 --condition "count == 12" --out "C:\temp\bp.json"
+Tools.IdeListBreakpoints --out "C:\temp\breakpoints.json"
+Tools.IdeDebugStart --wait-for-break true --timeout-ms 120000 --out "C:\temp\debug-start.json"
+Tools.IdeDebugContinue --wait-for-break true --timeout-ms 30000 --out "C:\temp\continue.json"
+
+Tools.IdeGetErrorList --wait-for-intellisense false --quick --out "C:\temp\errors.json"
+Tools.IdeBuildSolution --configuration Debug --platform x64 --out "C:\temp\build.json"
+Tools.IdeBuildAndCaptureErrors --timeout-ms 600000 --out "C:\temp\build-errors.json"
 ```
 
-`Tools.IdeFindAllReferences` and `Tools.IdeShowCallHierarchy` use the symbol at the active caret by default. Use `--file`, `--document`, `--line`, and `--column` when you want the bridge to position the editor first.
+### `IdeGetErrorList` flags
 
-Search and navigation results use normalized absolute file paths so an external tool can safely open or edit the same file in the background.
+- `--wait-for-intellisense true` (default) — waits for IntelliSense to finish loading before reading
+- `--quick` — reads the Error List once immediately; skips the stability polling loop (use after a build has finished)
 
-Bridge automation is serialized through a shared mutex so overlapping wrapper calls do not open multiple Visual Studio instances against the same solution at the same time.
+### `IdeBatchCommands`
 
-## Large-File Workflow
+Execute multiple commands in a single wrapper invocation — one PS process, one mutex acquire, one COM setup:
 
-For large C++ files, the intended bridge flow is:
-
-1. Use `Tools.IdeFindText` to get the exact match location from Visual Studio.
-2. Use `Tools.IdeGetDocumentSlice` to fetch only the lines around that hit.
-
-Example:
+```json
+[
+  { "command": "Tools.IdeGetState" },
+  { "command": "Tools.IdeFindFiles", "args": "--query \"GUI_App.cpp\"" },
+  { "command": "Tools.IdeGetDocumentSlice", "args": "--file \"C:\\repo\\src\\GUI_App.cpp\" --line 1384 --context-before 10 --context-after 30" }
+]
+```
 
 ```text
-Tools.IdeFindText --query "choose_app_dir" --scope solution --out "C:\temp\find.json"
-Tools.IdeGetDocumentSlice --file "C:\repo\src\GUI_App.cpp" --line 1045 --context-before 6 --context-after 20 --out "C:\temp\slice.json"
+Tools.IdeBatchCommands --batch-file "C:\temp\batch.json" --out "C:\temp\batch-result.json"
 ```
 
-This keeps the bridge useful on large codebases without repeatedly rescanning full source files outside Visual Studio.
+Add `--stop-on-error` to halt on first failure. The result envelope contains a `results[]` array with per-step `success`, `summary`, and `data`.
 
-For symbol-heavy work, the next step after a slice is usually a native Visual Studio command:
+### `IdeGoToDefinition`
 
-```text
-Tools.IdeFindAllReferences --file "C:\repo\src\GUI_App.cpp" --line 1045 --column 12 --out "C:\temp\references.json"
-Tools.IdeShowCallHierarchy --file "C:\repo\src\GUI_App.cpp" --line 1045 --column 12 --out "C:\temp\call-hierarchy.json"
-```
+Positions the cursor at `--file`/`--line`/`--column`, posts `Edit.GoToDefinition` through the VS shell dispatcher (same path as F12), and returns both the source location and the resolved definition location. Works on any language with a VS language service. `definitionFound` is `true` when the definition is at a different file or line.
+
+### `IdeGetFileOutline`
+
+Returns symbols in a file (functions, classes, structs, enums, namespaces) using VS's FileCodeModel. C# and VB support is complete; C++ support is partial and depends on VS having a code model for the file.
+
+### `IdeApplyUnifiedDiff`
+
+Accepts `--patch-file` (path) or `--patch-text-base64` (inline). After patching, reopens all changed files in VS so the editor immediately shows the new content.
+
+### `IdeExecuteVsCommand`
+
+Supports optional `--file`, `--document`, `--line`, `--column` args to position the editor before dispatching the native command. Useful for VS commands that act on the caret position.
 
 ## JSON Output
 
-Each command writes a JSON envelope. Current implementation uses these top-level keys:
+Every command writes a JSON envelope:
 
 ```json
 {
@@ -238,8 +230,8 @@ Each command writes a JSON envelope. Current implementation uses these top-level
   "Command": "Tools.IdeGetState",
   "RequestId": null,
   "Success": true,
-  "StartedAtUtc": "2026-03-01T18:50:06.0479106Z",
-  "FinishedAtUtc": "2026-03-01T18:50:06.0589103Z",
+  "StartedAtUtc": "2026-01-01T12:00:00.0000000Z",
+  "FinishedAtUtc": "2026-01-01T12:00:00.0100000Z",
   "Summary": "IDE state captured.",
   "Warnings": [],
   "Error": null,
@@ -247,15 +239,13 @@ Each command writes a JSON envelope. Current implementation uses these top-level
 }
 ```
 
-Failure results keep the same envelope and populate `Error`.
+Failures use the same envelope shape with `Success: false` and a populated `Error` object containing `code` and `message`.
 
-If a shell client or LLM does not want to parse JSON directly, use the native result reader:
+For shell clients that prefer flat output:
 
 ```bat
 scripts\read_bridge_result.bat C:\temp\ide-state.json
 ```
-
-Example output:
 
 ```text
 command=Tools.IdeGetState
@@ -263,88 +253,123 @@ success=true
 summary=IDE state captured.
 ```
 
+## Named Pipe Client
+
+The VSIX automatically starts a **persistent named pipe server** when Visual Studio loads the extension. Connecting directly over the pipe eliminates PowerShell process startup and COM mutex overhead on every call.
+
+**Benchmark (measured):**
+
+| Method | 1 command | 3 commands (batch) |
+|--------|-----------|-------------------|
+| PS wrapper | ~11 s | ~11 s |
+| Pipe client (conda Python startup) | ~3 s | ~3.2 s |
+| Pipe round-trip only | < 1 ms | < 3 ms |
+
+### Discovery
+
+When the VSIX starts it writes:
+
+```
+%TEMP%\vs-ide-bridge\pipes\bridge-{pid}.json
+```
+
+```json
+{ "pid": 12345, "pipeName": "VsIdeBridge18_12345" }
+```
+
+The file is deleted when Visual Studio exits. A missing file means VS is not running or the extension failed to load.
+
+### Python client (`tools/scripts/vs_bridge_pipe.py`)
+
+Requires **pywin32**:
+
+```bash
+conda run -n superslicer pip install pywin32
+```
+
+Single command:
+
+```bash
+conda run -n superslicer python tools/scripts/vs_bridge_pipe.py \
+  --cmd Tools.IdeGetState --format summary
+```
+
+With arguments:
+
+```bash
+conda run -n superslicer python tools/scripts/vs_bridge_pipe.py \
+  --cmd Tools.IdeFindFiles --args '--query "GUI_App.cpp"' --format json
+```
+
+Batch (all commands share one Python process — amortises startup cost):
+
+```bash
+conda run -n superslicer python tools/scripts/vs_bridge_pipe.py \
+  --batch output/test-batch.json --format summary
+```
+
+Batch file format (same as `IdeBatchCommands`):
+
+```json
+[
+  { "command": "Tools.IdeGetState" },
+  { "command": "Tools.IdeFindFiles", "args": "--query \"GUI_App.cpp\"" }
+]
+```
+
+`--format` choices: `json` (default) · `summary` · `keyvalue`
+`--out FILE` writes the full JSON response(s) to a file.
+`--sln HINT` filters discovery when multiple VS instances are running.
+
 ## Scripts
 
-- `scripts\invoke_vs_ide_command.ps1`
-  Launch or attach to Visual Studio and invoke an IDE Bridge command.
-- `scripts\invoke_active_vs_command.ps1`
-  Attach to an already-open Visual Studio 18 instance and execute one command without solution-launch logic.
-- `scripts\list_vs_commands.ps1`
-  Enumerate Visual Studio command names so bridge wrappers can target native IDE actions accurately.
-- `scripts\smoke_test.ps1`
-  Run a small end-to-end validation against the extension.
-- `scripts\vs_dte_probe.ps1`
-  Inspect live Visual Studio 18 DTE instances.
+| Script | Purpose |
+|--------|---------|
+| `scripts\build_vsix.bat` | Build the VSIX |
+| `scripts\install_vsix.ps1` | Build + install (handles VS shutdown/relaunch) |
+| `scripts\install_vsix.bat` | Shim that delegates to `install_vsix.ps1` |
+| `scripts\invoke_vs_ide_command.ps1` | Launch/attach VS and invoke a bridge command |
+| `scripts\invoke_active_vs_command.ps1` | Attach to an already-open VS instance and run one command |
+| `scripts\list_vs_commands.ps1` | Enumerate native VS command names from a live DTE instance |
+| `scripts\smoke_test.ps1` | End-to-end validation flow |
+| `scripts\read_bridge_result.bat` | Read a JSON envelope as `key=value` pairs |
+| `scripts\read_bridge_result.ps1` | PowerShell entry point for the same reader |
+| `scripts\vs_dte_probe.ps1` | Inspect live VS 18 DTE instances |
 
-## Wrapper Usage
+## Wrapper Reference
 
-Use the PowerShell wrapper when you want to drive the extension from outside Visual Studio:
+`invoke_vs_ide_command.ps1` parameters:
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\invoke_vs_ide_command.ps1 `
-  -SolutionPath C:\Users\elsto\source\repos\vs-ide-bridge\VsIdeBridge.sln `
-  -CommandName Tools.IdeGetState `
-  -OutputPath C:\temp\ide-state.json
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `-SolutionPath` | — | Open this solution before running the command |
+| `-CommandName` | (required) | `Tools.Ide*` command name |
+| `-CommandArgs` | `""` | Arguments string passed to the command |
+| `-OutputPath` | auto | JSON output file path |
+| `-StartupTimeoutSeconds` | 60 | Timeout waiting for VS to start |
+| `-CommandTimeoutSeconds` | 120 | Timeout waiting for the output file |
+| `-ReuseVisualStudio` | `$true` | Attach to an existing VS instance |
+| `-ResultFormat` | `summary` | `summary`, `keyvalue`, or `json` |
+| `-CloseVisualStudio` | `$false` | Close VS after the command completes |
+
+Key behaviors:
+- Reuses an existing VS 18 instance when the solution is already open.
+- Starts a new VS instance and opens the solution if needed.
+- Serializes concurrent wrapper calls through a named mutex.
+- Resolves the internal `Tools.Tools.Ide*` registration quirk transparently.
+
+## Repo Layout
+
 ```
-
-Key wrapper behavior:
-
-- reuses an existing Visual Studio 18 instance when the requested solution is already open
-- can open the requested solution in a blank VS instance
-- leaves Visual Studio open by default
-- only closes Visual Studio when `-CloseVisualStudio` is passed
-- waits for the output JSON file to be written before returning
-- resolves the internal `Tools.Tools.Ide*` registration quirk so callers can use `Tools.Ide*`
-- supports `-ResultFormat summary|keyvalue|json` so callers can choose human summary text, shell-friendly `key=value`, or raw JSON
-
-Run the smoke test with:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke_test.ps1
+src/VsIdeBridge/          VSIX package, commands, services, infrastructure
+scripts/                  Build, install, and automation helper scripts
+output/                   Local smoke-test artifacts (git-ignored)
 ```
-
-Run it against SuperSlicer with:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\invoke_vs_ide_command.ps1 `
-  -SolutionPath C:\Users\elsto\source\repos\Stan-Elston\SuperSlicer\build\Slic3r.sln `
-  -CommandName Tools.IdeGetErrorList `
-  -CommandArgs "--wait-for-intellisense true --timeout-ms 240000" `
-  -OutputPath C:\Users\elsto\source\repos\vs-ide-bridge\output\superslicer-errors.json
-```
-
-## Validation
-
-Validated locally:
-
-- build and install of the VSIX
-- wrapper-driven smoke test on this repo
-- wrapper-driven run on SuperSlicer:
-  - readiness wait
-  - state capture
-  - file search for `GUI_App.cpp`
-  - tab open/activate/close flow across `GUI_App.cpp` and `GUI_App.hpp`
-  - native `View.CallHierarchy` against `choose_app_dir`
-  - native `Edit.FindAllReferences` against `choose_app_dir`
-  - Error List export
-
-Example generated artifacts:
-
-- `output\smoke-test.txt`
-- `output\superslicer-ready.json`
-- `output\superslicer-state.json`
-- `output\superslicer-find-files.json`
-- `output\superslicer-list-documents.json`
-- `output\superslicer-list-windows.json`
-- `output\superslicer-call-hierarchy.json`
-- `output\superslicer-find-all-references.json`
-- `output\superslicer-errors.json`
 
 ## Notes
 
-- Search results are written to JSON and surfaced in the `IDE Bridge` Output pane.
-- Build and Error List commands reuse the same Error List extraction logic that worked in `vs-errorlist-export`.
-- The extension is command-first. The only visible menu items are `Help` and `Smoke Test`.
-- Search currently scans files on disk; unsaved in-memory editor changes are not yet part of search results.
-- Symbol commands intentionally rely on Visual Studio's own language services rather than bridge-side parsing.
-- `Tools.Ide*` is the public contract even though Visual Studio internally registers these commands as `Tools.Tools.Ide*`.
+- The only visible menu items are **IDE Bridge > Help** and **IDE Bridge > Smoke Test**. All other commands are `CommandWellOnly` (available in the Command Window and via DTE, not in menus).
+- Search scans files on disk; unsaved in-memory editor content is not included in `IdeFindText` results.
+- Symbol commands rely on VS language services, not bridge-side parsing.
+- `Tools.IdeExecuteVsCommand` is the escape hatch for native VS commands that have no first-class bridge equivalent.
+- `Tools.Ide*` is the public contract. VS internally registers them as `Tools.Tools.Ide*`; the wrapper resolves this automatically.

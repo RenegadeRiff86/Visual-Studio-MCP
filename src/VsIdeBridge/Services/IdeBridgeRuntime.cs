@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using EnvDTE80;
 using Microsoft;
@@ -17,6 +19,7 @@ internal sealed class IdeBridgeRuntime
         DocumentService documentService,
         WindowService windowService,
         VsCommandService vsCommandService,
+        PatchService patchService,
         BreakpointService breakpointService,
         DebuggerService debuggerService,
         BuildService buildService,
@@ -29,6 +32,7 @@ internal sealed class IdeBridgeRuntime
         DocumentService = documentService;
         WindowService = windowService;
         VsCommandService = vsCommandService;
+        PatchService = patchService;
         BreakpointService = breakpointService;
         DebuggerService = debuggerService;
         BuildService = buildService;
@@ -49,6 +53,8 @@ internal sealed class IdeBridgeRuntime
 
     public VsCommandService VsCommandService { get; }
 
+    public PatchService PatchService { get; }
+
     public BreakpointService BreakpointService { get; }
 
     public DebuggerService DebuggerService { get; }
@@ -56,6 +62,14 @@ internal sealed class IdeBridgeRuntime
     public BuildService BuildService { get; }
 
     public ErrorListService ErrorListService { get; }
+
+    private readonly Dictionary<string, IdeCommandBase> _dispatcher =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    internal void RegisterCommand(IdeCommandBase cmd) => _dispatcher[cmd.Name] = cmd;
+
+    internal bool TryGetCommand(string name, out IdeCommandBase cmd)
+        => _dispatcher.TryGetValue(name, out cmd!);
 
     public static async Task<IdeBridgeRuntime> CreateAsync(VsIdeBridgePackage package)
     {
@@ -78,6 +92,7 @@ internal sealed class IdeBridgeRuntime
             documentService,
             new WindowService(),
             new VsCommandService(),
+            new PatchService(),
             new BreakpointService(),
             new DebuggerService(),
             buildService,
