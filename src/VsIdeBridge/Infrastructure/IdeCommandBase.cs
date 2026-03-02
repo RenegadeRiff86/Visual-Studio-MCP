@@ -38,6 +38,11 @@ internal abstract class IdeCommandBase
 
     protected abstract string CanonicalName { get; }
 
+    internal string Name => CanonicalName;
+
+    internal Task<CommandExecutionResult> ExecuteDirectAsync(IdeCommandContext ctx, CommandArguments args)
+        => ExecuteAsync(ctx, args);
+
     protected abstract Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args);
 
     private void Execute(object sender, EventArgs e)

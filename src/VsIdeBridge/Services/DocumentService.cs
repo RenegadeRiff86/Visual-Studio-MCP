@@ -325,52 +325,40 @@ internal sealed class DocumentService
         var sourceLocation = await PositionTextSelectionAsync(dte, filePath, documentQuery, line, column, selectWord: false)
             .ConfigureAwait(true);
 
-        // Try multiple invocation strategies.  ExecuteCommand with an empty
-        // argument string maps to the Command Window form of the command.  If
-        // that fails (C++ on large files sometimes returns E_FAIL while
-        // IntelliSense is loading), fall back to Commands.Raise which is
-        // closer to pressing F12.
+        // Use IVsUIShell.PostExecCommand with the standard cmdidGotoDefn
+        // rather than dte.ExecuteCommand("Edit.GoToDefinition", ...).
+        // ExecuteCommand shows a modal "Command requires one argument" dialog
+        // for this command.  PostExecCommand posts through the shell command
+        // dispatcher — the same path as pressing F12.
         //
         // guidStandardCommandSet97 = {5efc7975-14bc-11cf-9b2b-00aa00573819}
         // cmdidGotoDefn             = 935   (from stdidcmd.h)
-        var navigated = false;
         try
         {
-            dte.ExecuteCommand("Edit.GoToDefinition", string.Empty);
-            navigated = true;
-        }
-        catch (COMException)
-        {
-        }
-
-        if (!navigated)
-        {
-            try
+            var goToDefnGuid = new Guid("{5efc7975-14bc-11cf-9b2b-00aa00573819}");
+            const uint goToDefnId = 935;
+            object arg = null;
+            var shell = (Microsoft.VisualStudio.Shell.Interop.IVsUIShell)
+                Microsoft.VisualStudio.Shell.Package.GetGlobalService(
+                    typeof(Microsoft.VisualStudio.Shell.Interop.SVsUIShell));
+            if (shell is null)
             {
-                var goToDefnGuid = new Guid("{5efc7975-14bc-11cf-9b2b-00aa00573819}");
-                const uint goToDefnId = 935;
-                object arg = null;
-                var shell = (Microsoft.VisualStudio.Shell.Interop.IVsUIShell)
-                    Microsoft.VisualStudio.Shell.Package.GetGlobalService(
-                        typeof(Microsoft.VisualStudio.Shell.Interop.SVsUIShell));
-                if (shell is not null)
-                {
-                    shell.PostExecCommand(ref goToDefnGuid, goToDefnId, 0, ref arg);
-                    // PostExecCommand is asynchronous — give VS a moment to navigate.
-                    await Task.Delay(500).ConfigureAwait(true);
-                    navigated = true;
-                }
+                throw new CommandErrorException("unsupported_operation", "IVsUIShell service not available.");
             }
-            catch (COMException)
-            {
-            }
-        }
 
-        if (!navigated)
+            shell.PostExecCommand(ref goToDefnGuid, goToDefnId, 0, ref arg);
+            // PostExecCommand is asynchronous — give VS a moment to navigate.
+            await Task.Delay(500).ConfigureAwait(true);
+        }
+        catch (CommandErrorException)
+        {
+            throw;
+        }
+        catch (COMException ex)
         {
             throw new CommandErrorException(
                 "unsupported_operation",
-                "GoToDefinition failed.  IntelliSense may still be loading for this file.");
+                $"GoToDefinition failed: {ex.Message}");
         }
 
         var activeDoc = dte.ActiveDocument;

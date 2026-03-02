@@ -233,7 +233,16 @@ internal static class SearchNavigationCommands
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
             var data = await context.Runtime.VsCommandService
-                .ExecuteCommandAsync(context.Dte, args.GetRequiredString("command"), args.GetString("args"))
+                .ExecutePositionedCommandAsync(
+                    context.Dte,
+                    context.Runtime.DocumentService,
+                    args.GetRequiredString("command"),
+                    args.GetString("args"),
+                    args.GetString("file"),
+                    args.GetString("document"),
+                    args.GetNullableInt32("line"),
+                    args.GetNullableInt32("column"),
+                    args.GetBoolean("select-word", false))
                 .ConfigureAwait(true);
             return new CommandExecutionResult("Visual Studio command executed.", data);
         }

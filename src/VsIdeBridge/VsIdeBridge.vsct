@@ -461,6 +461,28 @@
           <LocCanonicalName>.Tools.IdeBuildAndCaptureErrors</LocCanonicalName>
         </Strings>
       </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeOpenSolution" priority="0x0224" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Open Solution</ButtonText>
+          <CommandName>IdeOpenSolution</CommandName>
+          <CanonicalName>Tools.IdeOpenSolution</CanonicalName>
+          <LocCanonicalName>.Tools.IdeOpenSolution</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeBatchCommands" priority="0x0225" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Batch Commands</ButtonText>
+          <CommandName>IdeBatchCommands</CommandName>
+          <CanonicalName>Tools.IdeBatchCommands</CanonicalName>
+          <LocCanonicalName>.Tools.IdeBatchCommands</LocCanonicalName>
+        </Strings>
+      </Button>
     </Buttons>
   </Commands>
 
@@ -512,6 +534,8 @@
       <IDSymbol name="cmdidIdeBuildSolution" value="0x0212" />
       <IDSymbol name="cmdidIdeGetErrorList" value="0x0213" />
       <IDSymbol name="cmdidIdeBuildAndCaptureErrors" value="0x0214" />
+      <IDSymbol name="cmdidIdeOpenSolution" value="0x0224" />
+      <IDSymbol name="cmdidIdeBatchCommands" value="0x0225" />
     </GuidSymbol>
   </Symbols>
 </CommandTable>

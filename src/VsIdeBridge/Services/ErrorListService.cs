@@ -28,14 +28,30 @@ internal sealed class ErrorListService
         _readinessService = readinessService;
     }
 
-    public async Task<JObject> GetErrorListAsync(IdeCommandContext context, bool waitForIntellisense, int timeoutMilliseconds)
+    public async Task<JObject> GetErrorListAsync(IdeCommandContext context, bool waitForIntellisense, int timeoutMilliseconds, bool quickSnapshot = false)
     {
         if (waitForIntellisense)
         {
             await _readinessService.WaitForReadyAsync(context, timeoutMilliseconds).ConfigureAwait(true);
         }
 
-        var rows = await WaitForRowsAsync(context, timeoutMilliseconds).ConfigureAwait(true);
+        IReadOnlyList<JObject> rows;
+        if (quickSnapshot)
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
+            try
+            {
+                rows = ReadRows(context.Dte);
+            }
+            catch (InvalidOperationException)
+            {
+                rows = Array.Empty<JObject>();
+            }
+        }
+        else
+        {
+            rows = await WaitForRowsAsync(context, timeoutMilliseconds).ConfigureAwait(true);
+        }
         var severityCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
         {
             ["Error"] = 0,

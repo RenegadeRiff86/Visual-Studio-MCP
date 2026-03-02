@@ -184,7 +184,8 @@ internal static class DebugBuildCommands
             var data = await context.Runtime.ErrorListService.GetErrorListAsync(
                 context,
                 args.GetBoolean("wait-for-intellisense", true),
-                args.GetInt32("timeout-ms", 120000)).ConfigureAwait(true);
+                args.GetInt32("timeout-ms", 120000),
+                args.GetBoolean("quick", false)).ConfigureAwait(true);
 
             return new CommandExecutionResult($"Captured {data["count"]} Error List row(s).", data);
         }
