@@ -253,6 +253,74 @@ success=true
 summary=IDE state captured.
 ```
 
+## Named Pipe Client
+
+The VSIX automatically starts a **persistent named pipe server** when Visual Studio loads the extension. Connecting directly over the pipe eliminates PowerShell process startup and COM mutex overhead on every call.
+
+**Benchmark (measured):**
+
+| Method | 1 command | 3 commands (batch) |
+|--------|-----------|-------------------|
+| PS wrapper | ~11 s | ~11 s |
+| Pipe client (conda Python startup) | ~3 s | ~3.2 s |
+| Pipe round-trip only | < 1 ms | < 3 ms |
+
+### Discovery
+
+When the VSIX starts it writes:
+
+```
+%TEMP%\vs-ide-bridge\pipes\bridge-{pid}.json
+```
+
+```json
+{ "pid": 12345, "pipeName": "VsIdeBridge18_12345" }
+```
+
+The file is deleted when Visual Studio exits. A missing file means VS is not running or the extension failed to load.
+
+### Python client (`tools/scripts/vs_bridge_pipe.py`)
+
+Requires **pywin32**:
+
+```bash
+conda run -n superslicer pip install pywin32
+```
+
+Single command:
+
+```bash
+conda run -n superslicer python tools/scripts/vs_bridge_pipe.py \
+  --cmd Tools.IdeGetState --format summary
+```
+
+With arguments:
+
+```bash
+conda run -n superslicer python tools/scripts/vs_bridge_pipe.py \
+  --cmd Tools.IdeFindFiles --args '--query "GUI_App.cpp"' --format json
+```
+
+Batch (all commands share one Python process — amortises startup cost):
+
+```bash
+conda run -n superslicer python tools/scripts/vs_bridge_pipe.py \
+  --batch output/test-batch.json --format summary
+```
+
+Batch file format (same as `IdeBatchCommands`):
+
+```json
+[
+  { "command": "Tools.IdeGetState" },
+  { "command": "Tools.IdeFindFiles", "args": "--query \"GUI_App.cpp\"" }
+]
+```
+
+`--format` choices: `json` (default) · `summary` · `keyvalue`
+`--out FILE` writes the full JSON response(s) to a file.
+`--sln HINT` filters discovery when multiple VS instances are running.
+
 ## Scripts
 
 | Script | Purpose |
