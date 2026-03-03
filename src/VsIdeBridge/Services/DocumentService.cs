@@ -6,7 +6,11 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using EnvDTE;
 using EnvDTE80;
+using Microsoft.VisualStudio.ComponentModelHost;
+using Microsoft.VisualStudio.Editor;
 using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Text.Editor;
+using Microsoft.VisualStudio.TextManager.Interop;
 using Newtonsoft.Json.Linq;
 using VsIdeBridge.Infrastructure;
 
@@ -14,6 +18,13 @@ namespace VsIdeBridge.Services;
 
 internal sealed class DocumentService
 {
+    private readonly IServiceProvider _serviceProvider;
+
+    public DocumentService(IServiceProvider serviceProvider)
+    {
+        _serviceProvider = serviceProvider;
+    }
+
     public async Task<JObject> ListOpenTabsAsync(DTE2 dte)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -130,7 +141,9 @@ internal sealed class DocumentService
         string content,
         int line,
         int column,
-        bool saveChanges)
+        bool saveChanges,
+        IReadOnlyCollection<(int StartLine, int EndLine)>? changedRanges = null,
+        IReadOnlyCollection<int>? deletedLines = null)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
@@ -187,6 +200,15 @@ internal sealed class DocumentService
             window.Document.Save();
         }
 
+        if ((changedRanges is not null && changedRanges.Count > 0) || (deletedLines is not null && deletedLines.Count > 0))
+        {
+            var view = TryGetActiveWpfTextView();
+            if (view is not null)
+            {
+                BridgeEditHighlightService.Instance.ApplyHighlights(view, changedRanges ?? Array.Empty<(int, int)>(), deletedLines ?? Array.Empty<int>());
+            }
+        }
+
         return new JObject
         {
             ["resolvedPath"] = normalizedPath,
@@ -196,6 +218,26 @@ internal sealed class DocumentService
             ["column"] = Math.Max(1, column),
             ["windowCaption"] = window.Caption,
         };
+    }
+
+    private IWpfTextView? TryGetActiveWpfTextView()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        var textManager = _serviceProvider.GetService(typeof(SVsTextManager)) as IVsTextManager;
+        if (textManager is null)
+        {
+            return null;
+        }
+
+        if (textManager.GetActiveView(1, null, out var activeView) != 0 || activeView is null)
+        {
+            return null;
+        }
+
+        var componentModel = _serviceProvider.GetService(typeof(SComponentModel)) as IComponentModel;
+        var adapters = componentModel?.GetService<IVsEditorAdaptersFactoryService>();
+        return adapters?.GetWpfTextView(activeView);
     }
 
     public async Task<JObject> PositionTextSelectionAsync(

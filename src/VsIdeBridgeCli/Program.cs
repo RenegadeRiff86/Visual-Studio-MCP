@@ -26,7 +26,7 @@ catch (Exception ex)
     return 1;
 }
 
-internal static class CliApp
+internal static partial class CliApp
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -267,6 +267,7 @@ internal static class CliApp
             "close" => await RunSimpleCommandAsync("close-ide", options, "summary"),
             "batch" => await RunBatchAsync(options),
             "request" => await RunRawRequestAsync(options),
+            "mcp-server" => await RunMcpServerAsync(options),
             _ => throw new CliException($"Unknown command '{verb}'. Run 'vs-ide-bridge help'."),
         };
     }
@@ -830,6 +831,7 @@ internal static class CliApp
             "send" => HelpText.Send,
             "batch" => HelpText.Batch,
             "request" => HelpText.Request,
+            "mcp-server" => HelpText.McpServer,
             _ => $"ERROR: Unknown help topic '{subject}'.{Environment.NewLine}{Environment.NewLine}{HelpText.General}",
         };
 
@@ -886,6 +888,7 @@ internal static class HelpText
           call            Alias for send
           batch           Send a batch request
           request         Send raw JSON
+          mcp-server      Run MCP stdio server facade over the bridge
 
         Common selectors
           --instance <id> exact instance id
@@ -1630,6 +1633,17 @@ internal static class HelpText
         Examples
           vs-ide-bridge request --instance <instanceId> --json "{ \"command\": \"state\" }"
           vs-ide-bridge request --instance <instanceId> --json-file output\pipe-test-batch.json
+        """;
+
+    public const string McpServer =
+        """
+        mcp-server
+
+        Purpose
+          Run a stdio MCP server over one live VS IDE Bridge instance.
+
+        Example
+          vs-ide-bridge mcp-server --instance <instanceId>
         """;
 }
 

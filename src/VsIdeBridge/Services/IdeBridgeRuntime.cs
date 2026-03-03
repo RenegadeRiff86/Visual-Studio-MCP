@@ -104,7 +104,7 @@ internal sealed class IdeBridgeRuntime
         var logger = new OutputPaneLogger(package, dte);
         var bridgeInstanceService = new BridgeInstanceService();
         var uiSettings = new BridgeUiSettingsService(package);
-        var documentService = new DocumentService();
+        var documentService = new DocumentService(package);
         var failureContextService = new FailureContextService();
         var readinessService = new ReadinessService();
         var searchService = new SearchService();

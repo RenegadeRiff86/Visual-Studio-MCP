@@ -12,6 +12,8 @@ Lets you drive a running Visual Studio instance from outside the IDE: search cod
 
 Commands are invoked through simple pipe names like `state`, `search-symbols`, and `quick-info`. The legacy `Tools.Ide*` names still work for compatibility. The native CLI can print `json`, `summary`, or `keyvalue` to stdout and can also write envelopes to a caller-specified output file.
 
+The CLI also includes a Windows-side stdio MCP facade (`vs-ide-bridge mcp-server`) that forwards MCP tool/resource/prompt requests to the existing bridge pipe server. This keeps the VSIX bridge as the source of truth while exposing an LLM-friendly command surface.
+
 ## LLM Workflow
 
 Use this five-step pattern:
@@ -128,6 +130,8 @@ Bridge UI defaults:
 - `IDE Bridge > Go To Edited Parts` is on by default
 
 That means reads and diagnostics are visible in VS immediately, but `apply-diff` will refuse to change files until you explicitly allow bridge edits from the menu.
+
+Bridge edits now apply through the live editor buffer with temporary line markers: added/modified regions are color-highlighted, and deletions are shown as deletion markers so review can happen directly in Visual Studio before save.
 
 Optional parameters:
 
@@ -482,6 +486,7 @@ Supported verbs:
 - `send` (alias: `call`)
 - `batch`
 - `request`
+- `mcp-server`
 
 Common options:
 
@@ -510,6 +515,40 @@ Recommended agent pattern:
 - use `parse` when you already have a JSON result and only need one field or list
 - use `--instance` for all follow-up commands in the same task
 - only fall back to `instances` when `current` says more than one IDE is live
+
+### MCP server (`mcp-server`)
+
+Run a stdio MCP server on Windows next to Visual Studio:
+
+```bat
+src\VsIdeBridgeCli\bin\Debug\net8.0\vs-ide-bridge.exe mcp-server --instance <instanceId>
+```
+
+Exposed MCP tools use simple names:
+
+- `state`
+- `errors`
+- `warnings`
+- `list_tabs`
+- `open_file`
+- `search_symbols`
+- `quick_info`
+- `apply_diff`
+
+Exposed MCP resources:
+
+- `bridge://current-solution`
+- `bridge://active-document`
+- `bridge://open-tabs`
+- `bridge://error-list-snapshot`
+
+Exposed MCP prompts:
+
+- `help`
+- `fix_current_errors`
+- `open_solution_and_wait_ready`
+
+The MCP layer is intentionally thin: it forwards to the bridge command surface and keeps edit approval/safety enforcement inside the existing Visual Studio bridge flow.
 
 ### Pipe protocol
 

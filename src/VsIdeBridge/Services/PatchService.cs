@@ -59,6 +59,8 @@ internal sealed class PatchService
         public bool DeleteFile { get; set; }
 
         public List<ChangedRange> ChangedRanges { get; set; } = new List<ChangedRange>();
+
+        public List<int> DeletedLineMarkers { get; set; } = new List<int>();
     }
 
     public async Task<JObject> ApplyUnifiedDiffAsync(
@@ -138,7 +140,9 @@ internal sealed class PatchService
                     result.Content,
                     result.FirstChangedLine,
                     1,
-                    saveChangedFiles).ConfigureAwait(true);
+                    saveChangedFiles,
+                    result.ChangedRanges.Select(range => (range.StartLine, range.EndLine)).ToArray(),
+                    result.DeletedLineMarkers).ConfigureAwait(true);
                 filesToFocus.Add((target.Path, result.ChangedRanges));
 
                 appliedFiles.Add(new JObject
@@ -425,6 +429,7 @@ internal sealed class PatchService
         var firstChangedLine = 1;
         var firstChangeCaptured = false;
         var changedRanges = new List<ChangedRange>();
+        var deletedLineMarkers = new List<int>();
 
         foreach (var hunk in patch.Hunks)
         {
@@ -461,6 +466,7 @@ internal sealed class PatchService
                         }
 
                         hunkStartLine ??= Math.Max(1, resultLines.Count + 1);
+                        deletedLineMarkers.Add(Math.Max(1, resultLines.Count + 1));
 
                         sourceIndex++;
                         break;
@@ -508,6 +514,7 @@ internal sealed class PatchService
             FirstChangedLine = firstChangedLine,
             DeleteFile = deleteFile,
             ChangedRanges = changedRanges,
+            DeletedLineMarkers = deletedLineMarkers,
         };
     }
 
