@@ -49,17 +49,21 @@ internal sealed class BridgeEditHighlightTaggerProvider : IViewTaggerProvider
             return null;
         }
 
-        return new BridgeEditHighlightTagger(buffer) as ITagger<T>;
+        return textView.Properties.GetOrCreateSingletonProperty(
+            () => new BridgeEditHighlightTagger(textView, buffer)) as ITagger<T>;
     }
 
     private sealed class BridgeEditHighlightTagger : ITagger<TextMarkerTag>
     {
+        private readonly ITextView _textView;
         private readonly ITextBuffer _buffer;
 
-        public BridgeEditHighlightTagger(ITextBuffer buffer)
+        public BridgeEditHighlightTagger(ITextView textView, ITextBuffer buffer)
         {
+            _textView = textView;
             _buffer = buffer;
             BridgeEditHighlightService.Instance.HighlightsChanged += OnHighlightsChanged;
+            _textView.Closed += OnViewClosed;
         }
 
         public event EventHandler<SnapshotSpanEventArgs>? TagsChanged;
@@ -87,6 +91,12 @@ internal sealed class BridgeEditHighlightTaggerProvider : IViewTaggerProvider
             {
                 TagsChanged?.Invoke(this, e);
             }
+        }
+
+        private void OnViewClosed(object? sender, EventArgs e)
+        {
+            _textView.Closed -= OnViewClosed;
+            BridgeEditHighlightService.Instance.HighlightsChanged -= OnHighlightsChanged;
         }
     }
 }
