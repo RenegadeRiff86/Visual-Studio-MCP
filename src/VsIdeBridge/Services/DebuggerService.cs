@@ -16,19 +16,16 @@ internal sealed class DebuggerService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
+        var debugger = dte.Debugger;
         var data = new JObject
         {
-            ["mode"] = dte.Debugger.CurrentMode.ToString(),
-            ["currentProcess"] = dte.Debugger.CurrentProcess?.Name ?? string.Empty,
-            ["processes"] = new JArray(dte.Debugger.DebuggedProcesses.Cast<Process>().Select(process => process.Name)),
-            ["threads"] = new JArray(dte.Debugger.CurrentProgram?.Threads.Cast<Thread>().Select(thread => new JObject
-            {
-                ["id"] = thread.ID,
-                ["name"] = thread.Name ?? string.Empty,
-            }) ?? Enumerable.Empty<JObject>()),
+            ["mode"] = debugger.CurrentMode.ToString(),
+            ["currentProcess"] = debugger.CurrentProcess?.Name ?? string.Empty,
+            ["processes"] = GetDebuggedProcessNames(debugger),
+            ["threads"] = GetThreadSummaries(debugger.CurrentProgram),
         };
 
-        if (dte.Debugger.CurrentMode == dbgDebugMode.dbgBreakMode && dte.Debugger.CurrentStackFrame is StackFrame frame)
+        if (debugger.CurrentMode == dbgDebugMode.dbgBreakMode && debugger.CurrentStackFrame is StackFrame frame)
         {
             data["currentStackFrame"] = new JObject
             {
@@ -105,10 +102,47 @@ internal sealed class DebuggerService
 
     private static void EnsureBreakMode(DTE2 dte)
     {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
         if (dte.Debugger.CurrentMode != dbgDebugMode.dbgBreakMode)
         {
             throw new CommandErrorException("not_in_break_mode", "Debugger is not currently in break mode.");
         }
+    }
+
+    private static JArray GetDebuggedProcessNames(Debugger debugger)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        var items = new JArray();
+        foreach (Process process in debugger.DebuggedProcesses)
+        {
+            items.Add(process.Name ?? string.Empty);
+        }
+
+        return items;
+    }
+
+    private static JArray GetThreadSummaries(Program? program)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        var items = new JArray();
+        if (program is null)
+        {
+            return items;
+        }
+
+        foreach (Thread thread in program.Threads)
+        {
+            items.Add(new JObject
+            {
+                ["id"] = thread.ID,
+                ["name"] = thread.Name ?? string.Empty,
+            });
+        }
+
+        return items;
     }
 
     private static bool TryGetActiveSourceLocation(DTE2 dte, out string filePath, out int lineNumber, out int columnNumber)

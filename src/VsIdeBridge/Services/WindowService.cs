@@ -71,22 +71,24 @@ internal sealed class WindowService
 
     private static bool MatchesWindow(JObject window, string? query)
     {
-        if (string.IsNullOrWhiteSpace(query))
+        var text = query?.Trim();
+        if (string.IsNullOrWhiteSpace(text))
         {
             return true;
         }
 
-        var text = query.Trim();
-        return Contains(window["caption"], text) ||
-               Contains(window["kind"], text) ||
-               Contains(window["objectKind"], text) ||
-               Contains(window["documentPath"], text);
+        var queryText = text!;
+        return Contains(window["caption"], queryText) ||
+               Contains(window["kind"], queryText) ||
+               Contains(window["objectKind"], queryText) ||
+               Contains(window["documentPath"], queryText);
     }
 
     private static JObject CreateWindowInfo(Window window)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
+        var documentPath = window.Document?.FullName;
         return new JObject
         {
             ["caption"] = window.Caption ?? string.Empty,
@@ -94,9 +96,9 @@ internal sealed class WindowService
             ["objectKind"] = window.ObjectKind ?? string.Empty,
             ["type"] = window.Type.ToString(),
             ["visible"] = window.Visible,
-            ["documentPath"] = string.IsNullOrWhiteSpace(window.Document?.FullName)
+            ["documentPath"] = string.IsNullOrWhiteSpace(documentPath)
                 ? string.Empty
-                : PathNormalization.NormalizeFilePath(window.Document.FullName),
+                : PathNormalization.NormalizeFilePath(documentPath),
         };
     }
 
@@ -133,10 +135,7 @@ internal sealed class WindowService
             return null;
         }
 
-        var partial = windows.Where(window => Contains(window.Caption, trimmed) ||
-                                              Contains(window.Kind, trimmed) ||
-                                              Contains(window.ObjectKind, trimmed) ||
-                                              Contains(window.Document?.FullName, trimmed))
+        var partial = windows.Where(window => MatchesWindowQuery(window, trimmed))
             .ToArray();
 
         if (partial.Length == 1)
@@ -152,7 +151,7 @@ internal sealed class WindowService
                 new
                 {
                     query,
-                    matches = partial.Select(window => window.Caption).ToArray(),
+                    matches = partial.Select(GetWindowCaption).ToArray(),
                 });
         }
 
@@ -163,20 +162,49 @@ internal sealed class WindowService
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        return string.Equals(window.Caption, query, StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(window.ObjectKind, query, StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(window.Kind, query, StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(window.Document?.FullName, query, StringComparison.OrdinalIgnoreCase);
+        var caption = window.Caption;
+        var objectKind = window.ObjectKind;
+        var kind = window.Kind;
+        var documentPath = window.Document?.FullName;
+        return string.Equals(caption, query, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(objectKind, query, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(kind, query, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(documentPath, query, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool MatchesWindowQuery(Window window, string query)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        var caption = window.Caption;
+        var kind = window.Kind;
+        var objectKind = window.ObjectKind;
+        var documentPath = window.Document?.FullName;
+        return Contains(caption, query) ||
+               Contains(kind, query) ||
+               Contains(objectKind, query) ||
+               Contains(documentPath, query);
     }
 
     private static bool Contains(string? value, string query)
     {
-        return !string.IsNullOrWhiteSpace(value) &&
-               value.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
+        var candidate = value;
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return false;
+        }
+
+        return candidate!.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private static bool Contains(JToken? token, string query)
     {
         return token is not null && Contains(token.ToString(), query);
+    }
+
+    private static string GetWindowCaption(Window window)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        return window.Caption ?? string.Empty;
     }
 }

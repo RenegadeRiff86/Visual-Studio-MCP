@@ -273,7 +273,7 @@ internal sealed class DocumentService
         }
         else if (!string.IsNullOrWhiteSpace(query))
         {
-            resolvedQuery = query;
+            resolvedQuery = query!;
         }
         else
         {
@@ -416,7 +416,7 @@ internal sealed class DocumentService
         {
             var goToDefnGuid = new Guid("{5efc7975-14bc-11cf-9b2b-00aa00573819}");
             const uint goToDefnId = 935;
-            object arg = null;
+            object? arg = null;
             var shell = (Microsoft.VisualStudio.Shell.Interop.IVsUIShell)
                 Microsoft.VisualStudio.Shell.Package.GetGlobalService(
                     typeof(Microsoft.VisualStudio.Shell.Interop.SVsUIShell));
@@ -762,17 +762,18 @@ internal sealed class DocumentService
 
     private static bool MatchesOutlineKind(string normalizedKind, string? kindFilter)
     {
-        if (string.IsNullOrWhiteSpace(kindFilter) ||
-            string.Equals(kindFilter, "all", StringComparison.OrdinalIgnoreCase))
+        var filter = kindFilter?.Trim();
+        if (string.IsNullOrWhiteSpace(filter) ||
+            string.Equals(filter, "all", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
-        return kindFilter.ToLowerInvariant() switch
+        return filter!.ToLowerInvariant() switch
         {
             "type" => normalizedKind is "class" or "struct" or "enum" or "interface",
             "member" => normalizedKind is "member" or "function",
-            _ => normalizedKind.IndexOf(kindFilter, StringComparison.OrdinalIgnoreCase) >= 0,
+            _ => normalizedKind.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0,
         };
     }
 
@@ -853,7 +854,7 @@ internal sealed class DocumentService
         ThreadHelper.ThrowIfNotOnUIThread();
         return dte.Documents
             .Cast<Document>()
-            .Where(document => !string.IsNullOrWhiteSpace(TryGetDocumentFullName(document)))
+            .Where(HasDocumentPath)
             .ToArray();
     }
 
@@ -881,15 +882,12 @@ internal sealed class DocumentService
             return (new List<Document> { dte.ActiveDocument }, "active");
         }
 
-        var rawQuery = query.Trim();
+        var rawQuery = query!.Trim();
         var queryLooksLikePath = rawQuery.IndexOfAny(new[] { '\\', '/', ':' }) >= 0;
         if (queryLooksLikePath)
         {
             var normalizedQueryPath = PathNormalization.NormalizeFilePath(rawQuery);
-            var exactPath = documents.Where(document => string.Equals(
-                    PathNormalization.NormalizeFilePath(document.FullName),
-                    normalizedQueryPath,
-                    StringComparison.OrdinalIgnoreCase))
+            var exactPath = documents.Where(document => MatchesDocumentExactPath(document, normalizedQueryPath))
                 .ToList();
             if (exactPath.Count > 0)
             {
@@ -897,26 +895,21 @@ internal sealed class DocumentService
             }
         }
 
-        var exactName = documents.Where(document =>
-                string.Equals(document.Name, rawQuery, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(Path.GetFileName(document.FullName), rawQuery, StringComparison.OrdinalIgnoreCase))
+        var exactName = documents.Where(document => MatchesDocumentExactName(document, rawQuery))
             .ToList();
         if (exactName.Count > 0)
         {
             return FinalizeMatches(exactName, allowMultiple, "filename");
         }
 
-        var containsName = documents.Where(document =>
-                document.Name.IndexOf(rawQuery, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                Path.GetFileName(document.FullName).IndexOf(rawQuery, StringComparison.OrdinalIgnoreCase) >= 0)
+        var containsName = documents.Where(document => MatchesDocumentNameContains(document, rawQuery))
             .ToList();
         if (containsName.Count > 0)
         {
             return FinalizeMatches(containsName, allowMultiple, "filename-contains");
         }
 
-        var containsPath = documents.Where(document =>
-                document.FullName.IndexOf(rawQuery, StringComparison.OrdinalIgnoreCase) >= 0)
+        var containsPath = documents.Where(document => MatchesDocumentPathContains(document, rawQuery))
             .ToList();
         if (containsPath.Count > 0)
         {
@@ -932,7 +925,7 @@ internal sealed class DocumentService
 
         if (!allowMultiple && matches.Count > 1)
         {
-            var options = string.Join(", ", matches.Select(document => document.Name).Distinct(StringComparer.OrdinalIgnoreCase));
+            var options = string.Join(", ", GetDistinctDocumentNames(matches));
             throw new CommandErrorException("invalid_arguments", $"Document query is ambiguous. Matches: {options}");
         }
 
@@ -943,12 +936,7 @@ internal sealed class DocumentService
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var openDocument = dte.Documents
-            .Cast<Document>()
-            .FirstOrDefault(document => string.Equals(
-                PathNormalization.NormalizeFilePath(document.FullName),
-                resolvedPath,
-                StringComparison.OrdinalIgnoreCase));
+        var openDocument = TryFindOpenDocumentByPath(dte, resolvedPath);
 
         if (openDocument?.Object("TextDocument") is TextDocument textDocument)
         {
@@ -957,6 +945,86 @@ internal sealed class DocumentService
         }
 
         return File.ReadAllText(resolvedPath);
+    }
+
+    private static bool HasDocumentPath(Document document)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        return !string.IsNullOrWhiteSpace(TryGetDocumentFullName(document));
+    }
+
+    private static bool MatchesDocumentExactPath(Document document, string normalizedQueryPath)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        var fullName = TryGetDocumentFullName(document);
+        return !string.IsNullOrWhiteSpace(fullName) &&
+            string.Equals(fullName, normalizedQueryPath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool MatchesDocumentExactName(Document document, string rawQuery)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        var name = TryGetDocumentName(document);
+        var fullName = TryGetDocumentFullName(document);
+        var fileName = string.IsNullOrWhiteSpace(fullName) ? string.Empty : Path.GetFileName(fullName);
+        return string.Equals(name, rawQuery, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(fileName, rawQuery, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool MatchesDocumentNameContains(Document document, string rawQuery)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        var name = TryGetDocumentName(document);
+        var fullName = TryGetDocumentFullName(document);
+        var fileName = string.IsNullOrWhiteSpace(fullName) ? null : Path.GetFileName(fullName);
+        return ContainsOrdinalIgnoreCase(name, rawQuery) ||
+            ContainsOrdinalIgnoreCase(fileName, rawQuery);
+    }
+
+    private static bool MatchesDocumentPathContains(Document document, string rawQuery)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        return ContainsOrdinalIgnoreCase(TryGetDocumentFullName(document), rawQuery);
+    }
+
+    private static IReadOnlyList<string> GetDistinctDocumentNames(IEnumerable<Document> matches)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        return matches
+            .Select(document => TryGetDocumentName(document) ?? Path.GetFileName(TryGetDocumentFullName(document) ?? string.Empty))
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static Document? TryFindOpenDocumentByPath(DTE2 dte, string resolvedPath)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        foreach (Document document in dte.Documents)
+        {
+            if (MatchesDocumentExactPath(document, resolvedPath))
+            {
+                return document;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool ContainsOrdinalIgnoreCase(string? value, string query)
+    {
+        var candidate = value;
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return false;
+        }
+
+        return candidate!.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private static List<string> SplitLines(string text)

@@ -160,9 +160,7 @@ internal sealed class PatchService
         ThreadHelper.ThrowIfNotOnUIThread();
 
         var normalizedPath = PathNormalization.NormalizeFilePath(path);
-        var openDocument = dte.Documents.Cast<Document>().FirstOrDefault(document =>
-            !string.IsNullOrWhiteSpace(document.FullName) &&
-            PathNormalization.AreEquivalent(document.FullName, normalizedPath));
+        var openDocument = TryFindOpenDocumentByPath(dte, normalizedPath);
 
         if (openDocument is null)
         {
@@ -180,9 +178,7 @@ internal sealed class PatchService
         ThreadHelper.ThrowIfNotOnUIThread();
 
         var normalizedPath = PathNormalization.NormalizeFilePath(path);
-        var openDocument = dte.Documents.Cast<Document>().FirstOrDefault(document =>
-            !string.IsNullOrWhiteSpace(document.FullName) &&
-            PathNormalization.AreEquivalent(document.FullName, normalizedPath));
+        var openDocument = TryFindOpenDocumentByPath(dte, normalizedPath);
 
         if (openDocument is null)
         {
@@ -195,6 +191,27 @@ internal sealed class PatchService
         }
 
         openDocument.Close(vsSaveChanges.vsSaveChangesNo);
+    }
+
+    private static Document? TryFindOpenDocumentByPath(DTE2 dte, string normalizedPath)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        foreach (Document document in dte.Documents)
+        {
+            var fullName = document.FullName;
+            if (string.IsNullOrWhiteSpace(fullName))
+            {
+                continue;
+            }
+
+            if (PathNormalization.AreEquivalent(fullName, normalizedPath))
+            {
+                return document;
+            }
+        }
+
+        return null;
     }
 
     private static (string Path, bool IsNewFile) ResolveTargetPath(DTE2 dte, string baseDirectory, FilePatch patch)

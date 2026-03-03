@@ -5,7 +5,7 @@ namespace VsIdeBridge.Infrastructure;
 
 internal static class PathNormalization
 {
-    public static string NormalizeFilePath(string path)
+    public static string NormalizeFilePath(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -16,7 +16,7 @@ internal static class PathNormalization
             .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
     }
 
-    public static bool AreEquivalent(string left, string right)
+    public static bool AreEquivalent(string? left, string? right)
     {
         return string.Equals(
             NormalizeFilePath(left),

@@ -24,6 +24,8 @@ internal sealed class IdeStateService
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
         var solutionPath = dte.Solution?.IsOpen == true ? PathNormalization.NormalizeFilePath(dte.Solution.FullName) : string.Empty;
+        var activeDocument = dte.ActiveDocument;
+        var activeDocumentPath = activeDocument?.FullName;
         var data = new JObject
         {
             ["solutionPath"] = solutionPath,
@@ -32,15 +34,13 @@ internal sealed class IdeStateService
             ["debugMode"] = dte.Debugger.CurrentMode.ToString(),
             ["activeWindow"] = dte.ActiveWindow?.Caption ?? string.Empty,
             ["activeWindowKind"] = dte.ActiveWindow?.Kind ?? string.Empty,
-            ["activeDocument"] = string.IsNullOrWhiteSpace(dte.ActiveDocument?.FullName) ? string.Empty : PathNormalization.NormalizeFilePath(dte.ActiveDocument.FullName),
-            ["openDocuments"] = new JArray(dte.Documents.Cast<Document>()
-                .Where(document => !string.IsNullOrWhiteSpace(document.FullName))
-                .Select(document => PathNormalization.NormalizeFilePath(document.FullName))),
+            ["activeDocument"] = string.IsNullOrWhiteSpace(activeDocumentPath) ? string.Empty : PathNormalization.NormalizeFilePath(activeDocumentPath),
+            ["openDocuments"] = GetOpenDocumentPaths(dte),
             ["startupProjects"] = GetStartupProjects(dte),
             ["bridge"] = _bridgeInstanceService.CreateStateData(solutionPath),
         };
 
-        if (TryGetActiveTextSelection(dte.ActiveDocument, out var selection))
+        if (TryGetActiveTextSelection(activeDocument, out var selection))
         {
             data["caretLine"] = selection.ActivePoint.Line;
             data["caretColumn"] = selection.ActivePoint.DisplayColumn;
@@ -58,6 +58,25 @@ internal sealed class IdeStateService
         }
 
         return data;
+    }
+
+    private static JArray GetOpenDocumentPaths(DTE2 dte)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        var items = new JArray();
+        foreach (Document document in dte.Documents)
+        {
+            var fullName = document.FullName;
+            if (string.IsNullOrWhiteSpace(fullName))
+            {
+                continue;
+            }
+
+            items.Add(PathNormalization.NormalizeFilePath(fullName));
+        }
+
+        return items;
     }
 
     private static bool TryGetActiveTextSelection(Document? document, out TextSelection selection)

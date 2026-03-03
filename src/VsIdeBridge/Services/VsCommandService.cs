@@ -179,8 +179,15 @@ internal sealed class VsCommandService
 
         return dte.Commands
             .Cast<Command>()
-            .FirstOrDefault(command => string.Equals(command.Name, commandName, StringComparison.OrdinalIgnoreCase));
+            .FirstOrDefault(command => MatchesCommandName(command, commandName));
     }
+
+    private static bool MatchesCommandName(Command command, string commandName)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        return string.Equals(command.Name, commandName, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string[] ToStringArray(object bindings)
     {
         if (bindings is object[] items)

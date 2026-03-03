@@ -525,7 +525,7 @@ internal static class SearchNavigationCommands
             {
                 try
                 {
-                    ranges = JArray.Parse(rangesJson);
+                    ranges = JArray.Parse(rangesJson!);
                 }
                 catch (Exception ex)
                 {

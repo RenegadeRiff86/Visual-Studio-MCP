@@ -66,7 +66,7 @@ internal sealed class BreakpointService
         var normalizedPath = PathNormalization.NormalizeFilePath(filePath);
         var matches = dte.Debugger.Breakpoints
             .Cast<Breakpoint>()
-            .Where(breakpoint => PathNormalization.AreEquivalent(breakpoint.File, normalizedPath) && breakpoint.FileLine == line)
+            .Where(breakpoint => MatchesBreakpointLocation(breakpoint, normalizedPath, line))
             .ToList();
 
         foreach (var breakpoint in matches)
@@ -171,23 +171,44 @@ internal sealed class BreakpointService
         ThreadHelper.ThrowIfNotOnUIThread();
         return dte.Debugger.Breakpoints
             .Cast<Breakpoint>()
-            .FirstOrDefault(breakpoint => PathNormalization.AreEquivalent(breakpoint.File, normalizedPath) && breakpoint.FileLine == line);
+            .FirstOrDefault(breakpoint => MatchesBreakpointLocation(breakpoint, normalizedPath, line));
+    }
+
+    private static bool MatchesBreakpointLocation(Breakpoint breakpoint, string normalizedPath, int line)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        var file = breakpoint.File;
+        var fileLine = breakpoint.FileLine;
+        return PathNormalization.AreEquivalent(file, normalizedPath) && fileLine == line;
     }
 
     private static JObject SerializeBreakpoint(Breakpoint breakpoint)
     {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        var file = breakpoint.File ?? string.Empty;
+        var line = breakpoint.FileLine;
+        var column = breakpoint.FileColumn;
+        var function = breakpoint.FunctionName ?? string.Empty;
+        var enabled = breakpoint.Enabled;
+        var condition = breakpoint.Condition ?? string.Empty;
+        var conditionType = breakpoint.ConditionType.ToString();
+        var hitCountTarget = breakpoint.HitCountTarget;
+        var hitCountType = breakpoint.HitCountType.ToString();
+        var name = breakpoint.Name ?? string.Empty;
         return new JObject
         {
-            ["file"] = breakpoint.File ?? string.Empty,
-            ["line"] = breakpoint.FileLine,
-            ["column"] = breakpoint.FileColumn,
-            ["function"] = breakpoint.FunctionName ?? string.Empty,
-            ["enabled"] = breakpoint.Enabled,
-            ["condition"] = breakpoint.Condition ?? string.Empty,
-            ["conditionType"] = breakpoint.ConditionType.ToString(),
-            ["hitCountTarget"] = breakpoint.HitCountTarget,
-            ["hitCountType"] = breakpoint.HitCountType.ToString(),
-            ["name"] = breakpoint.Name ?? string.Empty,
+            ["file"] = file,
+            ["line"] = line,
+            ["column"] = column,
+            ["function"] = function,
+            ["enabled"] = enabled,
+            ["condition"] = condition,
+            ["conditionType"] = conditionType,
+            ["hitCountTarget"] = hitCountTarget,
+            ["hitCountType"] = hitCountType,
+            ["name"] = name,
         };
     }
 

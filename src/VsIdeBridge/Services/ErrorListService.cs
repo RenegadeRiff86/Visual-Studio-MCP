@@ -242,7 +242,13 @@ internal sealed class ErrorListService
 
         return dte.Windows
             .Cast<Window>()
-            .FirstOrDefault(candidate => string.Equals(candidate.Caption, "Error List", StringComparison.OrdinalIgnoreCase));
+            .FirstOrDefault(IsErrorListWindow);
+    }
+
+    private static bool IsErrorListWindow(Window candidate)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        return string.Equals(candidate.Caption, "Error List", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string MapSeverity(vsBuildErrorLevel level)

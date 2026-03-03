@@ -41,7 +41,7 @@ internal sealed class PipeServerService : IDisposable
     public void Start()
     {
         WriteDiscoveryFile(string.Empty);
-        _package.JoinableTaskFactory.RunAsync(async delegate
+        _ = _package.JoinableTaskFactory.RunAsync(async delegate
         {
             try
             {
