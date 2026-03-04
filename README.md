@@ -550,6 +550,25 @@ Exposed MCP prompts:
 
 The MCP layer is intentionally thin: it forwards to the bridge command surface and keeps edit approval/safety enforcement inside the existing Visual Studio bridge flow.
 
+Implementation note: the server advertises MCP `tools` capability only. `resources/*` and `prompts/*` methods are still implemented, but not advertised, to avoid eager startup probes from MCP clients that can trigger Visual Studio automation calls before the IDE is fully ready.
+
+Example MCP client registration (Claude Code and Codex CLI use the same stdio command):
+
+```json
+{
+  "mcpServers": {
+    "vs-ide-bridge": {
+      "command": "C:\\path\\to\\vs-ide-bridge.exe",
+      "args": [
+        "mcp-server",
+        "--instance",
+        "<instanceId>"
+      ]
+    }
+  }
+}
+```
+
 ### Pipe protocol
 
 Each request is one JSON object terminated by `\n`:

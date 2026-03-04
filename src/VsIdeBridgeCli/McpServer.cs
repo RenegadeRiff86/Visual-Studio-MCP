@@ -87,8 +87,6 @@ internal static partial class CliApp
             ["capabilities"] = new JsonObject
             {
                 ["tools"] = new JsonObject(),
-                ["resources"] = new JsonObject(),
-                ["prompts"] = new JsonObject(),
             },
             ["serverInfo"] = new JsonObject
             {
@@ -154,7 +152,7 @@ internal static partial class CliApp
                 _ => throw new McpRequestException(id, -32602, $"Unknown MCP tool: {toolName}"),
             };
 
-            var response = await SendBridgeAsync(options, command, commandArgs).ConfigureAwait(false);
+            var response = await SendBridgeAsync(id, options, command, commandArgs).ConfigureAwait(false);
             return new JsonObject
             {
                 ["content"] = new JsonArray
@@ -190,10 +188,10 @@ internal static partial class CliApp
             var uri = p?["uri"]?.GetValue<string>() ?? throw new McpRequestException(id, -32602, "resources/read missing uri.");
             JsonObject data = uri switch
             {
-                "bridge://current-solution" => await SendBridgeAsync(options, "state", string.Empty).ConfigureAwait(false),
-                "bridge://active-document" => await SendBridgeAsync(options, "state", string.Empty).ConfigureAwait(false),
-                "bridge://open-tabs" => await SendBridgeAsync(options, "list-tabs", string.Empty).ConfigureAwait(false),
-                "bridge://error-list-snapshot" => await SendBridgeAsync(options, "errors", "--quick --wait-for-intellisense false").ConfigureAwait(false),
+                "bridge://current-solution" => await SendBridgeAsync(id, options, "state", string.Empty).ConfigureAwait(false),
+                "bridge://active-document" => await SendBridgeAsync(id, options, "state", string.Empty).ConfigureAwait(false),
+                "bridge://open-tabs" => await SendBridgeAsync(id, options, "list-tabs", string.Empty).ConfigureAwait(false),
+                "bridge://error-list-snapshot" => await SendBridgeAsync(id, options, "errors", "--quick --wait-for-intellisense false").ConfigureAwait(false),
                 _ => throw new McpRequestException(id, -32602, $"Unknown resource uri: {uri}"),
             };
 
@@ -250,19 +248,34 @@ internal static partial class CliApp
             };
         }
 
-        private static async Task<JsonObject> SendBridgeAsync(CliOptions options, string command, string args)
+        private static async Task<JsonObject> SendBridgeAsync(JsonNode? id, CliOptions options, string command, string args)
         {
-            var selector = BridgeInstanceSelector.FromOptions(options);
-            var discovery = await PipeDiscovery.SelectAsync(selector, options.GetFlag("verbose")).ConfigureAwait(false);
-            await using var client = new PipeClient(discovery.PipeName, options.GetInt32("timeout-ms", 10_000));
-            var request = new JsonObject
+            try
             {
-                ["id"] = Guid.NewGuid().ToString("N")[..8],
-                ["command"] = command,
-                ["args"] = args,
-            };
+                var selector = BridgeInstanceSelector.FromOptions(options);
+                var discovery = await PipeDiscovery.SelectAsync(selector, options.GetFlag("verbose")).ConfigureAwait(false);
+                await using var client = new PipeClient(discovery.PipeName, options.GetInt32("timeout-ms", 10_000));
+                var request = new JsonObject
+                {
+                    ["id"] = Guid.NewGuid().ToString("N")[..8],
+                    ["command"] = command,
+                    ["args"] = args,
+                };
 
-            return await client.SendAsync(request).ConfigureAwait(false);
+                return await client.SendAsync(request).ConfigureAwait(false);
+            }
+            catch (CliException ex)
+            {
+                throw new McpRequestException(id, -32001, ex.Message);
+            }
+            catch (TimeoutException ex)
+            {
+                throw new McpRequestException(id, -32002, $"Timed out waiting for Visual Studio bridge response: {ex.Message}");
+            }
+            catch (IOException ex)
+            {
+                throw new McpRequestException(id, -32003, $"Failed communicating with Visual Studio bridge pipe: {ex.Message}");
+            }
         }
 
         private static string BuildArgs(params (string Name, string? Value)[] items)
