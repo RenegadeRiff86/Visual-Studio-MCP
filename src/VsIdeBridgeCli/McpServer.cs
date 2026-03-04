@@ -10,15 +10,13 @@ internal static partial class CliApp
 
     private static async Task<int> RunMcpServerAsync(CliOptions options)
     {
-        var selector = BridgeInstanceSelector.FromOptions(options);
-        var discovery = await PipeDiscovery.SelectAsync(selector, options.GetFlag("verbose")).ConfigureAwait(false);
-        await McpServer.RunAsync(discovery, options).ConfigureAwait(false);
+        await McpServer.RunAsync(options).ConfigureAwait(false);
         return 0;
     }
 
     private static class McpServer
     {
-        public static async Task RunAsync(PipeDiscovery discovery, CliOptions options)
+        public static async Task RunAsync(CliOptions options)
         {
             var input = Console.OpenStandardInput();
             var output = Console.OpenStandardOutput();
@@ -34,7 +32,7 @@ internal static partial class CliApp
                         return;
                     }
 
-                    response = await HandleRequestAsync(request, discovery, options).ConfigureAwait(false);
+                    response = await HandleRequestAsync(request, options).ConfigureAwait(false);
                 }
                 catch (McpRequestException ex)
                 {
@@ -56,7 +54,7 @@ internal static partial class CliApp
             }
         }
 
-        private static async Task<JsonObject?> HandleRequestAsync(JsonObject request, PipeDiscovery discovery, CliOptions options)
+        private static async Task<JsonObject?> HandleRequestAsync(JsonObject request, CliOptions options)
         {
             var id = request["id"]?.DeepClone();
             var method = request["method"]?.GetValue<string>() ?? string.Empty;
@@ -66,9 +64,9 @@ internal static partial class CliApp
             {
                 "initialize" => InitializeResult(),
                 "tools/list" => new JsonObject { ["tools"] = ListTools() },
-                "tools/call" => await CallToolAsync(id, @params, discovery, options).ConfigureAwait(false),
+                "tools/call" => await CallToolAsync(id, @params, options).ConfigureAwait(false),
                 "resources/list" => new JsonObject { ["resources"] = ListResources() },
-                "resources/read" => await ReadResourceAsync(id, @params, discovery, options).ConfigureAwait(false),
+                "resources/read" => await ReadResourceAsync(id, @params, options).ConfigureAwait(false),
                 "prompts/list" => new JsonObject { ["prompts"] = ListPrompts() },
                 "prompts/get" => GetPrompt(id, @params),
                 "notifications/initialized" => null!,
@@ -139,7 +137,7 @@ internal static partial class CliApp
             ["inputSchema"] = inputSchema,
         };
 
-        private static async Task<JsonNode> CallToolAsync(JsonNode? id, JsonObject? p, PipeDiscovery discovery, CliOptions options)
+        private static async Task<JsonNode> CallToolAsync(JsonNode? id, JsonObject? p, CliOptions options)
         {
             var toolName = p?["name"]?.GetValue<string>() ?? throw new McpRequestException(id, -32602, "tools/call missing name.");
             var args = p?["arguments"] as JsonObject;
@@ -156,7 +154,7 @@ internal static partial class CliApp
                 _ => throw new McpRequestException(id, -32602, $"Unknown MCP tool: {toolName}"),
             };
 
-            var response = await SendBridgeAsync(discovery, options, command, commandArgs).ConfigureAwait(false);
+            var response = await SendBridgeAsync(options, command, commandArgs).ConfigureAwait(false);
             return new JsonObject
             {
                 ["content"] = new JsonArray
@@ -187,15 +185,15 @@ internal static partial class CliApp
             ["mimeType"] = "application/json",
         };
 
-        private static async Task<JsonNode> ReadResourceAsync(JsonNode? id, JsonObject? p, PipeDiscovery discovery, CliOptions options)
+        private static async Task<JsonNode> ReadResourceAsync(JsonNode? id, JsonObject? p, CliOptions options)
         {
             var uri = p?["uri"]?.GetValue<string>() ?? throw new McpRequestException(id, -32602, "resources/read missing uri.");
             JsonObject data = uri switch
             {
-                "bridge://current-solution" => await SendBridgeAsync(discovery, options, "state", string.Empty).ConfigureAwait(false),
-                "bridge://active-document" => await SendBridgeAsync(discovery, options, "state", string.Empty).ConfigureAwait(false),
-                "bridge://open-tabs" => await SendBridgeAsync(discovery, options, "list-tabs", string.Empty).ConfigureAwait(false),
-                "bridge://error-list-snapshot" => await SendBridgeAsync(discovery, options, "errors", "--quick --wait-for-intellisense false").ConfigureAwait(false),
+                "bridge://current-solution" => await SendBridgeAsync(options, "state", string.Empty).ConfigureAwait(false),
+                "bridge://active-document" => await SendBridgeAsync(options, "state", string.Empty).ConfigureAwait(false),
+                "bridge://open-tabs" => await SendBridgeAsync(options, "list-tabs", string.Empty).ConfigureAwait(false),
+                "bridge://error-list-snapshot" => await SendBridgeAsync(options, "errors", "--quick --wait-for-intellisense false").ConfigureAwait(false),
                 _ => throw new McpRequestException(id, -32602, $"Unknown resource uri: {uri}"),
             };
 
@@ -252,8 +250,10 @@ internal static partial class CliApp
             };
         }
 
-        private static async Task<JsonObject> SendBridgeAsync(PipeDiscovery discovery, CliOptions options, string command, string args)
+        private static async Task<JsonObject> SendBridgeAsync(CliOptions options, string command, string args)
         {
+            var selector = BridgeInstanceSelector.FromOptions(options);
+            var discovery = await PipeDiscovery.SelectAsync(selector, options.GetFlag("verbose")).ConfigureAwait(false);
             await using var client = new PipeClient(discovery.PipeName, options.GetInt32("timeout-ms", 10_000));
             var request = new JsonObject
             {
