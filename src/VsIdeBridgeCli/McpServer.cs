@@ -18,45 +18,218 @@ internal static partial class CliApp
 
     private static class McpServer
     {
+        private static readonly string McpLog = @"C:\Temp\mcp-server.log";
+        private static readonly byte[] RawJsonTerminator = new byte[] { (byte)'\n' };
+
+        private enum McpWireFormat
+        {
+            HeaderFramed,
+            RawJson,
+        }
+
+        private sealed class McpIncomingMessage
+        {
+            public JsonObject Request { get; set; } = null!;
+
+            public McpWireFormat WireFormat { get; set; }
+        }
+
+        private sealed class BridgeBinding
+        {
+            private readonly CliOptions _options;
+            private readonly bool _verbose;
+            private BridgeInstanceSelector _selector;
+            private PipeDiscovery? _cachedDiscovery;
+
+            public BridgeBinding(CliOptions options)
+            {
+                _options = options;
+                _selector = BridgeInstanceSelector.FromOptions(options);
+                _verbose = options.GetFlag("verbose");
+            }
+
+            public async Task<JsonObject> SendAsync(JsonNode? id, string command, string args)
+            {
+                try
+                {
+                    return await SendCoreAsync(command, args).ConfigureAwait(false);
+                }
+                catch (CliException ex)
+                {
+                    throw new McpRequestException(id, -32001, ex.Message);
+                }
+                catch (TimeoutException ex)
+                {
+                    throw new McpRequestException(id, -32002, $"Timed out waiting for Visual Studio bridge response: {ex.Message}");
+                }
+                catch (IOException ex) when (_cachedDiscovery is not null)
+                {
+                    McpTrace($"cached pipe '{_cachedDiscovery.PipeName}' failed, refreshing binding: {ex.Message}");
+                    _cachedDiscovery = null;
+
+                    try
+                    {
+                        return await SendCoreAsync(command, args).ConfigureAwait(false);
+                    }
+                    catch (CliException retryEx)
+                    {
+                        throw new McpRequestException(id, -32001, retryEx.Message);
+                    }
+                    catch (TimeoutException retryEx)
+                    {
+                        throw new McpRequestException(id, -32002, $"Timed out waiting for Visual Studio bridge response: {retryEx.Message}");
+                    }
+                    catch (IOException retryEx)
+                    {
+                        throw new McpRequestException(id, -32003, $"Failed communicating with Visual Studio bridge pipe: {retryEx.Message}");
+                    }
+                }
+                catch (IOException ex)
+                {
+                    throw new McpRequestException(id, -32003, $"Failed communicating with Visual Studio bridge pipe: {ex.Message}");
+                }
+            }
+
+            public async Task<JsonObject> BindAsync(JsonNode? id, JsonObject? args)
+            {
+                _selector = CreateSelector(args);
+                _cachedDiscovery = null;
+
+                try
+                {
+                    var discovery = await GetDiscoveryAsync().ConfigureAwait(false);
+                    return new JsonObject
+                    {
+                        ["success"] = true,
+                        ["binding"] = DiscoveryToJson(discovery),
+                        ["selector"] = SelectorToJson(_selector),
+                    };
+                }
+                catch (CliException ex)
+                {
+                    throw new McpRequestException(id, -32001, ex.Message);
+                }
+            }
+
+            public PipeDiscovery? CurrentDiscovery => _cachedDiscovery;
+
+            private async Task<JsonObject> SendCoreAsync(string command, string args)
+            {
+                var discovery = await GetDiscoveryAsync().ConfigureAwait(false);
+                await using var client = new PipeClient(discovery.PipeName, _options.GetInt32("timeout-ms", 10_000));
+                var request = new JsonObject
+                {
+                    ["id"] = Guid.NewGuid().ToString("N")[..8],
+                    ["command"] = command,
+                    ["args"] = args,
+                };
+
+                return await client.SendAsync(request).ConfigureAwait(false);
+            }
+
+            private async Task<PipeDiscovery> GetDiscoveryAsync()
+            {
+                if (_cachedDiscovery is not null)
+                {
+                    return _cachedDiscovery;
+                }
+
+                var discovery = await PipeDiscovery.SelectAsync(_selector, _verbose).ConfigureAwait(false);
+                _cachedDiscovery = discovery;
+                McpTrace($"bound instance={discovery.InstanceId} pipe={discovery.PipeName} solution={discovery.SolutionPath}");
+                return discovery;
+            }
+
+            private static BridgeInstanceSelector CreateSelector(JsonObject? args)
+            {
+                return new BridgeInstanceSelector
+                {
+                    InstanceId = GetString(args, "instance_id") ?? GetString(args, "instance"),
+                    ProcessId = GetInt32(args, "pid"),
+                    PipeName = GetString(args, "pipe_name") ?? GetString(args, "pipe"),
+                    SolutionHint = GetString(args, "solution_hint") ?? GetString(args, "sln"),
+                };
+            }
+
+            private static string? GetString(JsonObject? args, string name)
+            {
+                var value = args?[name]?.GetValue<string>();
+                return string.IsNullOrWhiteSpace(value) ? null : value;
+            }
+
+            private static int? GetInt32(JsonObject? args, string name)
+            {
+                return args?[name]?.GetValue<int?>();
+            }
+        }
+
+        private static void McpTrace(string msg)
+        {
+            try { File.AppendAllText(McpLog, $"{DateTime.Now:O} {msg}\n"); } catch { }
+        }
+
         public static async Task RunAsync(CliOptions options)
         {
+            try
+            {
+                File.WriteAllText(McpLog, $"{DateTime.Now:O} mcp-server started\n");
+            }
+            catch
+            {
+            }
+
             var input = Console.OpenStandardInput();
             var output = Console.OpenStandardOutput();
+            var bridgeBinding = new BridgeBinding(options);
+            var wireFormat = McpWireFormat.HeaderFramed;
+            McpTrace("stdin/stdout opened");
             while (true)
             {
                 JsonObject? response;
 
                 try
                 {
-                    var request = await ReadMessageAsync(input).ConfigureAwait(false);
-                    if (request is null)
+                    McpTrace("waiting for next message...");
+                    var incoming = await ReadMessageAsync(input).ConfigureAwait(false);
+                    if (incoming is null)
                     {
+                        McpTrace("null request (EOF) — exiting");
                         return;
                     }
 
-                    response = await HandleRequestAsync(request, options).ConfigureAwait(false);
+                    wireFormat = incoming.WireFormat;
+                    var request = incoming.Request;
+                    var method = request["method"]?.GetValue<string>() ?? "(null)";
+                    McpTrace($"got request method={method}");
+                    response = await HandleRequestAsync(request, bridgeBinding).ConfigureAwait(false);
+                    McpTrace($"handled method={method} response={(response is null ? "null" : "ok")}");
                 }
                 catch (McpRequestException ex)
                 {
+                    McpTrace($"McpRequestException: {ex.Message}");
                     response = CreateErrorResponse(ex.Id, ex.Code, ex.Message);
                 }
                 catch (JsonException ex)
                 {
+                    McpTrace($"JsonException: {ex.Message}");
                     response = CreateErrorResponse(null, -32700, $"Parse error: {ex.Message}");
                 }
                 catch (Exception ex)
                 {
+                    McpTrace($"Exception: {ex}");
                     response = CreateErrorResponse(null, -32603, $"Internal error: {ex.Message}");
                 }
 
                 if (response is not null)
                 {
-                    await WriteMessageAsync(output, response).ConfigureAwait(false);
+                    McpTrace("writing response...");
+                    await WriteMessageAsync(output, response, wireFormat).ConfigureAwait(false);
+                    McpTrace("response written");
                 }
             }
         }
 
-        private static async Task<JsonObject?> HandleRequestAsync(JsonObject request, CliOptions options)
+        private static async Task<JsonObject?> HandleRequestAsync(JsonObject request, BridgeBinding bridgeBinding)
         {
             var id = request["id"]?.DeepClone();
             var method = request["method"]?.GetValue<string>() ?? string.Empty;
@@ -66,11 +239,12 @@ internal static partial class CliApp
             {
                 "initialize" => InitializeResult(),
                 "tools/list" => new JsonObject { ["tools"] = ListTools() },
-                "tools/call" => await CallToolAsync(id, @params, options).ConfigureAwait(false),
+                "tools/call" => await CallToolAsync(id, @params, bridgeBinding).ConfigureAwait(false),
                 "resources/list" => new JsonObject { ["resources"] = ListResources() },
-                "resources/read" => await ReadResourceAsync(id, @params, options).ConfigureAwait(false),
+                "resources/read" => await ReadResourceAsync(id, @params, bridgeBinding).ConfigureAwait(false),
                 "prompts/list" => new JsonObject { ["prompts"] = ListPrompts() },
                 "prompts/get" => GetPrompt(id, @params),
+                "ping" => new JsonObject(),
                 "notifications/initialized" => null!,
                 _ => throw new McpRequestException(id, -32601, $"Unsupported MCP method: {method}"),
             };
@@ -89,6 +263,8 @@ internal static partial class CliApp
             ["capabilities"] = new JsonObject
             {
                 ["tools"] = new JsonObject(),
+                ["resources"] = new JsonObject { ["subscribe"] = false },
+                ["prompts"] = new JsonObject(),
             },
             ["serverInfo"] = new JsonObject
             {
@@ -100,16 +276,35 @@ internal static partial class CliApp
         private static JsonArray ListTools() => new()
         {
             Tool("state", "Capture current Visual Studio bridge state.", EmptySchema()),
+            Tool("list_instances", "List live VS IDE Bridge instances visible to this MCP server.", EmptySchema()),
+            Tool(
+                "bind_instance",
+                "Bind this MCP session to one Visual Studio bridge instance.",
+                ObjectSchema(
+                    ("instance_id", StringSchema("Optional exact bridge instance id."), false),
+                    ("pid", IntegerSchema("Optional Visual Studio process id."), false),
+                    ("pipe_name", StringSchema("Optional exact bridge pipe name."), false),
+                    ("solution_hint", StringSchema("Optional solution path or name substring."), false))),
+            Tool(
+                "bind_solution",
+                "Bind this MCP session to the Visual Studio bridge instance whose solution matches a name or path hint.",
+                ObjectSchema(
+                    ("solution", StringSchema("Solution name or path substring to match."), true))),
             Tool("errors", "Get current errors.", EmptySchema()),
             Tool("warnings", "Get current warnings.", EmptySchema()),
             Tool("list_tabs", "List open editor tabs.", EmptySchema()),
             Tool(
                 "open_file",
-                "Open a file path and optional line/column.",
+                "Open an absolute path, solution-relative path, or solution item name and optional line/column.",
                 ObjectSchema(
-                    ("file", StringSchema("Absolute or solution-relative file path."), true),
+                    ("file", StringSchema("Absolute path, solution-relative path, or solution item name."), true),
                     ("line", IntegerSchema("Optional 1-based line number."), false),
                     ("column", IntegerSchema("Optional 1-based column number."), false))),
+            Tool(
+                "find_files",
+                "Search solution explorer files by name or path fragment.",
+                ObjectSchema(
+                    ("query", StringSchema("File name or path fragment."), true))),
             Tool(
                 "search_symbols",
                 "Search solution symbols by query.",
@@ -203,6 +398,49 @@ internal static partial class CliApp
                 "github_issue_close",
                 "Close a GitHub issue by number and optionally add a comment.",
                 ObjectSchema(("issue_number", IntegerSchema("Issue number to close."), true), ("repo", StringSchema("Optional owner/repo. Defaults to git origin repo."), false), ("comment", StringSchema("Optional closing comment."), false))),
+            Tool(
+                "find_text",
+                "Full-text search across the solution or a path subtree. Returns file paths, line numbers and preview text.",
+                ObjectSchema(
+                    ("query", StringSchema("Search text or regex pattern."), true),
+                    ("path", StringSchema("Optional path or directory filter (solution-relative or absolute)."), false),
+                    ("scope", StringSchema("Scope: solution (default), project, or document."), false),
+                    ("match_case", BooleanSchema("Case-sensitive match (default false)."), false),
+                    ("whole_word", BooleanSchema("Match whole word only (default false)."), false))),
+            Tool(
+                "read_file",
+                "Read lines from a file open in the solution. Use start_line/end_line for a range, or line with context_before/context_after centered on an anchor.",
+                ObjectSchema(
+                    ("file", StringSchema("Absolute or solution-relative file path."), true),
+                    ("start_line", IntegerSchema("First 1-based line to read. Use with end_line for a range."), false),
+                    ("end_line", IntegerSchema("Last 1-based line to read (inclusive). Use with start_line."), false),
+                    ("line", IntegerSchema("Anchor 1-based line. Use with context_before/context_after."), false),
+                    ("context_before", IntegerSchema("Lines before anchor (default 10)."), false),
+                    ("context_after", IntegerSchema("Lines after anchor (default 30)."), false))),
+            Tool(
+                "find_references",
+                "Find all references to the symbol at file/line/column using VS IntelliSense.",
+                ObjectSchema(
+                    ("file", StringSchema("Absolute or solution-relative file path."), true),
+                    ("line", IntegerSchema("1-based line number."), true),
+                    ("column", IntegerSchema("1-based column number."), true))),
+            Tool(
+                "peek_definition",
+                "Return the definition source and surrounding context of the symbol at file/line/column.",
+                ObjectSchema(
+                    ("file", StringSchema("Absolute or solution-relative file path."), true),
+                    ("line", IntegerSchema("1-based line number."), true),
+                    ("column", IntegerSchema("1-based column number."), true))),
+            Tool(
+                "file_outline",
+                "Get the symbol outline (namespaces, classes, methods, fields, etc.) of a file.",
+                ObjectSchema(
+                    ("file", StringSchema("Absolute or solution-relative file path."), true))),
+            Tool(
+                "build",
+                "Trigger a solution build and return errors/warnings. Start the MCP server with --timeout-ms 300000 or higher for builds.",
+                ObjectSchema(
+                    ("configuration", StringSchema("Optional build configuration (e.g. Debug, Release)."), false))),
         };
 
         private static JsonObject Tool(string name, string description, JsonObject inputSchema) => new()
@@ -212,19 +450,65 @@ internal static partial class CliApp
             ["inputSchema"] = inputSchema,
         };
 
-        private static async Task<JsonNode> CallToolAsync(JsonNode? id, JsonObject? p, CliOptions options)
+        private static async Task<JsonNode> CallToolAsync(JsonNode? id, JsonObject? p, BridgeBinding bridgeBinding)
         {
             var toolName = p?["name"]?.GetValue<string>() ?? throw new McpRequestException(id, -32602, "tools/call missing name.");
             var args = p?["arguments"] as JsonObject;
 
             if (toolName.StartsWith("git_", StringComparison.Ordinal))
             {
-                return await CallGitToolAsync(id, toolName, args, options).ConfigureAwait(false);
+                return await CallGitToolAsync(id, toolName, args, bridgeBinding).ConfigureAwait(false);
             }
 
             if (toolName.StartsWith("github_", StringComparison.Ordinal))
             {
-                return await CallGitHubToolAsync(id, toolName, args, options).ConfigureAwait(false);
+                return await CallGitHubToolAsync(id, toolName, args, bridgeBinding).ConfigureAwait(false);
+            }
+
+            if (string.Equals(toolName, "list_instances", StringComparison.Ordinal))
+            {
+                return await ListInstancesAsync(bridgeBinding).ConfigureAwait(false);
+            }
+
+            if (string.Equals(toolName, "bind_instance", StringComparison.Ordinal))
+            {
+                var result = await bridgeBinding.BindAsync(id, args).ConfigureAwait(false);
+                return new JsonObject
+                {
+                    ["content"] = new JsonArray
+                    {
+                        new JsonObject
+                        {
+                            ["type"] = "text",
+                            ["text"] = result.ToJsonString(JsonOptions),
+                        },
+                    },
+                    ["isError"] = !(result["success"]?.GetValue<bool>() ?? false),
+                    ["structuredContent"] = result,
+                };
+            }
+
+            if (string.Equals(toolName, "bind_solution", StringComparison.Ordinal))
+            {
+                var bindArgs = new JsonObject
+                {
+                    ["solution_hint"] = args?["solution"]?.DeepClone() ?? args?["solution_hint"]?.DeepClone(),
+                };
+
+                var result = await bridgeBinding.BindAsync(id, bindArgs).ConfigureAwait(false);
+                return new JsonObject
+                {
+                    ["content"] = new JsonArray
+                    {
+                        new JsonObject
+                        {
+                            ["type"] = "text",
+                            ["text"] = result.ToJsonString(JsonOptions),
+                        },
+                    },
+                    ["isError"] = !(result["success"]?.GetValue<bool>() ?? false),
+                    ["structuredContent"] = result,
+                };
             }
 
             var (command, commandArgs) = toolName switch
@@ -234,13 +518,20 @@ internal static partial class CliApp
                 "warnings" => ("warnings", "--quick --wait-for-intellisense false"),
                 "list_tabs" => ("list-tabs", string.Empty),
                 "open_file" => ("open-document", BuildArgs(("file", args?["file"]?.GetValue<string>()), ("line", args?["line"]?.ToString()), ("column", args?["column"]?.ToString()))),
+                "find_files" => ("find-files", BuildArgs(("query", args?["query"]?.GetValue<string>()))),
                 "search_symbols" => ("search-symbols", BuildArgs(("query", args?["query"]?.GetValue<string>()), ("kind", args?["kind"]?.GetValue<string>()))),
                 "quick_info" => ("quick-info", BuildArgs(("file", args?["file"]?.GetValue<string>()), ("line", args?["line"]?.ToString()), ("column", args?["column"]?.ToString()))),
                 "apply_diff" => ("apply-diff", BuildArgs(("patch-text-base64", Convert.ToBase64String(Encoding.UTF8.GetBytes(args?["patch"]?.GetValue<string>() ?? string.Empty))), ("open-changed-files", "true"))),
+                "find_text" => ("find-text", BuildArgs(("query", args?["query"]?.GetValue<string>()), ("path", args?["path"]?.GetValue<string>()), ("scope", args?["scope"]?.GetValue<string>()), ("match-case", args?["match_case"]?.GetValue<bool>() == true ? "true" : null), ("whole-word", args?["whole_word"]?.GetValue<bool>() == true ? "true" : null))),
+                "read_file" => ("document-slice", BuildArgs(("file", args?["file"]?.GetValue<string>()), ("start-line", args?["start_line"]?.ToString()), ("end-line", args?["end_line"]?.ToString()), ("line", args?["line"]?.ToString()), ("context-before", args?["context_before"]?.ToString()), ("context-after", args?["context_after"]?.ToString()))),
+                "find_references" => ("find-references", BuildArgs(("file", args?["file"]?.GetValue<string>()), ("line", args?["line"]?.ToString()), ("column", args?["column"]?.ToString()))),
+                "peek_definition" => ("peek-definition", BuildArgs(("file", args?["file"]?.GetValue<string>()), ("line", args?["line"]?.ToString()), ("column", args?["column"]?.ToString()))),
+                "file_outline" => ("file-outline", BuildArgs(("file", args?["file"]?.GetValue<string>()))),
+                "build" => ("build", BuildArgs(("configuration", args?["configuration"]?.GetValue<string>()))),
                 _ => throw new McpRequestException(id, -32602, $"Unknown MCP tool: {toolName}"),
             };
 
-            var response = await SendBridgeAsync(id, options, command, commandArgs).ConfigureAwait(false);
+            var response = await SendBridgeAsync(id, bridgeBinding, command, commandArgs).ConfigureAwait(false);
             return new JsonObject
             {
                 ["content"] = new JsonArray
@@ -253,6 +544,40 @@ internal static partial class CliApp
                 },
                 ["isError"] = !ResponseFormatter.IsSuccess(response),
                 ["structuredContent"] = response.DeepClone(),
+            };
+        }
+
+        private static async Task<JsonNode> ListInstancesAsync(BridgeBinding bridgeBinding)
+        {
+            var instances = await PipeDiscovery.ListAsync(verbose: false).ConfigureAwait(false);
+            var boundInstanceId = bridgeBinding.CurrentDiscovery?.InstanceId;
+            var items = new JsonArray();
+            foreach (var instance in instances.OrderByDescending(item => item.LastWriteTimeUtc))
+            {
+                var json = DiscoveryToJson(instance);
+                json["is_bound"] = string.Equals(instance.InstanceId, boundInstanceId, StringComparison.OrdinalIgnoreCase);
+                items.Add(json);
+            }
+
+            var result = new JsonObject
+            {
+                ["success"] = true,
+                ["count"] = instances.Count,
+                ["items"] = items,
+            };
+
+            return new JsonObject
+            {
+                ["content"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["type"] = "text",
+                        ["text"] = result.ToJsonString(JsonOptions),
+                    },
+                },
+                ["isError"] = false,
+                ["structuredContent"] = result,
             };
         }
 
@@ -271,15 +596,15 @@ internal static partial class CliApp
             ["mimeType"] = "application/json",
         };
 
-        private static async Task<JsonNode> ReadResourceAsync(JsonNode? id, JsonObject? p, CliOptions options)
+        private static async Task<JsonNode> ReadResourceAsync(JsonNode? id, JsonObject? p, BridgeBinding bridgeBinding)
         {
             var uri = p?["uri"]?.GetValue<string>() ?? throw new McpRequestException(id, -32602, "resources/read missing uri.");
             JsonObject data = uri switch
             {
-                "bridge://current-solution" => await SendBridgeAsync(id, options, "state", string.Empty).ConfigureAwait(false),
-                "bridge://active-document" => await SendBridgeAsync(id, options, "state", string.Empty).ConfigureAwait(false),
-                "bridge://open-tabs" => await SendBridgeAsync(id, options, "list-tabs", string.Empty).ConfigureAwait(false),
-                "bridge://error-list-snapshot" => await SendBridgeAsync(id, options, "errors", "--quick --wait-for-intellisense false").ConfigureAwait(false),
+                "bridge://current-solution" => await SendBridgeAsync(id, bridgeBinding, "state", string.Empty).ConfigureAwait(false),
+                "bridge://active-document" => await SendBridgeAsync(id, bridgeBinding, "state", string.Empty).ConfigureAwait(false),
+                "bridge://open-tabs" => await SendBridgeAsync(id, bridgeBinding, "list-tabs", string.Empty).ConfigureAwait(false),
+                "bridge://error-list-snapshot" => await SendBridgeAsync(id, bridgeBinding, "errors", "--quick --wait-for-intellisense false").ConfigureAwait(false),
                 _ => throw new McpRequestException(id, -32602, $"Unknown resource uri: {uri}"),
             };
 
@@ -319,8 +644,8 @@ internal static partial class CliApp
             var name = p?["name"]?.GetValue<string>() ?? throw new McpRequestException(id, -32602, "prompts/get missing name.");
             var text = name switch
             {
-                "help" => "Use tools state, errors, warnings, list_tabs, open_file, search_symbols, quick_info, and apply_diff.",
-                "fix_current_errors" => "Call errors, inspect rows, then use open_file, quick_info, search_symbols, and apply_diff.",
+                "help" => "Use tools list_instances, bind_solution or bind_instance, then state, find_files, open_file, errors, warnings, search_symbols, quick_info, and apply_diff.",
+                "fix_current_errors" => "Bind to the right solution first, call errors, inspect rows, then use find_files, open_file, quick_info, search_symbols, and apply_diff.",
                 "open_solution_and_wait_ready" => "Outside MCP, run: vs-ide-bridge ensure --solution <path>; then call state until ready.",
                 "git_review_before_commit" => "Call git_status, git_diff_unstaged, git_diff_staged, git_log, then git_add and git_commit when ready.",
                 "git_sync_with_remote" => "Call git_fetch, git_status, and git_log first. Then use git_pull when behind or git_push when ahead.",
@@ -342,34 +667,35 @@ internal static partial class CliApp
             };
         }
 
-        private static async Task<JsonObject> SendBridgeAsync(JsonNode? id, CliOptions options, string command, string args)
+        private static Task<JsonObject> SendBridgeAsync(JsonNode? id, BridgeBinding bridgeBinding, string command, string args)
         {
-            try
-            {
-                var selector = BridgeInstanceSelector.FromOptions(options);
-                var discovery = await PipeDiscovery.SelectAsync(selector, options.GetFlag("verbose")).ConfigureAwait(false);
-                await using var client = new PipeClient(discovery.PipeName, options.GetInt32("timeout-ms", 10_000));
-                var request = new JsonObject
-                {
-                    ["id"] = Guid.NewGuid().ToString("N")[..8],
-                    ["command"] = command,
-                    ["args"] = args,
-                };
+            return bridgeBinding.SendAsync(id, command, args);
+        }
 
-                return await client.SendAsync(request).ConfigureAwait(false);
-            }
-            catch (CliException ex)
+        private static JsonObject DiscoveryToJson(PipeDiscovery discovery)
+        {
+            return new JsonObject
             {
-                throw new McpRequestException(id, -32001, ex.Message);
-            }
-            catch (TimeoutException ex)
+                ["instanceId"] = discovery.InstanceId,
+                ["pid"] = discovery.ProcessId,
+                ["pipeName"] = discovery.PipeName,
+                ["solutionPath"] = discovery.SolutionPath,
+                ["solutionName"] = discovery.SolutionName,
+                ["startedAtUtc"] = discovery.StartedAtUtc,
+                ["discoveryFile"] = discovery.DiscoveryFile,
+                ["lastWriteTimeUtc"] = discovery.LastWriteTimeUtc.ToString("O"),
+            };
+        }
+
+        private static JsonObject SelectorToJson(BridgeInstanceSelector selector)
+        {
+            return new JsonObject
             {
-                throw new McpRequestException(id, -32002, $"Timed out waiting for Visual Studio bridge response: {ex.Message}");
-            }
-            catch (IOException ex)
-            {
-                throw new McpRequestException(id, -32003, $"Failed communicating with Visual Studio bridge pipe: {ex.Message}");
-            }
+                ["instanceId"] = selector.InstanceId,
+                ["pid"] = selector.ProcessId,
+                ["pipeName"] = selector.PipeName,
+                ["solutionHint"] = selector.SolutionHint,
+            };
         }
 
         private static string BuildArgs(params (string Name, string? Value)[] items)
@@ -446,9 +772,9 @@ internal static partial class CliApp
             },
         };
 
-        private static async Task<JsonNode> CallGitToolAsync(JsonNode? id, string toolName, JsonObject? args, CliOptions options)
+        private static async Task<JsonNode> CallGitToolAsync(JsonNode? id, string toolName, JsonObject? args, BridgeBinding bridgeBinding)
         {
-            var workingDirectory = await ResolveGitWorkingDirectoryAsync(id, options).ConfigureAwait(false);
+            var workingDirectory = await ResolveGitWorkingDirectoryAsync(id, bridgeBinding).ConfigureAwait(false);
 
             var gitArgs = toolName switch
             {
@@ -592,9 +918,9 @@ internal static partial class CliApp
                 : $"checkout -b {QuoteForGit(name)} {QuoteForGit(startPoint)}";
         }
 
-        private static async Task<string> ResolveGitWorkingDirectoryAsync(JsonNode? id, CliOptions options)
+        private static async Task<string> ResolveGitWorkingDirectoryAsync(JsonNode? id, BridgeBinding bridgeBinding)
         {
-            var state = await SendBridgeAsync(id, options, "state", string.Empty).ConfigureAwait(false);
+            var state = await SendBridgeAsync(id, bridgeBinding, "state", string.Empty).ConfigureAwait(false);
             var data = state["Data"] as JsonObject;
             var solutionPath = data?["solutionPath"]?.GetValue<string>() ?? string.Empty;
             var directory = Path.GetDirectoryName(solutionPath);
@@ -687,9 +1013,9 @@ internal static partial class CliApp
         }
 
 
-        private static async Task<JsonNode> CallGitHubToolAsync(JsonNode? id, string toolName, JsonObject? args, CliOptions options)
+        private static async Task<JsonNode> CallGitHubToolAsync(JsonNode? id, string toolName, JsonObject? args, BridgeBinding bridgeBinding)
         {
-            var workingDirectory = await ResolveGitWorkingDirectoryAsync(id, options).ConfigureAwait(false);
+            var workingDirectory = await ResolveGitWorkingDirectoryAsync(id, bridgeBinding).ConfigureAwait(false);
             var repo = args?["repo"]?.GetValue<string>();
             if (string.IsNullOrWhiteSpace(repo))
             {
@@ -839,9 +1165,26 @@ internal static partial class CliApp
             },
         };
 
-        private static async Task<JsonObject?> ReadMessageAsync(Stream input)
+        private static async Task<McpIncomingMessage?> ReadMessageAsync(Stream input)
         {
-            var header = await ReadHeaderAsync(input).ConfigureAwait(false);
+            var firstByte = await ReadNextNonWhitespaceByteAsync(input).ConfigureAwait(false);
+            if (firstByte is null)
+            {
+                return null;
+            }
+
+            if (LooksLikeRawJson(firstByte.Value))
+            {
+                McpTrace($"ReadMessageAsync: detected raw JSON transport starting with 0x{firstByte.Value:X2}");
+                var rawJson = await ReadRawJsonMessageAsync(input, firstByte.Value).ConfigureAwait(false);
+                return new McpIncomingMessage
+                {
+                    Request = ParseJsonObject(rawJson),
+                    WireFormat = McpWireFormat.RawJson,
+                };
+            }
+
+            var header = await ReadHeaderAsync(input, firstByte.Value).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(header))
             {
                 return null;
@@ -872,40 +1215,153 @@ internal static partial class CliApp
             }
 
             var json = Encoding.UTF8.GetString(payloadBytes);
+            return new McpIncomingMessage
+            {
+                Request = ParseJsonObject(json),
+                WireFormat = McpWireFormat.HeaderFramed,
+            };
+        }
+
+        private static JsonObject ParseJsonObject(string json)
+        {
             return JsonNode.Parse(json) as JsonObject
                 ?? throw new McpRequestException(null, -32600, "MCP request must be a JSON object.");
         }
 
-        private static async Task<string> ReadHeaderAsync(Stream input)
+        private static async Task<byte?> ReadNextNonWhitespaceByteAsync(Stream input)
         {
-            var bytes = new List<byte>();
-            var lastFour = new Queue<byte>(4);
             while (true)
             {
+                var buffer = new byte[1];
+                var read = await input.ReadAsync(buffer, 0, 1).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    return null;
+                }
+
+                if (!char.IsWhiteSpace((char)buffer[0]))
+                {
+                    return buffer[0];
+                }
+            }
+        }
+
+        private static bool LooksLikeRawJson(byte firstByte)
+        {
+            return firstByte == (byte)'{' || firstByte == (byte)'[';
+        }
+
+        private static async Task<string> ReadRawJsonMessageAsync(Stream input, byte firstByte)
+        {
+            var bytes = new List<byte> { firstByte };
+            var depth = 1;
+            var inString = false;
+            var isEscaped = false;
+
+            while (depth > 0)
+            {
+                var buffer = new byte[1];
+                var read = await input.ReadAsync(buffer, 0, 1).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    throw new McpRequestException(null, -32600, "Unexpected EOF while reading raw JSON MCP payload.");
+                }
+
+                var current = buffer[0];
+                bytes.Add(current);
+
+                if (isEscaped)
+                {
+                    isEscaped = false;
+                    continue;
+                }
+
+                if (current == (byte)'\\')
+                {
+                    if (inString)
+                    {
+                        isEscaped = true;
+                    }
+
+                    continue;
+                }
+
+                if (current == (byte)'"')
+                {
+                    inString = !inString;
+                    continue;
+                }
+
+                if (inString)
+                {
+                    continue;
+                }
+
+                if (current == (byte)'{' || current == (byte)'[')
+                {
+                    depth++;
+                }
+                else if (current == (byte)'}' || current == (byte)']')
+                {
+                    depth--;
+                }
+            }
+
+            return Encoding.UTF8.GetString(bytes.ToArray());
+        }
+
+        private static async Task<string> ReadHeaderAsync(Stream input, byte firstByte)
+        {
+            var bytes = new List<byte> { firstByte };
+            var lastFour = new Queue<byte>(4);
+            var firstBytes = new List<byte>(); // log first 64 bytes for diagnostics
+            firstBytes.Add(firstByte);
+            lastFour.Enqueue(firstByte);
+            while (true)
+            {
+                if (lastFour.Count == 4 && lastFour.SequenceEqual(new byte[] { (byte)'\r', (byte)'\n', (byte)'\r', (byte)'\n' }))
+                {
+                    McpTrace($"ReadHeaderAsync: got CRLF header after {bytes.Count} bytes");
+                    return Encoding.ASCII.GetString(bytes.ToArray());
+                }
+
+                var arr = lastFour.ToArray();
+                if (arr.Length >= 2 && arr[arr.Length - 1] == (byte)'\n' && arr[arr.Length - 2] == (byte)'\n'
+                    && !(arr.Length >= 4 && arr[arr.Length - 4] == (byte)'\r'))
+                {
+                    McpTrace($"ReadHeaderAsync: got LF-only header after {bytes.Count} bytes");
+                    return Encoding.ASCII.GetString(bytes.ToArray());
+                }
+
                 var b = new byte[1];
                 var read = await input.ReadAsync(b, 0, 1).ConfigureAwait(false);
                 if (read == 0)
                 {
+                    McpTrace($"ReadHeaderAsync: EOF after {bytes.Count} bytes. First bytes: {BitConverter.ToString(firstBytes.ToArray())}");
                     return string.Empty;
                 }
 
                 bytes.Add(b[0]);
+                if (firstBytes.Count < 64) firstBytes.Add(b[0]);
                 lastFour.Enqueue(b[0]);
                 if (lastFour.Count > 4)
                 {
                     lastFour.Dequeue();
                 }
-
-                if (lastFour.Count == 4 && lastFour.SequenceEqual(new byte[] { (byte)'\r', (byte)'\n', (byte)'\r', (byte)'\n' }))
-                {
-                    return Encoding.ASCII.GetString(bytes.ToArray());
-                }
             }
         }
 
-        private static async Task WriteMessageAsync(Stream output, JsonObject response)
+        private static async Task WriteMessageAsync(Stream output, JsonObject response, McpWireFormat wireFormat)
         {
-            var bytes = Encoding.UTF8.GetBytes(response.ToJsonString(McpJsonOptions));
+            var bytes = Encoding.UTF8.GetBytes(response.ToJsonString());
+            if (wireFormat == McpWireFormat.RawJson)
+            {
+                await output.WriteAsync(bytes, 0, bytes.Length).ConfigureAwait(false);
+                await output.WriteAsync(RawJsonTerminator, 0, RawJsonTerminator.Length).ConfigureAwait(false);
+                await output.FlushAsync().ConfigureAwait(false);
+                return;
+            }
+
             var header = Encoding.ASCII.GetBytes($"Content-Length: {bytes.Length}\r\n\r\n");
             await output.WriteAsync(header, 0, header.Length).ConfigureAwait(false);
             await output.WriteAsync(bytes, 0, bytes.Length).ConfigureAwait(false);

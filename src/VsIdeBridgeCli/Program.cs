@@ -97,6 +97,11 @@ internal static partial class CliApp
                 builder.AddFlag("all", cli.GetFlag("all"));
                 builder.AddFlag("save", cli.GetFlag("save"));
             }),
+            "save-document" => await RunStructuredCommandAsync("save-document", options, static (builder, cli) =>
+            {
+                builder.Add("file", cli.GetValue("file"));
+                builder.AddFlag("all", cli.GetFlag("all"));
+            }),
             "close-file" => await RunStructuredCommandAsync("close-file", options, static (builder, cli) =>
             {
                 builder.Add("file", cli.GetValue("file"));
@@ -599,7 +604,7 @@ internal static partial class CliApp
         return SelectJsonNode(root, segments, 0, "/");
     }
 
-    private static IReadOnlyList<string> ParseSelectSegments(string? select)
+    private static string[] ParseSelectSegments(string? select)
     {
         if (string.IsNullOrWhiteSpace(select) || string.Equals(select, "/", StringComparison.Ordinal))
         {
@@ -607,13 +612,12 @@ internal static partial class CliApp
         }
 
         return select
-            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToArray();
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
-    private static JsonNode? SelectJsonNode(JsonNode? node, IReadOnlyList<string> segments, int index, string currentPath)
+    private static JsonNode? SelectJsonNode(JsonNode? node, string[] segments, int index, string currentPath)
     {
-        if (index >= segments.Count)
+        if (index >= segments.Length)
         {
             return node?.DeepClone();
         }
@@ -633,7 +637,7 @@ internal static partial class CliApp
         };
     }
 
-    private static JsonNode? SelectWildcard(JsonNode? node, IReadOnlyList<string> segments, int nextIndex, string currentPath)
+    private static JsonNode? SelectWildcard(JsonNode? node, string[] segments, int nextIndex, string currentPath)
     {
         var results = new JsonArray();
         switch (node)
@@ -664,7 +668,7 @@ internal static partial class CliApp
     private static JsonNode? SelectObjectProperty(
         JsonObject obj,
         string segment,
-        IReadOnlyList<string> segments,
+        string[] segments,
         int nextIndex,
         string currentPath)
     {
@@ -680,7 +684,7 @@ internal static partial class CliApp
     private static JsonNode? SelectArrayIndex(
         JsonArray array,
         string segment,
-        IReadOnlyList<string> segments,
+        string[] segments,
         int nextIndex,
         string currentPath)
     {
@@ -1641,6 +1645,15 @@ internal static class HelpText
 
         Purpose
           Run a stdio MCP server over one live VS IDE Bridge instance.
+
+        Optional
+          --instance <instanceId>
+          --pid <pid>
+          --pipe <pipeName>
+          --sln <hint>
+
+        Notes
+          Resolves the selected bridge once and reuses that pipe for the MCP session.
 
         Example
           vs-ide-bridge mcp-server --instance <instanceId>

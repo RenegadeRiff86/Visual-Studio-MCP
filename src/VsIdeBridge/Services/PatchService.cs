@@ -439,6 +439,29 @@ internal sealed class PatchService
                 throw new CommandErrorException("invalid_arguments", $"Patch hunks overlap for file: {path}");
             }
 
+            // Fuzzy position search: if the hunk's nominal start line doesn't match
+            // the first context/deletion line, scan ±FuzzLines to find the real position.
+            const int FuzzLines = 3;
+            var firstCheckLine = hunk.Lines.FirstOrDefault(l => l.Kind == ' ' || l.Kind == '-');
+            if (firstCheckLine is not null && targetIndex < existingLines.Count
+                && !string.Equals(existingLines[targetIndex], firstCheckLine.Text, StringComparison.Ordinal))
+            {
+                var found = false;
+                for (var fuzz = 1; fuzz <= FuzzLines && !found; fuzz++)
+                {
+                    foreach (var candidate in new[] { targetIndex + fuzz, targetIndex - fuzz })
+                    {
+                        if (candidate >= sourceIndex && candidate < existingLines.Count
+                            && string.Equals(existingLines[candidate], firstCheckLine.Text, StringComparison.Ordinal))
+                        {
+                            targetIndex = candidate;
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
             while (sourceIndex < targetIndex && sourceIndex < existingLines.Count)
             {
                 resultLines.Add(existingLines[sourceIndex]);
@@ -590,6 +613,10 @@ internal sealed class PatchService
 
                     if (hunkLine.Length == 0)
                     {
+                        // Blank line in hunk body = context line for an empty file line.
+                        // Treating it as a skip (without advancing sourceIndex) would shift
+                        // all subsequent matches off by one.
+                        hunk.Lines.Add(new HunkLine { Kind = ' ', Text = string.Empty });
                         lineIndex++;
                         continue;
                     }
