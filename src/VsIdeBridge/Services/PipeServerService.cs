@@ -48,14 +48,20 @@ internal sealed class PipeServerService : IDisposable
         _discoveryFile = Path.Combine(discoveryDir, $"bridge-{runtime.BridgeInstanceService.ProcessId}.json");
         _emitDiscoveryJson = ReadBooleanEnvironmentVariable("VS_IDE_BRIDGE_EMIT_DISCOVERY_JSON", true);
         var mode = Environment.GetEnvironmentVariable("VS_IDE_BRIDGE_DISCOVERY_MODE");
-        _emitMemoryDiscovery = !string.Equals(mode, "json-only", StringComparison.OrdinalIgnoreCase);
+        var modeAllowsMemory = !string.Equals(mode, "json-only", StringComparison.OrdinalIgnoreCase);
+        var enableMemoryDiscovery = ReadBooleanEnvironmentVariable("VS_IDE_BRIDGE_EMIT_MEMORY_DISCOVERY", false);
+        _emitMemoryDiscovery = modeAllowsMemory && enableMemoryDiscovery;
     }
 
     public void Start()
     {
         PurgeStaleDiscoveryFiles();
         WriteDiscoveryFile(string.Empty);
-        _listenTask = Task.Run(() => ListenLoopAsync(_cts.Token));
+        _listenTask = Task.Factory.StartNew(
+            () => ListenLoopAsync(_cts.Token),
+            _cts.Token,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default).Unwrap();
     }
 
     private void PurgeStaleDiscoveryFiles()
@@ -202,8 +208,17 @@ internal sealed class PipeServerService : IDisposable
             }
             catch (Exception ex)
             {
-                ActivityLog.LogError(nameof(PipeServerService), $"Failed to create pipe server instance: {ex.Message}");
-                return;
+                ActivityLog.LogWarning(nameof(PipeServerService), $"Failed to create pipe server instance: {ex.Message}");
+                try
+                {
+                    await Task.Delay(1000, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+
+                continue;
             }
 
             try
