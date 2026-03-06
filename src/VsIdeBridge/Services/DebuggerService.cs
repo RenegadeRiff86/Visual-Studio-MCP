@@ -1,11 +1,9 @@
-using System.Collections.Generic;
-using System.Collections;
-using System.Linq;
-using System.Threading.Tasks;
 using EnvDTE;
 using EnvDTE80;
 using Microsoft.VisualStudio.Shell;
 using Newtonsoft.Json.Linq;
+using System.Collections;
+using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 using Stopwatch = System.Diagnostics.Stopwatch;
 
@@ -73,12 +71,7 @@ internal sealed class DebuggerService
         }
 
         var frames = new JArray();
-        var targetThread = ResolveThread(debugger.CurrentProgram, threadId);
-        if (targetThread is null)
-        {
-            throw new CommandErrorException("thread_not_found", $"Thread '{threadId}' was not found in the current debug program.");
-        }
-
+        var targetThread = ResolveThread(debugger.CurrentProgram, threadId) ?? throw new CommandErrorException("thread_not_found", $"Thread '{threadId}' was not found in the current debug program.");
         var limit = maxFrames <= 0 ? 100 : maxFrames;
         var collected = 0;
         foreach (StackFrame frame in targetThread.StackFrames)

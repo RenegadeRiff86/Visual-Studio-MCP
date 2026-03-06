@@ -1,10 +1,10 @@
+using EnvDTE;
+using EnvDTE80;
+using Microsoft.VisualStudio.Shell;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using EnvDTE;
-using EnvDTE80;
-using Microsoft.VisualStudio.Shell;
 using VsIdeBridge.Infrastructure;
 
 namespace VsIdeBridge.Services;
@@ -33,7 +33,7 @@ internal static class SolutionFileLocator
         var trimmedQuery = query?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(trimmedQuery))
         {
-            return Array.Empty<Match>();
+            return [];
         }
 
         var normalizedQuery = NormalizeQuery(trimmedQuery);
@@ -66,13 +66,13 @@ internal static class SolutionFileLocator
         var trimmedQuery = query?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(trimmedQuery))
         {
-            return Array.Empty<Match>();
+            return [];
         }
 
         var solutionDirectory = GetSolutionDirectory(dte);
         if (string.IsNullOrWhiteSpace(solutionDirectory) || !Directory.Exists(solutionDirectory))
         {
-            return Array.Empty<Match>();
+            return [];
         }
 
         var normalizedQuery = NormalizeQuery(trimmedQuery);
@@ -87,7 +87,7 @@ internal static class SolutionFileLocator
         }
         catch
         {
-            return Array.Empty<Match>();
+            return [];
         }
 
         foreach (var candidate in files)

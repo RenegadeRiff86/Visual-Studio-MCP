@@ -31,6 +31,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\Shared\BridgeCommandCatalog.cs" Link="Shared\BridgeCommandCatalog.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Update="source.extension.vsixmanifest">
       <SubType>Designer</SubType>
     </Content>

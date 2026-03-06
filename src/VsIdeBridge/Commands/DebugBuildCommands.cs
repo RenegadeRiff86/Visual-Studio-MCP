@@ -1,7 +1,6 @@
-using System.ComponentModel.Design;
-using System.Threading.Tasks;
 using Microsoft.VisualStudio.Shell;
 using Newtonsoft.Json.Linq;
+using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 using VsIdeBridge.Services;
 
@@ -23,13 +22,8 @@ internal static class DebugBuildCommands
         };
     }
 
-    internal sealed class IdeDebugGetStateCommand : IdeCommandBase
+    internal sealed class IdeDebugGetStateCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x020A)
     {
-        public IdeDebugGetStateCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x020A)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeDebugGetState";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -39,13 +33,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeDebugStartCommand : IdeCommandBase
+    internal sealed class IdeDebugStartCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x020B)
     {
-        public IdeDebugStartCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x020B)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeDebugStart";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -58,13 +47,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeDebugStopCommand : IdeCommandBase
+    internal sealed class IdeDebugStopCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x020C)
     {
-        public IdeDebugStopCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x020C)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeDebugStop";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -74,13 +58,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeDebugBreakCommand : IdeCommandBase
+    internal sealed class IdeDebugBreakCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x020D)
     {
-        public IdeDebugBreakCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x020D)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeDebugBreak";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -90,13 +69,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeDebugContinueCommand : IdeCommandBase
+    internal sealed class IdeDebugContinueCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x020E)
     {
-        public IdeDebugContinueCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x020E)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeDebugContinue";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -109,13 +83,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeDebugStepOverCommand : IdeCommandBase
+    internal sealed class IdeDebugStepOverCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x020F)
     {
-        public IdeDebugStepOverCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x020F)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeDebugStepOver";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -127,13 +96,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeDebugStepIntoCommand : IdeCommandBase
+    internal sealed class IdeDebugStepIntoCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0210)
     {
-        public IdeDebugStepIntoCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0210)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeDebugStepInto";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -145,13 +109,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeDebugStepOutCommand : IdeCommandBase
+    internal sealed class IdeDebugStepOutCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0211)
     {
-        public IdeDebugStepOutCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0211)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeDebugStepOut";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -163,13 +122,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeDebugThreadsCommand : IdeCommandBase
+    internal sealed class IdeDebugThreadsCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0233)
     {
-        public IdeDebugThreadsCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0233)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeDebugThreads";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -179,13 +133,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeDebugStackCommand : IdeCommandBase
+    internal sealed class IdeDebugStackCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0234)
     {
-        public IdeDebugStackCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0234)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeDebugStack";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -198,13 +147,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeDebugLocalsCommand : IdeCommandBase
+    internal sealed class IdeDebugLocalsCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0235)
     {
-        public IdeDebugLocalsCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0235)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeDebugLocals";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -216,13 +160,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeDebugModulesCommand : IdeCommandBase
+    internal sealed class IdeDebugModulesCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0236)
     {
-        public IdeDebugModulesCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0236)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeDebugModules";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -232,13 +171,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeDebugWatchCommand : IdeCommandBase
+    internal sealed class IdeDebugWatchCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0237)
     {
-        public IdeDebugWatchCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0237)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeDebugWatch";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -251,13 +185,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeDebugExceptionsCommand : IdeCommandBase
+    internal sealed class IdeDebugExceptionsCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0238)
     {
-        public IdeDebugExceptionsCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0238)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeDebugExceptions";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -267,13 +196,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeDiagnosticsSnapshotCommand : IdeCommandBase
+    internal sealed class IdeDiagnosticsSnapshotCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0239)
     {
-        public IdeDiagnosticsSnapshotCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0239)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeDiagnosticsSnapshot";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -309,13 +233,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeBuildConfigurationsCommand : IdeCommandBase
+    internal sealed class IdeBuildConfigurationsCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x023A)
     {
-        public IdeBuildConfigurationsCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x023A)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeBuildConfigurations";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -325,13 +244,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeSetBuildConfigurationCommand : IdeCommandBase
+    internal sealed class IdeSetBuildConfigurationCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x023B)
     {
-        public IdeSetBuildConfigurationCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x023B)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeSetBuildConfiguration";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -344,13 +258,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeBuildSolutionCommand : IdeCommandBase
+    internal sealed class IdeBuildSolutionCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0212)
     {
-        public IdeBuildSolutionCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0212)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeBuildSolution";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -365,13 +274,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeGetErrorListCommand : IdeCommandBase
+    internal sealed class IdeGetErrorListCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0213)
     {
-        public IdeGetErrorListCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0213)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeGetErrorList";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -387,13 +291,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeGetWarningsCommand : IdeCommandBase
+    internal sealed class IdeGetWarningsCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0230)
     {
-        public IdeGetWarningsCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0230)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeGetWarnings";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
@@ -409,13 +308,8 @@ internal static class DebugBuildCommands
         }
     }
 
-    internal sealed class IdeBuildAndCaptureErrorsCommand : IdeCommandBase
+    internal sealed class IdeBuildAndCaptureErrorsCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0214)
     {
-        public IdeBuildAndCaptureErrorsCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0214)
-        {
-        }
-
         protected override string CanonicalName => "Tools.IdeBuildAndCaptureErrors";
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)

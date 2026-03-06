@@ -1,15 +1,15 @@
-using System;
-using System.Collections.Generic;
-using System.ComponentModel.Design;
-using System.IO;
-using System.Threading.Tasks;
-using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 using VsIdeBridge.Services;
+using VsIdeBridge.Shared;
 
 namespace VsIdeBridge.Commands;
 
@@ -53,7 +53,7 @@ internal static class IdeCoreCommands
                     stepResult = new JObject
                     {
                         ["index"] = i,
-                        ["id"] = stepId is null ? JValue.CreateNull() : stepId,
+                        ["id"] = (JToken?)stepId ?? JValue.CreateNull(),
                         ["command"] = commandName,
                         ["success"] = false,
                         ["summary"] = $"Unknown command: {commandName}",
@@ -72,7 +72,7 @@ internal static class IdeCoreCommands
                         stepResult = new JObject
                         {
                             ["index"] = i,
-                            ["id"] = stepId is null ? JValue.CreateNull() : stepId,
+                            ["id"] = (JToken?)stepId ?? JValue.CreateNull(),
                             ["command"] = commandName,
                             ["success"] = true,
                             ["summary"] = result.Summary,
@@ -87,7 +87,7 @@ internal static class IdeCoreCommands
                         stepResult = new JObject
                         {
                             ["index"] = i,
-                            ["id"] = stepId is null ? JValue.CreateNull() : stepId,
+                            ["id"] = (JToken?)stepId ?? JValue.CreateNull(),
                             ["command"] = commandName,
                             ["success"] = false,
                             ["summary"] = ex.Message,
@@ -102,7 +102,7 @@ internal static class IdeCoreCommands
                         stepResult = new JObject
                         {
                             ["index"] = i,
-                            ["id"] = stepId is null ? JValue.CreateNull() : stepId,
+                            ["id"] = (JToken?)stepId ?? JValue.CreateNull(),
                             ["command"] = commandName,
                             ["success"] = false,
                             ["summary"] = ex.Message,
@@ -139,84 +139,46 @@ internal static class IdeCoreCommands
 
     private static Task<CommandExecutionResult> GetHelpResultAsync()
     {
-        var canonicalCommands = new[]
-        {
-            "Tools.IdeGetState",
-            "Tools.IdeWaitForReady",
-            "Tools.IdeFindText",
-            "Tools.IdeFindFiles",
-            "Tools.IdeOpenDocument",
-            "Tools.IdeListDocuments",
-            "Tools.IdeListOpenTabs",
-            "Tools.IdeActivateDocument",
-            "Tools.IdeCloseDocument",
-            "Tools.IdeCloseFile",
-            "Tools.IdeCloseAllExceptCurrent",
-            "Tools.IdeActivateWindow",
-            "Tools.IdeListWindows",
-            "Tools.IdeExecuteVsCommand",
-            "Tools.IdeFindAllReferences",
-            "Tools.IdeCountReferences",
-            "Tools.IdeShowCallHierarchy",
-            "Tools.IdeGetDocumentSlice",
-            "Tools.IdeGetSmartContextForQuery",
-            "Tools.IdeApplyUnifiedDiff",
-            "Tools.IdeSetBreakpoint",
-            "Tools.IdeListBreakpoints",
-            "Tools.IdeRemoveBreakpoint",
-            "Tools.IdeClearAllBreakpoints",
-            "Tools.IdeDebugGetState",
-            "Tools.IdeDebugStart",
-            "Tools.IdeDebugStop",
-            "Tools.IdeDebugBreak",
-            "Tools.IdeDebugContinue",
-            "Tools.IdeDebugStepOver",
-            "Tools.IdeDebugStepInto",
-            "Tools.IdeDebugStepOut",
-            "Tools.IdeDebugThreads",
-            "Tools.IdeDebugStack",
-            "Tools.IdeDebugLocals",
-            "Tools.IdeDebugModules",
-            "Tools.IdeDebugWatch",
-            "Tools.IdeDebugExceptions",
-            "Tools.IdeDiagnosticsSnapshot",
-            "Tools.IdeBuildConfigurations",
-            "Tools.IdeSetBuildConfiguration",
-            "Tools.IdeBuildSolution",
-            "Tools.IdeGetErrorList",
-            "Tools.IdeGetWarnings",
-            "Tools.IdeBuildAndCaptureErrors",
-            "Tools.IdeOpenSolution",
-            "Tools.IdeGoToDefinition",
-            "Tools.IdeGoToImplementation",
-            "Tools.IdeGetFileOutline",
-            "Tools.IdeGetFileSymbols",
-            "Tools.IdeSearchSymbols",
-            "Tools.IdeGetQuickInfo",
-            "Tools.IdeGetDocumentSlices",
-            "Tools.IdeEnableBreakpoint",
-            "Tools.IdeDisableBreakpoint",
-            "Tools.IdeEnableAllBreakpoints",
-            "Tools.IdeDisableAllBreakpoints",
-            "Tools.IdeBatchCommands",
-        };
+        var commandMetadata = BridgeCommandCatalog.All
+            .OrderBy(item => item.PipeName, StringComparer.Ordinal)
+            .ToArray();
+        var generatedAtUtc = DateTime.UtcNow.ToString("O");
+        var commandDetails = BuildCommandDetails(commandMetadata);
 
         var commands = new JArray();
         var legacyCommands = new JArray();
-        foreach (var canonicalCommand in canonicalCommands)
+        foreach (var command in commandMetadata)
         {
-            commands.Add(PipeCommandNames.GetPrimaryName(canonicalCommand));
-            legacyCommands.Add(canonicalCommand);
+            commands.Add(command.PipeName);
+            legacyCommands.Add(command.CanonicalName);
         }
 
         return Task.FromResult(new CommandExecutionResult(
             "Command catalog written.",
             new JObject
             {
+                ["schemaVersion"] = "vs-ide-bridge.help.v1",
+                ["generatedAtUtc"] = generatedAtUtc,
+                ["catalog"] = new JObject
+                {
+                    ["schemaVersion"] = "vs-ide-bridge.command-catalog.v1",
+                    ["generatedAtUtc"] = generatedAtUtc,
+                    ["count"] = commandMetadata.Length,
+                    ["commands"] = commandDetails.DeepClone(),
+                    ["nameField"] = "name",
+                    ["canonicalNameField"] = "canonicalName",
+                    ["exampleField"] = "example",
+                    ["aliasesField"] = "aliases",
+                    ["notes"] = new JArray
+                    {
+                        "Use name for pipe/MCP command routing.",
+                        "Use canonicalName only for compatibility mapping or VS Command Window fallbacks.",
+                    },
+                },
                 ["commands"] = commands,
                 ["legacyCommands"] = legacyCommands,
                 ["note"] = "Pipe requests accept the simple command names in commands[]. The legacy Tools.Ide* names still work in Visual Studio and over the pipe.",
-                ["commandDetails"] = BuildCommandDetails(canonicalCommands),
+                ["commandDetails"] = commandDetails,
                 ["recipes"] = new JArray
                 {
                     new JObject
@@ -235,7 +197,7 @@ internal static class IdeCoreCommands
                     {
                         ["name"] = "group-current-warnings",
                         ["summary"] = "Filter the Error List down to warnings and group them by code.",
-                        ["command"] = @"warnings --group-by code"
+                        ["command"] = "warnings --group-by code"
                     },
                     new JObject
                     {
@@ -259,89 +221,34 @@ internal static class IdeCoreCommands
             }));
     }
 
-    private static JArray BuildCommandDetails(IEnumerable<string> canonicalCommands)
+    private static JArray BuildCommandDetails(IEnumerable<BridgeCommandMetadata> commandMetadata)
     {
         var details = new JArray();
-        foreach (var canonicalCommand in canonicalCommands)
+        foreach (var command in commandMetadata)
         {
-            var pipeName = PipeCommandNames.GetPrimaryName(canonicalCommand);
-            var (description, example) = GetCommandDetail(pipeName);
+            var aliases = new JArray();
+            foreach (var alias in PipeCommandNames.GetAliases(command.CanonicalName))
+            {
+                if (string.Equals(alias, command.PipeName, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                aliases.Add(alias);
+            }
+
             details.Add(new JObject
             {
-                ["name"] = pipeName,
-                ["legacyName"] = canonicalCommand,
-                ["description"] = description,
-                ["example"] = example,
+                ["name"] = command.PipeName,
+                ["canonicalName"] = command.CanonicalName,
+                ["legacyName"] = command.CanonicalName,
+                ["description"] = command.Description,
+                ["example"] = command.Example,
+                ["aliases"] = aliases,
             });
         }
 
         return details;
-    }
-
-    private static (string Description, string Example) GetCommandDetail(string commandName)
-    {
-        return commandName switch
-        {
-            "state" => ("Capture IDE state including solution, active document, and bridge identity.", @"state --out ""C:\temp\ide-state.json"""),
-            "ready" => ("Wait for Visual Studio and IntelliSense to be ready for semantic commands.", "ready --timeout-ms 120000"),
-            "find-text" => ("Find text across the solution, project, or current document, with optional subtree filtering.", @"find-text --query ""OnInit"" --path ""src\libslic3r"""),
-            "find-files" => ("Search solution explorer files by name or path fragment and return ranked matches.", @"find-files --query ""CMakeLists.txt"""),
-            "open-document" => ("Open a document by absolute path, solution-relative path, or solution item name.", @"open-document --file ""src\CMakeLists.txt"" --line 1 --column 1"),
-            "list-documents" => ("List open documents.", "list-documents"),
-            "list-tabs" => ("List open editor tabs and identify the active tab.", "list-tabs"),
-            "activate-document" => ("Activate an open document tab by query.", @"activate-document --query ""Program.cs"""),
-            "close-document" => ("Close one or more open tabs by query.", @"close-document --query "".json"" --all"),
-            "close-file" => ("Close one open file tab by path or query.", @"close-file --file ""C:\repo\src\foo.cpp"""),
-            "close-others" => ("Close all tabs except the active tab.", "close-others"),
-            "activate-window" => ("Activate a Visual Studio tool window by caption or kind.", @"activate-window --window ""Error List"""),
-            "list-windows" => ("List Visual Studio tool windows, optionally filtered by query.", @"list-windows --query ""Error"""),
-            "execute-command" => ("Execute an arbitrary Visual Studio command with optional arguments.", @"execute-command --name ""Edit.FormatDocument"""),
-            "find-references" => ("Run Find All References for the symbol at a file/line/column.", @"find-references --file ""C:\repo\src\foo.cpp"" --line 42 --column 13"),
-            "count-references" => ("Run Find All References and return exact count when Visual Studio exposes one, or explicit unknown otherwise.", @"count-references --file ""C:\repo\src\foo.cpp"" --line 42 --column 13"),
-            "call-hierarchy" => ("Open Call Hierarchy for the symbol at a file/line/column.", @"call-hierarchy --file ""C:\repo\src\foo.cpp"" --line 42 --column 13"),
-            "document-slice" => ("Fetch one code slice from a file.", @"document-slice --file ""C:\repo\src\foo.cpp"" --line 120 --context-before 8 --context-after 20"),
-            "smart-context" => ("Collect focused code context for a natural-language query.", @"smart-context --query ""where is GUI_App::OnInit used"" --max-contexts 3"),
-            "apply-diff" => ("Apply a unified diff through the live editor so changes are visible in Visual Studio.", @"apply-diff --patch-file ""C:\temp\change.diff"""),
-            "set-breakpoint" => ("Set a breakpoint at file/line with optional condition and hit count.", @"set-breakpoint --file ""C:\repo\src\foo.cpp"" --line 42"),
-            "list-breakpoints" => ("List current breakpoints.", "list-breakpoints"),
-            "remove-breakpoint" => ("Remove breakpoints by file/line, id, or all.", @"remove-breakpoint --file ""C:\repo\src\foo.cpp"" --line 42"),
-            "clear-breakpoints" => ("Clear all breakpoints.", "clear-breakpoints"),
-            "debug-state" => ("Get debugger mode and active stack frame info.", "debug-state"),
-            "debug-start" => ("Start debugging the current startup project.", "debug-start"),
-            "debug-stop" => ("Stop the debugger.", "debug-stop"),
-            "debug-break" => ("Break execution in the debugger.", "debug-break"),
-            "debug-continue" => ("Continue execution in the debugger.", "debug-continue"),
-            "debug-step-over" => ("Step over the current line in the debugger.", "debug-step-over"),
-            "debug-step-into" => ("Step into the current call in the debugger.", "debug-step-into"),
-            "debug-step-out" => ("Step out of the current function in the debugger.", "debug-step-out"),
-            "debug-threads" => ("List debugger threads for the active debug session.", "debug-threads"),
-            "debug-stack" => ("Capture stack frames for the current or selected debugger thread.", "debug-stack --thread-id 1 --max-frames 50"),
-            "debug-locals" => ("Capture local variables for the active stack frame.", "debug-locals --max 200"),
-            "debug-modules" => ("Capture debugger module snapshot (best effort by debugger engine).", "debug-modules"),
-            "debug-watch" => ("Evaluate one debugger watch expression in break mode.", @"debug-watch --expression ""count"""),
-            "debug-exceptions" => ("Capture debugger exception group/settings snapshot (best effort).", "debug-exceptions"),
-            "diagnostics-snapshot" => ("Aggregate IDE state, debugger state, build state, and current errors/warnings.", "diagnostics-snapshot --wait-for-intellisense true"),
-            "build-configurations" => ("List available solution build configurations and platforms.", "build-configurations"),
-            "set-build-configuration" => ("Activate one build configuration/platform pair.", "set-build-configuration --configuration Debug --platform x64"),
-            "build" => ("Build the current solution.", @"build --configuration Debug --platform x64"),
-            "errors" => ("Capture Error List rows with optional severity and text filters.", @"errors --severity error --max 50"),
-            "warnings" => ("Capture warning rows with optional code/path/project filters.", @"warnings --group-by code"),
-            "build-errors" => ("Build then capture Error List rows in one call.", @"build-errors --max 200"),
-            "open-solution" => ("Open a solution in the current Visual Studio instance.", @"open-solution --solution ""C:\repo\VsIdeBridge.sln"""),
-            "goto-definition" => ("Navigate to the definition of the symbol at a file/line/column.", @"goto-definition --file ""C:\repo\src\foo.cpp"" --line 42 --column 13"),
-            "goto-implementation" => ("Navigate to one implementation of the symbol at a file/line/column.", @"goto-implementation --file ""C:\repo\src\foo.cpp"" --line 42 --column 13"),
-            "file-outline" => ("List a file outline from the code model.", @"file-outline --file ""C:\repo\src\foo.cpp"""),
-            "file-symbols" => ("List symbols in one file with optional kind filtering.", @"file-symbols --file ""C:\repo\src\foo.cpp"" --kind function"),
-            "search-symbols" => ("Search symbol definitions by name across solution scope.", @"search-symbols --query ""RunAsync"" --kind function --path ""src\VsIdeBridgeCli"""),
-            "quick-info" => ("Resolve symbol information at file/line/column with surrounding context.", @"quick-info --file ""C:\repo\src\foo.cpp"" --line 42 --column 13"),
-            "document-slices" => ("Fetch multiple code slices from --ranges-file or inline --ranges JSON.", @"document-slices --ranges ""[{\""file\"":\""C:\\repo\\src\\foo.cpp\"",\""line\"":42,\""contextBefore\"":8,\""contextAfter\"":20}]"""),
-            "enable-breakpoint" => ("Enable a breakpoint by id or file/line.", @"enable-breakpoint --file ""C:\repo\src\foo.cpp"" --line 42"),
-            "disable-breakpoint" => ("Disable a breakpoint by id or file/line.", @"disable-breakpoint --file ""C:\repo\src\foo.cpp"" --line 42"),
-            "enable-all-breakpoints" => ("Enable all breakpoints.", "enable-all-breakpoints"),
-            "disable-all-breakpoints" => ("Disable all breakpoints.", "disable-all-breakpoints"),
-            "batch" => ("Run multiple commands in one request.", @"batch --steps ""[{\""id\"":\""state\"",\""command\"":\""state\""}]"""),
-            _ => ($"Run bridge command '{commandName}'.", commandName),
-        };
     }
 
     private static async Task<CommandExecutionResult> GetSmokeTestResultAsync(IdeCommandContext context)
@@ -436,7 +343,7 @@ internal static class IdeCoreCommands
             string.IsNullOrWhiteSpace(readmePath) ? "Displayed IDE Bridge help." : "Opened IDE Bridge help.",
             new JObject
             {
-                ["readmePath"] = readmePath is null ? JValue.CreateNull() : readmePath,
+                ["readmePath"] = (JToken?)readmePath ?? JValue.CreateNull(),
                 ["commandWindowHelp"] = "Tools.IdeHelp",
             });
     }

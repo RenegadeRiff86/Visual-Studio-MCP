@@ -1,9 +1,9 @@
+using Microsoft.VisualStudio;
+using Microsoft.VisualStudio.Shell;
 using System;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.VisualStudio;
-using Microsoft.VisualStudio.Shell;
 using VsIdeBridge.Services;
 
 namespace VsIdeBridge;
@@ -29,6 +29,7 @@ public sealed class VsIdeBridgePackage : AsyncPackage
     {
         _runtime = await IdeBridgeRuntime.CreateAsync(this).ConfigureAwait(false);
         await CommandRegistrar.InitializeAsync(this, _runtime).ConfigureAwait(false);
+        _runtime.BridgeWatchdogService.Start();
 
         // Start named pipe server (best-effort; failure does not break DTE commands)
         try
@@ -45,7 +46,10 @@ public sealed class VsIdeBridgePackage : AsyncPackage
     protected override void Dispose(bool disposing)
     {
         if (disposing)
+        {
             _pipeServer?.Dispose();
+            _runtime?.BridgeWatchdogService.Dispose();
+        }
         base.Dispose(disposing);
     }
 }

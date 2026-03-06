@@ -1,17 +1,17 @@
-using System;
-using System.Diagnostics;
-using System.IO;
-using System.IO.Pipes;
-using System.Text;
-using System.Globalization;
-using System.Threading;
-using System.Threading.Tasks;
 using EnvDTE80;
 using Microsoft;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using System;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.IO.Pipes;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using VsIdeBridge.Commands;
 using VsIdeBridge.Infrastructure;
 
@@ -34,10 +34,14 @@ internal sealed class PipeServerService : IDisposable
     private readonly MemoryDiscoveryStore _memoryDiscoveryStore = new();
     private readonly bool _emitDiscoveryJson;
     private readonly bool _emitMemoryDiscovery;
-    private readonly CancellationTokenSource _cts = new CancellationTokenSource();
-    private readonly object _executorSync = new();
+    private readonly CancellationTokenSource _cts = new();
+    private readonly object _discoverySync = new();
+    private readonly SemaphoreSlim _commandQueue = new(1, 1);
     private Task? _listenTask;
-    private Task? _activeCommandTask;
+    private bool _discoveryWorkerScheduled;
+    private bool _discoveryPurgePending;
+    private string? _pendingDiscoverySolutionPath;
+    private int _queuedCommandCount;
 
     public PipeServerService(VsIdeBridgePackage package, IdeBridgeRuntime runtime)
     {
@@ -49,19 +53,84 @@ internal sealed class PipeServerService : IDisposable
         _emitDiscoveryJson = ReadBooleanEnvironmentVariable("VS_IDE_BRIDGE_EMIT_DISCOVERY_JSON", true);
         var mode = Environment.GetEnvironmentVariable("VS_IDE_BRIDGE_DISCOVERY_MODE");
         var modeAllowsMemory = !string.Equals(mode, "json-only", StringComparison.OrdinalIgnoreCase);
-        var enableMemoryDiscovery = ReadBooleanEnvironmentVariable("VS_IDE_BRIDGE_EMIT_MEMORY_DISCOVERY", false);
-        _emitMemoryDiscovery = modeAllowsMemory && enableMemoryDiscovery;
+        _emitMemoryDiscovery = modeAllowsMemory;
     }
 
     public void Start()
     {
-        PurgeStaleDiscoveryFiles();
-        WriteDiscoveryFile(string.Empty);
+        QueueDiscoveryUpdate(string.Empty, includePurge: true);
         _listenTask = Task.Factory.StartNew(
             () => ListenLoopAsync(_cts.Token),
             _cts.Token,
             TaskCreationOptions.LongRunning,
             TaskScheduler.Default).Unwrap();
+    }
+
+    private void QueueDiscoveryUpdate(string? solutionPath, bool includePurge = false)
+    {
+        lock (_discoverySync)
+        {
+            _pendingDiscoverySolutionPath = solutionPath ?? string.Empty;
+            if (includePurge)
+            {
+                _discoveryPurgePending = true;
+            }
+
+            if (_discoveryWorkerScheduled)
+            {
+                return;
+            }
+
+            _discoveryWorkerScheduled = true;
+        }
+
+        _ = Task.Run(FlushDiscoveryUpdatesAsync);
+    }
+
+    private async Task FlushDiscoveryUpdatesAsync()
+    {
+        while (!_cts.IsCancellationRequested)
+        {
+            string? solutionPath;
+            var purgePending = false;
+            lock (_discoverySync)
+            {
+                solutionPath = _pendingDiscoverySolutionPath;
+                _pendingDiscoverySolutionPath = null;
+                purgePending = _discoveryPurgePending;
+                _discoveryPurgePending = false;
+            }
+
+            try
+            {
+                if (purgePending)
+                {
+                    PurgeStaleDiscoveryFiles();
+                }
+
+                WriteDiscoveryFile(solutionPath ?? string.Empty);
+            }
+            catch (Exception ex)
+            {
+                ActivityLog.LogWarning(nameof(PipeServerService), $"Failed to flush discovery updates: {ex.Message}");
+            }
+
+            lock (_discoverySync)
+            {
+                if (_pendingDiscoverySolutionPath is null && !_discoveryPurgePending)
+                {
+                    _discoveryWorkerScheduled = false;
+                    return;
+                }
+            }
+
+            await Task.Yield();
+        }
+
+        lock (_discoverySync)
+        {
+            _discoveryWorkerScheduled = false;
+        }
     }
 
     private void PurgeStaleDiscoveryFiles()
@@ -173,7 +242,7 @@ internal sealed class PipeServerService : IDisposable
         {
             steps.Add(new JObject
             {
-                ["id"] = batchRequest.Id is null ? JValue.CreateNull() : batchRequest.Id,
+                ["id"] = (JToken?)batchRequest.Id ?? JValue.CreateNull(),
                 ["command"] = batchRequest.Command ?? string.Empty,
                 ["args"] = batchRequest.Args ?? string.Empty,
             });
@@ -296,7 +365,7 @@ internal sealed class PipeServerService : IDisposable
                 false,
                 "Could not parse request JSON.",
                 new JObject(),
-                new JArray(),
+                [],
                 new { code = "invalid_request", message = ex.Message },
                 DateTimeOffset.UtcNow);
             return JsonConvert.SerializeObject(envelope);
@@ -308,42 +377,48 @@ internal sealed class PipeServerService : IDisposable
             : (request.Command ?? string.Empty);
         var timeoutMilliseconds = ResolveTimeoutMilliseconds(commandName, request.Args, hasBatch);
         var isDiagnosticsCommand = IsDiagnosticsCommand(commandName);
-        var startedAt = DateTimeOffset.UtcNow;
-
-        Task<string>? executionTask;
-        lock (_executorSync)
+        var enqueuedAt = DateTimeOffset.UtcNow;
+        var queueCount = Interlocked.Increment(ref _queuedCommandCount);
+        var positionAtEnqueue = Math.Max(0, queueCount - 1);
+        var acquired = false;
+        try
         {
-            if (_activeCommandTask is { IsCompleted: false })
-            {
-                var busyEnvelope = BuildEnvelope(
-                    commandName,
-                    request.Id,
-                    false,
-                    "Another bridge command is still running.",
-                    new JObject(),
-                    new JArray(),
-                    new { code = "command_in_progress", message = "Another bridge command is still running.", details = new { active = true } },
-                    startedAt);
-                return JsonConvert.SerializeObject(busyEnvelope);
-            }
-
-            executionTask = ExecuteRequestCoreAsync(request, commandName, hasBatch, timeoutMilliseconds, isDiagnosticsCommand, ct);
-            _activeCommandTask = executionTask;
+            await _commandQueue.WaitAsync(ct).ConfigureAwait(false);
+            acquired = true;
+            var startedAt = DateTimeOffset.UtcNow;
+            var queueWaitMs = (startedAt - enqueuedAt).TotalMilliseconds;
+            return await ExecuteRequestCoreAsync(
+                request,
+                commandName,
+                hasBatch,
+                timeoutMilliseconds,
+                isDiagnosticsCommand,
+                ct,
+                enqueuedAt,
+                startedAt,
+                positionAtEnqueue,
+                queueWaitMs).ConfigureAwait(false);
         }
-
-        var response = await executionTask.ConfigureAwait(false);
-        return response;
+        finally
+        {
+            Interlocked.Decrement(ref _queuedCommandCount);
+            if (acquired)
+            {
+                _commandQueue.Release();
+            }
+        }
     }
 
-    private async Task<string> ExecuteRequestCoreAsync(PipeRequest request, string commandName, bool hasBatch, int timeoutMilliseconds, bool isDiagnosticsCommand, CancellationToken serverCancellationToken)
+    private async Task<string> ExecuteRequestCoreAsync(PipeRequest request, string commandName, bool hasBatch, int timeoutMilliseconds, bool isDiagnosticsCommand, CancellationToken serverCancellationToken, DateTimeOffset enqueuedAtUtc, DateTimeOffset startedAtUtc, int queuePositionAtEnqueue, double queueWaitMs)
     {
-        var startedAt = DateTimeOffset.UtcNow;
         var commandStopwatch = Stopwatch.StartNew();
         string? requestId = request.Id;
+        var completionRecorded = false;
         IdeCommandContext? failureContext = null;
         using var commandCts = CancellationTokenSource.CreateLinkedTokenSource(serverCancellationToken);
         commandCts.CancelAfter(timeoutMilliseconds);
         var commandToken = commandCts.Token;
+        _runtime.BridgeWatchdogService.RecordCommandStarted(commandName, requestId);
 
         try
         {
@@ -362,7 +437,7 @@ internal sealed class PipeServerService : IDisposable
                 Assumes.Present(dte);
 
                 await _package.JoinableTaskFactory.SwitchToMainThreadAsync(commandToken);
-                WriteDiscoveryFile(GetSolutionPath(dte!));
+                QueueDiscoveryUpdate(GetSolutionPath(dte!));
 
                 var ctx = new IdeCommandContext(_package, dte!, _runtime.Logger, _runtime, commandToken);
                 failureContext = ctx;
@@ -408,7 +483,12 @@ internal sealed class PipeServerService : IDisposable
                 commandToken,
                 activatePane: ShouldRevealActivity(commandName)).ConfigureAwait(false);
             await _runtime.Logger.LogAsync($"IDE Bridge Trace: {commandName} end (duration={commandStopwatch.ElapsedMilliseconds}ms)", commandToken).ConfigureAwait(false);
-            var envelope = BuildEnvelope(commandName, requestId, true, result.Summary, result.Data, result.Warnings, null, startedAt);
+            _runtime.BridgeWatchdogService.RecordCommandCompleted(commandName, requestId, success: true, durationMs: commandStopwatch.Elapsed.TotalMilliseconds, errorCode: null);
+            completionRecorded = true;
+            var summary = BuildQueuedSummary(result.Summary, queuePositionAtEnqueue, queueWaitMs);
+            var data = WithQueueMetadata(result.Data, enqueuedAtUtc, startedAtUtc, queuePositionAtEnqueue, queueWaitMs);
+            var warnings = WithQueueWarning(result.Warnings, queuePositionAtEnqueue, queueWaitMs);
+            var envelope = BuildEnvelope(commandName, requestId, true, summary, data, warnings, null, startedAtUtc);
             return JsonConvert.SerializeObject(envelope);
         }
         catch (OperationCanceledException) when (commandCts.IsCancellationRequested && !serverCancellationToken.IsCancellationRequested)
@@ -433,7 +513,12 @@ internal sealed class PipeServerService : IDisposable
             {
             }
 
-            var envelope = BuildEnvelope(commandName, requestId, false, summary, failureData, new JArray(), errorObj, startedAt);
+            _runtime.BridgeWatchdogService.RecordCommandCompleted(commandName, requestId, success: false, durationMs: commandStopwatch.Elapsed.TotalMilliseconds, errorCode);
+            completionRecorded = true;
+            var queuedSummary = BuildQueuedSummary(summary, queuePositionAtEnqueue, queueWaitMs);
+            var data = WithQueueMetadata(failureData, enqueuedAtUtc, startedAtUtc, queuePositionAtEnqueue, queueWaitMs);
+            var warnings = WithQueueWarning([], queuePositionAtEnqueue, queueWaitMs);
+            var envelope = BuildEnvelope(commandName, requestId, false, queuedSummary, data, warnings, errorObj, startedAtUtc);
             return JsonConvert.SerializeObject(envelope);
         }
         catch (CommandErrorException ex)
@@ -442,7 +527,12 @@ internal sealed class PipeServerService : IDisposable
             var errorObj = new { code = ex.Code, message = ex.Message, details = ex.Details };
             var failureData = await _runtime.FailureContextService.CaptureAsync(failureContext).ConfigureAwait(false);
             await _runtime.Logger.LogAsync($"IDE Bridge Trace: {commandName} end (duration={commandStopwatch.ElapsedMilliseconds}ms, failed={ex.Code})", CancellationToken.None).ConfigureAwait(false);
-            var envelope = BuildEnvelope(commandName, requestId, false, ex.Message, failureData, new JArray(), errorObj, startedAt);
+            _runtime.BridgeWatchdogService.RecordCommandCompleted(commandName, requestId, success: false, durationMs: commandStopwatch.Elapsed.TotalMilliseconds, ex.Code);
+            completionRecorded = true;
+            var summary = BuildQueuedSummary(ex.Message, queuePositionAtEnqueue, queueWaitMs);
+            var data = WithQueueMetadata(failureData, enqueuedAtUtc, startedAtUtc, queuePositionAtEnqueue, queueWaitMs);
+            var warnings = WithQueueWarning([], queuePositionAtEnqueue, queueWaitMs);
+            var envelope = BuildEnvelope(commandName, requestId, false, summary, data, warnings, errorObj, startedAtUtc);
             return JsonConvert.SerializeObject(envelope);
         }
         catch (Exception ex)
@@ -451,19 +541,66 @@ internal sealed class PipeServerService : IDisposable
             var errorObj = new { code = "internal_error", message = ex.Message, details = new { exception = ex.ToString() } };
             var failureData = await _runtime.FailureContextService.CaptureAsync(failureContext).ConfigureAwait(false);
             await _runtime.Logger.LogAsync($"IDE Bridge Trace: {commandName} end (duration={commandStopwatch.ElapsedMilliseconds}ms, failed=internal_error)", CancellationToken.None).ConfigureAwait(false);
-            var envelope = BuildEnvelope(commandName, requestId, false, ex.Message, failureData, new JArray(), errorObj, startedAt);
+            _runtime.BridgeWatchdogService.RecordCommandCompleted(commandName, requestId, success: false, durationMs: commandStopwatch.Elapsed.TotalMilliseconds, "internal_error");
+            completionRecorded = true;
+            var summary = BuildQueuedSummary(ex.Message, queuePositionAtEnqueue, queueWaitMs);
+            var data = WithQueueMetadata(failureData, enqueuedAtUtc, startedAtUtc, queuePositionAtEnqueue, queueWaitMs);
+            var warnings = WithQueueWarning([], queuePositionAtEnqueue, queueWaitMs);
+            var envelope = BuildEnvelope(commandName, requestId, false, summary, data, warnings, errorObj, startedAtUtc);
             return JsonConvert.SerializeObject(envelope);
         }
         finally
         {
-            lock (_executorSync)
+            if (!completionRecorded)
             {
-                if (_activeCommandTask?.IsCompleted ?? false)
-                {
-                    _activeCommandTask = null;
-                }
+                _runtime.BridgeWatchdogService.RecordCommandCompleted(commandName, requestId, success: false, durationMs: commandStopwatch.Elapsed.TotalMilliseconds, "internal_error");
             }
         }
+    }
+
+    private static string BuildQueuedSummary(string summary, int queuePositionAtEnqueue, double queueWaitMs)
+    {
+        if (queuePositionAtEnqueue <= 0 && queueWaitMs < 100)
+        {
+            return summary;
+        }
+
+        return $"{summary} (queued {Math.Round(queueWaitMs)} ms behind {queuePositionAtEnqueue} request(s))";
+    }
+
+    private static JToken WithQueueMetadata(JToken data, DateTimeOffset enqueuedAtUtc, DateTimeOffset startedAtUtc, int queuePositionAtEnqueue, double queueWaitMs)
+    {
+        var queueMetadata = new JObject
+        {
+            ["positionAtEnqueue"] = queuePositionAtEnqueue,
+            ["waitMs"] = Math.Round(Math.Max(0, queueWaitMs), 1),
+            ["wasQueued"] = queuePositionAtEnqueue > 0 || queueWaitMs >= 100,
+            ["enqueuedAtUtc"] = enqueuedAtUtc.UtcDateTime.ToString("O"),
+            ["startedAtUtc"] = startedAtUtc.UtcDateTime.ToString("O"),
+        };
+
+        if (data is JObject obj)
+        {
+            obj["queue"] = queueMetadata;
+            return obj;
+        }
+
+        return new JObject
+        {
+            ["value"] = data,
+            ["queue"] = queueMetadata,
+        };
+    }
+
+    private static JArray WithQueueWarning(JArray warnings, int queuePositionAtEnqueue, double queueWaitMs)
+    {
+        if (queuePositionAtEnqueue <= 0 && queueWaitMs < 100)
+        {
+            return warnings;
+        }
+
+        warnings.Add($"Command waited in queue for {Math.Round(queueWaitMs)} ms.");
+        return warnings;
     }
 
     private async Task<DTE2?> GetDteAsync(CancellationToken cancellationToken)
@@ -541,6 +678,8 @@ internal sealed class PipeServerService : IDisposable
     public void Dispose()
     {
         _cts.Cancel();
+        _commandQueue.Dispose();
+        _memoryDiscoveryStore.Dispose();
         try
         {
             if (_emitDiscoveryJson && File.Exists(_discoveryFile))

@@ -1,7 +1,7 @@
-using System.ComponentModel.Design;
-using System.Threading.Tasks;
 using Microsoft;
 using Microsoft.VisualStudio.Shell;
+using System.ComponentModel.Design;
+using System.Threading.Tasks;
 using VsIdeBridge.Commands;
 using VsIdeBridge.Services;
 

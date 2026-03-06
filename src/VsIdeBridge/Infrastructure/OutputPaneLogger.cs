@@ -1,22 +1,17 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using EnvDTE80;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace VsIdeBridge.Infrastructure;
 
-internal sealed class OutputPaneLogger
+internal sealed class OutputPaneLogger(AsyncPackage package)
 {
     private const string PaneName = "IDE Bridge";
 
-    private readonly AsyncPackage _package;
-
-    public OutputPaneLogger(AsyncPackage package)
-    {
-        _package = package;
-    }
+    private readonly AsyncPackage _package = package;
 
     public async Task LogAsync(string message, CancellationToken cancellationToken, bool activatePane = false)
     {

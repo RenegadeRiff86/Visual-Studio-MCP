@@ -1,24 +1,20 @@
-using System;
-using System.Threading.Tasks;
 using EnvDTE;
 using EnvDTE80;
 using Microsoft.VisualStudio.Shell;
 using Newtonsoft.Json.Linq;
+using System;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 
 namespace VsIdeBridge.Services;
 
-internal sealed class BuildService
+internal sealed class BuildService(ReadinessService readinessService)
 {
     private const int DefaultBuildTimeoutMilliseconds = 600_000;
     private const int BuildPollIntervalMilliseconds = 500;
 
-    private readonly ReadinessService _readinessService;
-
-    public BuildService(ReadinessService readinessService)
-    {
-        _readinessService = readinessService;
-    }
+    private readonly ReadinessService _readinessService = readinessService;
 
     public async Task<JObject> BuildSolutionAsync(IdeCommandContext context, int timeoutMilliseconds, string? configuration, string? platform)
     {
@@ -81,14 +77,36 @@ internal sealed class BuildService
         }
 
         var solutionBuild = dte.Solution.SolutionBuild;
-        return new JObject
+        var lastBuildInfoKnown = true;
+        var lastBuildInfoValue = 0;
+        string? lastBuildInfoReason = null;
+
+        try
+        {
+            lastBuildInfoValue = solutionBuild.LastBuildInfo;
+        }
+        catch (COMException ex)
+        {
+            lastBuildInfoKnown = false;
+            lastBuildInfoReason = ex.Message;
+        }
+
+        var data = new JObject
         {
             ["solutionPath"] = dte.Solution.FullName,
             ["activeConfiguration"] = solutionBuild.ActiveConfiguration?.Name ?? string.Empty,
             ["activePlatform"] = (solutionBuild.ActiveConfiguration as SolutionConfiguration2)?.PlatformName ?? string.Empty,
             ["buildState"] = solutionBuild.BuildState.ToString(),
-            ["lastBuildInfo"] = solutionBuild.LastBuildInfo,
+            ["lastBuildInfoKnown"] = lastBuildInfoKnown,
+            ["lastBuildInfo"] = lastBuildInfoKnown ? lastBuildInfoValue : JValue.CreateNull(),
         };
+
+        if (!string.IsNullOrWhiteSpace(lastBuildInfoReason))
+        {
+            data["lastBuildInfoReason"] = lastBuildInfoReason;
+        }
+
+        return data;
     }
 
     public async Task<JObject> ListConfigurationsAsync(DTE2 dte)

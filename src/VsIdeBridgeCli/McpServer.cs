@@ -1,10 +1,10 @@
 using System.Diagnostics;
-using System.IO;
-using System.Linq;
-using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using VsIdeBridge.Shared;
+
+namespace VsIdeBridgeCli;
 
 internal static partial class CliApp
 {
@@ -18,10 +18,20 @@ internal static partial class CliApp
 
     private static class McpServer
     {
-        private static readonly string McpLog = @"C:\Temp\mcp-server.log";
+        private const string McpLog = @"C:\Temp\mcp-server.log";
+        private const string DotNetExecutableName = "dotnet";
+        private const string GitExecutableName = "git";
+        private const string CondaExecutableName = "conda";
         private static readonly byte[] RawJsonTerminator = [(byte)'\n'];
         private static readonly byte[] HeaderTerminator = "\r\n\r\n"u8.ToArray();
         private static readonly string[] SupportedProtocolVersions = ["2025-03-26", "2024-11-05"];
+        private static readonly string[] CondaExecutableExtensions = [".exe", ".cmd", ".bat", string.Empty];
+        private static readonly string[] CondaRelativeCandidatePaths =
+        [
+            @"anaconda3\Scripts\conda.exe",
+            @"miniconda3\Scripts\conda.exe",
+            @"Miniconda3\Scripts\conda.exe",
+        ];
 
         private enum McpWireFormat
         {
@@ -318,6 +328,10 @@ internal static partial class CliApp
                 "tool_help",
                 "Return MCP tool help with descriptions, schemas, and examples. Pass name for one tool or omit for all.",
                 ObjectSchema(("name", StringSchema("Optional tool name for focused help."), false))),
+            Tool(
+                "help",
+                "Alias for tool_help. Return MCP tool help with descriptions, schemas, and examples.",
+                ObjectSchema(("name", StringSchema("Optional tool name for focused help."), false))),
             Tool("bridge_health", "Get binding health, discovery source, and last round-trip metrics.", EmptySchema()),
             Tool("list_instances", "List live VS IDE Bridge instances visible to this MCP server.", EmptySchema()),
             Tool(
@@ -511,6 +525,45 @@ internal static partial class CliApp
                 "Close a GitHub issue by number and optionally add a comment.",
                 ObjectSchema(("issue_number", IntegerSchema("Issue number to close."), true), ("repo", StringSchema("Optional owner/repo. Defaults to git origin repo."), false), ("comment", StringSchema("Optional closing comment."), false))),
             Tool(
+                "nuget_restore",
+                "Restore NuGet packages with dotnet restore for the active solution or a specific path.",
+                ObjectSchema(("path", StringSchema("Optional solution/project path. Defaults to the active bridge solution."), false))),
+            Tool(
+                "nuget_add_package",
+                "Add a NuGet package reference to a project via dotnet add package.",
+                ObjectSchema(
+                    ("project", StringSchema("Project path (.csproj/.fsproj/.vbproj), absolute or solution-relative."), true),
+                    ("package", StringSchema("NuGet package id to add."), true),
+                    ("version", StringSchema("Optional package version."), false),
+                    ("source", StringSchema("Optional package source (name or URL)."), false),
+                    ("prerelease", BooleanSchema("If true, include prerelease versions."), false),
+                    ("no_restore", BooleanSchema("If true, skip restore after adding the package."), false))),
+            Tool(
+                "nuget_remove_package",
+                "Remove a NuGet package reference from a project via dotnet remove package.",
+                ObjectSchema(
+                    ("project", StringSchema("Project path (.csproj/.fsproj/.vbproj), absolute or solution-relative."), true),
+                    ("package", StringSchema("NuGet package id to remove."), true))),
+            Tool(
+                "conda_install",
+                "Install one or more packages into a conda environment.",
+                ObjectSchema(
+                    ("packages", ArrayOfStringsSchema("One or more conda package specs (for example ['numpy','cmake>=3.29'])."), true),
+                    ("name", StringSchema("Optional environment name (-n/--name)."), false),
+                    ("prefix", StringSchema("Optional environment prefix path (--prefix)."), false),
+                    ("channels", ArrayOfStringsSchema("Optional channels to add with --channel."), false),
+                    ("dry_run", BooleanSchema("If true, run with --dry-run."), false),
+                    ("yes", BooleanSchema("Auto-confirm install (default true)."), false))),
+            Tool(
+                "conda_remove",
+                "Remove one or more packages from a conda environment.",
+                ObjectSchema(
+                    ("packages", ArrayOfStringsSchema("One or more package names to remove."), true),
+                    ("name", StringSchema("Optional environment name (-n/--name)."), false),
+                    ("prefix", StringSchema("Optional environment prefix path (--prefix)."), false),
+                    ("dry_run", BooleanSchema("If true, run with --dry-run."), false),
+                    ("yes", BooleanSchema("Auto-confirm remove (default true)."), false))),
+            Tool(
                 "find_text",
                 "Full-text search across the solution or a path subtree. Returns file paths, line numbers and preview text.",
                 ObjectSchema(
@@ -528,7 +581,8 @@ internal static partial class CliApp
                     ("end_line", IntegerSchema("Last 1-based line to read (inclusive). Use with start_line."), false),
                     ("line", IntegerSchema("Anchor 1-based line. Use with context_before/context_after."), false),
                     ("context_before", IntegerSchema("Lines before anchor (default 10)."), false),
-                    ("context_after", IntegerSchema("Lines after anchor (default 30)."), false))),
+                    ("context_after", IntegerSchema("Lines after anchor (default 30)."), false),
+                    ("reveal_in_editor", BooleanSchema("Whether to reveal the slice in the editor (default true)."), false))),
             Tool(
                 "find_references",
                 "Find all references to the symbol at file/line/column using VS IntelliSense.",
@@ -565,16 +619,30 @@ internal static partial class CliApp
         private static JsonObject Tool(string name, string description, JsonObject inputSchema) => new()
         {
             ["name"] = name,
-            ["description"] = description,
+            ["description"] = ResolveToolDescription(name, description),
             ["inputSchema"] = inputSchema,
         };
+
+        private static string ResolveToolDescription(string toolName, string fallback)
+        {
+            var bridgeCommand = ResolveBridgeCommandForTool(toolName);
+            if (string.IsNullOrWhiteSpace(bridgeCommand))
+            {
+                return fallback;
+            }
+
+            return BridgeCommandCatalog.TryGetByPipeName(bridgeCommand, out var metadata)
+                ? metadata.Description
+                : fallback;
+        }
 
         private static async Task<JsonNode> CallToolAsync(JsonNode? id, JsonObject? p, BridgeBinding bridgeBinding)
         {
             var toolName = p?["name"]?.GetValue<string>() ?? throw new McpRequestException(id, -32602, "tools/call missing name.");
             var args = p?["arguments"] as JsonObject;
 
-            if (string.Equals(toolName, "tool_help", StringComparison.Ordinal))
+            if (string.Equals(toolName, "tool_help", StringComparison.Ordinal) ||
+                string.Equals(toolName, "help", StringComparison.Ordinal))
             {
                 return ToolHelp(id, args?["name"]?.GetValue<string>());
             }
@@ -592,6 +660,16 @@ internal static partial class CliApp
             if (toolName.StartsWith("github_", StringComparison.Ordinal))
             {
                 return await CallGitHubToolAsync(id, toolName, args, bridgeBinding).ConfigureAwait(false);
+            }
+
+            if (toolName.StartsWith("nuget_", StringComparison.Ordinal))
+            {
+                return await CallNuGetToolAsync(id, toolName, args, bridgeBinding).ConfigureAwait(false);
+            }
+
+            if (toolName.StartsWith("conda_", StringComparison.Ordinal))
+            {
+                return await CallCondaToolAsync(id, toolName, args, bridgeBinding).ConfigureAwait(false);
             }
 
             if (string.Equals(toolName, "list_instances", StringComparison.Ordinal))
@@ -699,7 +777,14 @@ internal static partial class CliApp
                 "build_configurations" => ("build-configurations", string.Empty),
                 "set_build_configuration" => ("set-build-configuration", BuildArgs(("configuration", args?["configuration"]?.GetValue<string>()), ("platform", args?["platform"]?.GetValue<string>()))),
                 "find_text" => ("find-text", BuildArgs(("query", args?["query"]?.GetValue<string>()), ("path", args?["path"]?.GetValue<string>()), ("scope", args?["scope"]?.GetValue<string>()), ("match-case", args?["match_case"]?.GetValue<bool>() == true ? "true" : null), ("whole-word", args?["whole_word"]?.GetValue<bool>() == true ? "true" : null))),
-                "read_file" => ("document-slice", BuildArgs(("file", args?["file"]?.GetValue<string>()), ("start-line", args?["start_line"]?.ToString()), ("end-line", args?["end_line"]?.ToString()), ("line", args?["line"]?.ToString()), ("context-before", args?["context_before"]?.ToString()), ("context-after", args?["context_after"]?.ToString()))),
+                "read_file" => ("document-slice", BuildArgs(
+                    ("file", args?["file"]?.GetValue<string>()),
+                    ("start-line", args?["start_line"]?.ToString()),
+                    ("end-line", args?["end_line"]?.ToString()),
+                    ("line", args?["line"]?.ToString()),
+                    ("context-before", args?["context_before"]?.ToString()),
+                    ("context-after", args?["context_after"]?.ToString()),
+                    ("reveal-in-editor", GetBoolean(args, "reveal_in_editor", true) ? "true" : "false"))),
                 "find_references" => ("find-references", BuildArgs(("file", args?["file"]?.GetValue<string>()), ("line", args?["line"]?.ToString()), ("column", args?["column"]?.ToString()))),
                 "peek_definition" => ("peek-definition", BuildArgs(("file", args?["file"]?.GetValue<string>()), ("line", args?["line"]?.ToString()), ("column", args?["column"]?.ToString()))),
                 "file_outline" => ("file-outline", BuildArgs(("file", args?["file"]?.GetValue<string>()))),
@@ -735,7 +820,7 @@ internal static partial class CliApp
             };
         }
 
-        private static JsonNode ToolHelp(JsonNode? id, string? toolName)
+        private static JsonObject ToolHelp(JsonNode? id, string? toolName)
         {
             var tools = ListTools()
                 .OfType<JsonObject>()
@@ -744,11 +829,8 @@ internal static partial class CliApp
             if (!string.IsNullOrWhiteSpace(toolName))
             {
                 var match = tools.FirstOrDefault(tool =>
-                    string.Equals(tool["name"]?.GetValue<string>(), toolName, StringComparison.Ordinal));
-                if (match is null)
-                {
-                    throw new McpRequestException(id, -32602, $"Unknown MCP tool: {toolName}");
-                }
+                    string.Equals(tool["name"]?.GetValue<string>(), toolName, StringComparison.Ordinal))
+                    ?? throw new McpRequestException(id, -32602, $"Unknown MCP tool: {toolName}");
 
                 var item = BuildToolHelpEntry(match);
                 var result = new JsonObject
@@ -778,16 +860,35 @@ internal static partial class CliApp
         {
             var name = tool["name"]?.GetValue<string>() ?? string.Empty;
             var inputSchema = tool["inputSchema"] as JsonObject ?? EmptySchema();
+            var bridgeCommand = ResolveBridgeCommandForTool(name);
+            BridgeCommandMetadata? bridgeMetadata = null;
+            if (!string.IsNullOrWhiteSpace(bridgeCommand))
+            {
+                if (BridgeCommandCatalog.TryGetByPipeName(bridgeCommand, out var commandMetadata))
+                {
+                    bridgeMetadata = commandMetadata;
+                }
+            }
+
+            var hasBridgeMetadata = bridgeMetadata is not null;
+            var description = hasBridgeMetadata
+                ? bridgeMetadata!.Description
+                : tool["description"]?.GetValue<string>() ?? string.Empty;
+
+            string? bridgeCommandValue = hasBridgeMetadata ? bridgeMetadata!.PipeName : null;
+            string? bridgeExampleValue = hasBridgeMetadata ? bridgeMetadata!.Example : null;
             return new JsonObject
             {
                 ["name"] = name,
-                ["description"] = tool["description"]?.GetValue<string>() ?? string.Empty,
+                ["description"] = description,
                 ["inputSchema"] = inputSchema.DeepClone(),
                 ["example"] = GetToolExample(name, inputSchema),
+                ["bridgeCommand"] = bridgeCommandValue,
+                ["bridgeExample"] = bridgeExampleValue,
             };
         }
 
-        private static JsonNode WrapToolResult(JsonNode structuredContent, bool isError)
+        private static JsonObject WrapToolResult(JsonObject structuredContent, bool isError)
         {
             return new JsonObject
             {
@@ -809,6 +910,8 @@ internal static partial class CliApp
             var overrideExample = name switch
             {
                 "bind_solution" => "{ \"solution\": \"VsIdeBridge.sln\" }",
+                "help" => "{ \"name\": \"open_file\" }",
+                "tool_help" => "{ \"name\": \"open_file\" }",
                 "open_solution" => "{ \"solution\": \"C:\\\\repo\\\\VsIdeBridge.sln\", \"wait_for_ready\": true }",
                 "open_file" => "{ \"file\": \"src\\\\VsIdeBridgeCli\\\\Program.cs\", \"line\": 1 }",
                 "find_files" => "{ \"query\": \"CMakeLists.txt\", \"include_non_project\": true }",
@@ -818,6 +921,11 @@ internal static partial class CliApp
                 "debug_watch" => "{ \"expression\": \"count\", \"timeout_ms\": 1000 }",
                 "set_build_configuration" => "{ \"configuration\": \"Debug\", \"platform\": \"x64\" }",
                 "count_references" => "{ \"file\": \"src\\\\foo.cpp\", \"line\": 42, \"column\": 13 }",
+                "nuget_restore" => "{ \"path\": \"VsIdeBridge.sln\" }",
+                "nuget_add_package" => "{ \"project\": \"src\\\\VsIdeBridgeCli\\\\VsIdeBridgeCli.csproj\", \"package\": \"Newtonsoft.Json\", \"version\": \"13.0.3\" }",
+                "nuget_remove_package" => "{ \"project\": \"src\\\\VsIdeBridgeCli\\\\VsIdeBridgeCli.csproj\", \"package\": \"Newtonsoft.Json\" }",
+                "conda_install" => "{ \"packages\": [\"cmake\", \"ninja\"], \"name\": \"superslicer\", \"yes\": true }",
+                "conda_remove" => "{ \"packages\": [\"ninja\"], \"name\": \"superslicer\", \"yes\": true }",
                 _ => string.Empty,
             };
 
@@ -827,8 +935,8 @@ internal static partial class CliApp
             }
 
             var example = new JsonObject();
-            var requiredNames = inputSchema["required"] as JsonArray ?? new JsonArray();
-            var properties = inputSchema["properties"] as JsonObject ?? new JsonObject();
+            var requiredNames = inputSchema["required"] as JsonArray ?? [];
+            var properties = inputSchema["properties"] as JsonObject ?? [];
             foreach (var required in requiredNames.OfType<JsonNode>())
             {
                 var nameToken = required.GetValue<string>();
@@ -846,6 +954,42 @@ internal static partial class CliApp
             return example.ToJsonString(JsonOptions);
         }
 
+        private static string? ResolveBridgeCommandForTool(string toolName)
+        {
+            return toolName switch
+            {
+                "help" => "help",
+                "state" => "state",
+                "ready" => "ready",
+                "errors" => "errors",
+                "warnings" => "warnings",
+                "list_tabs" => "list-tabs",
+                "open_file" => "open-document",
+                "find_files" => "find-files",
+                "search_symbols" => "search-symbols",
+                "count_references" => "count-references",
+                "quick_info" => "quick-info",
+                "apply_diff" => "apply-diff",
+                "debug_threads" => "debug-threads",
+                "debug_stack" => "debug-stack",
+                "debug_locals" => "debug-locals",
+                "debug_modules" => "debug-modules",
+                "debug_watch" => "debug-watch",
+                "debug_exceptions" => "debug-exceptions",
+                "diagnostics_snapshot" => "diagnostics-snapshot",
+                "build_configurations" => "build-configurations",
+                "set_build_configuration" => "set-build-configuration",
+                "find_text" => "find-text",
+                "read_file" => "document-slice",
+                "find_references" => "find-references",
+                "peek_definition" => "quick-info",
+                "file_outline" => "file-outline",
+                "build" => "build",
+                "open_solution" => "open-solution",
+                _ => null,
+            };
+        }
+
         private static async Task<JsonNode> BridgeHealthAsync(JsonNode? id, BridgeBinding bridgeBinding)
         {
             var sw = Stopwatch.StartNew();
@@ -854,14 +998,21 @@ internal static partial class CliApp
             sw.Stop();
 
             var discovery = bridgeBinding.CurrentDiscovery;
+            var stateData = state["Data"] as JsonObject;
+            var watchdog = stateData?["watchdog"] as JsonObject;
+            var isDegraded = GetBoolean(watchdog, "isDegraded", false);
+            var readySuccess = ResponseFormatter.IsSuccess(ready);
+            var stateSuccess = ResponseFormatter.IsSuccess(state);
             var result = new JsonObject
             {
-                ["success"] = ResponseFormatter.IsSuccess(state),
+                ["success"] = stateSuccess && readySuccess && !isDegraded,
+                ["status"] = stateSuccess && readySuccess && !isDegraded ? "healthy" : "degraded",
                 ["binding"] = discovery is null ? null : DiscoveryToJson(discovery),
                 ["selector"] = SelectorToJson(bridgeBinding.CurrentSelector),
                 ["roundTripMs"] = Math.Round(sw.Elapsed.TotalMilliseconds, 1),
                 ["state"] = state,
                 ["lastReady"] = ready,
+                ["watchdog"] = watchdog,
             };
 
             return WrapToolResult(result, isError: false);
@@ -1000,7 +1151,7 @@ internal static partial class CliApp
             var name = p?["name"]?.GetValue<string>() ?? throw new McpRequestException(id, -32602, "prompts/get missing name.");
             var text = name switch
             {
-                "help" => "Key tools: bind_solution or bind_instance to connect, open_solution to load a .sln, state/ready/bridge_health for status. Navigation: find_files, find_text, open_file, search_symbols, count_references, quick_info, read_file, find_references, peek_definition, file_outline. Editing: apply_diff (optionally post_check). Diagnostics: errors, warnings, diagnostics_snapshot, build, build_configurations, set_build_configuration. Debug: debug_threads, debug_stack, debug_locals, debug_modules, debug_watch, debug_exceptions. Use tool_help for per-tool schemas and examples.",
+                "help" => "Key tools: bind_solution or bind_instance to connect, open_solution to load a .sln, state/ready/bridge_health for status. Navigation: find_files, find_text, open_file, search_symbols, count_references, quick_info, read_file, find_references, peek_definition, file_outline. Editing: apply_diff (optionally post_check). Diagnostics: errors, warnings, diagnostics_snapshot, build, build_configurations, set_build_configuration. Dependencies: nuget_restore, nuget_add_package, nuget_remove_package, conda_install, conda_remove. Debug: debug_threads, debug_stack, debug_locals, debug_modules, debug_watch, debug_exceptions. Use tool_help for per-tool schemas and examples.",
                 "fix_current_errors" => "Bind to the right solution first, call errors to list problems. Use read_file or find_text to inspect code, quick_info and find_references for context, then apply_diff to fix.",
                 "open_solution_and_wait_ready" => "Call open_solution with the absolute .sln path and wait_for_ready=true (default). Then call state or bridge_health.",
                 "git_review_before_commit" => "Call git_status, git_diff_unstaged, git_diff_staged, git_log, then git_add and git_commit when ready.",
@@ -1158,7 +1309,7 @@ internal static partial class CliApp
 
         private static async Task<JsonNode> CallGitToolAsync(JsonNode? id, string toolName, JsonObject? args, BridgeBinding bridgeBinding)
         {
-            var workingDirectory = await ResolveGitWorkingDirectoryAsync(id, bridgeBinding).ConfigureAwait(false);
+            var workingDirectory = await ResolveSolutionWorkingDirectoryAsync(id, bridgeBinding).ConfigureAwait(false);
 
             var gitArgs = toolName switch
             {
@@ -1201,6 +1352,290 @@ internal static partial class CliApp
                 ["isError"] = !(gitResult["success"]?.GetValue<bool>() ?? false),
                 ["structuredContent"] = gitResult,
             };
+        }
+
+        private static async Task<JsonNode> CallNuGetToolAsync(JsonNode? id, string toolName, JsonObject? args, BridgeBinding bridgeBinding)
+        {
+            var workingDirectory = await ResolveSolutionWorkingDirectoryAsync(id, bridgeBinding).ConfigureAwait(false);
+            var nugetArgs = toolName switch
+            {
+                "nuget_restore" => BuildNuGetRestoreArgs(args),
+                "nuget_add_package" => BuildNuGetAddPackageArgs(args, id),
+                "nuget_remove_package" => BuildNuGetRemovePackageArgs(args, id),
+                _ => throw new McpRequestException(id, -32602, $"Unknown MCP tool: {toolName}"),
+            };
+
+            var nugetResult = await RunProcessAsync(DotNetExecutableName, nugetArgs, workingDirectory).ConfigureAwait(false);
+            return new JsonObject
+            {
+                ["content"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["type"] = "text",
+                        ["text"] = nugetResult["stdout"]?.GetValue<string>() ?? string.Empty,
+                    },
+                },
+                ["isError"] = !(nugetResult["success"]?.GetValue<bool>() ?? false),
+                ["structuredContent"] = nugetResult,
+            };
+        }
+
+        private static async Task<JsonNode> CallCondaToolAsync(JsonNode? id, string toolName, JsonObject? args, BridgeBinding bridgeBinding)
+        {
+            var condaExecutable = ResolveCondaExecutable(id);
+            var workingDirectory = await ResolveSolutionWorkingDirectoryAsync(id, bridgeBinding).ConfigureAwait(false);
+            var condaArgs = toolName switch
+            {
+                "conda_install" => BuildCondaInstallArgs(args, id),
+                "conda_remove" => BuildCondaRemoveArgs(args, id),
+                _ => throw new McpRequestException(id, -32602, $"Unknown MCP tool: {toolName}"),
+            };
+            var condaResult = await RunProcessAsync(condaExecutable, condaArgs, workingDirectory).ConfigureAwait(false);
+
+            return new JsonObject
+            {
+                ["content"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["type"] = "text",
+                        ["text"] = condaResult["stdout"]?.GetValue<string>() ?? string.Empty,
+                    },
+                },
+                ["isError"] = !(condaResult["success"]?.GetValue<bool>() ?? false),
+                ["structuredContent"] = condaResult,
+            };
+        }
+
+        private static string BuildNuGetRestoreArgs(JsonObject? args)
+        {
+            var path = args?["path"]?.GetValue<string>();
+            return string.IsNullOrWhiteSpace(path)
+                ? "restore"
+                : $"restore {QuoteForProcess(path)}";
+        }
+
+        private static string BuildNuGetAddPackageArgs(JsonObject? args, JsonNode? id)
+        {
+            var project = GetRequiredString(args, id, "project");
+            var package = GetRequiredString(args, id, "package");
+            var version = args?["version"]?.GetValue<string>();
+            var source = args?["source"]?.GetValue<string>();
+            var prerelease = GetBoolean(args, "prerelease", false);
+            var noRestore = GetBoolean(args, "no_restore", false);
+
+            var segments = new List<string>
+            {
+                "add",
+                QuoteForProcess(project),
+                "package",
+                QuoteForProcess(package),
+            };
+
+            if (!string.IsNullOrWhiteSpace(version))
+            {
+                segments.Add("--version");
+                segments.Add(QuoteForProcess(version));
+            }
+
+            if (!string.IsNullOrWhiteSpace(source))
+            {
+                segments.Add("--source");
+                segments.Add(QuoteForProcess(source));
+            }
+
+            if (prerelease)
+            {
+                segments.Add("--prerelease");
+            }
+
+            if (noRestore)
+            {
+                segments.Add("--no-restore");
+            }
+
+            return string.Join(" ", segments);
+        }
+
+        private static string BuildNuGetRemovePackageArgs(JsonObject? args, JsonNode? id)
+        {
+            var project = GetRequiredString(args, id, "project");
+            var package = GetRequiredString(args, id, "package");
+
+            return $"remove {QuoteForProcess(project)} package {QuoteForProcess(package)}";
+        }
+
+        private static string BuildCondaInstallArgs(JsonObject? args, JsonNode? id)
+        {
+            var packages = GetRequiredStringArray(args, id, "packages");
+            var channels = GetOptionalStringArray(args, "channels");
+            var environmentName = args?["name"]?.GetValue<string>();
+            var environmentPrefix = args?["prefix"]?.GetValue<string>();
+            var dryRun = GetBoolean(args, "dry_run", false);
+            var autoYes = GetBoolean(args, "yes", true);
+
+            var segments = new List<string> { "install" };
+            AppendCondaEnvironmentSelector(segments, environmentName, environmentPrefix, id, "conda_install");
+
+            foreach (var channel in channels)
+            {
+                segments.Add("--channel");
+                segments.Add(QuoteForProcess(channel));
+            }
+
+            foreach (var package in packages)
+            {
+                segments.Add(QuoteForProcess(package));
+            }
+
+            if (autoYes)
+            {
+                segments.Add("--yes");
+            }
+
+            if (dryRun)
+            {
+                segments.Add("--dry-run");
+            }
+
+            return string.Join(" ", segments);
+        }
+
+        private static string BuildCondaRemoveArgs(JsonObject? args, JsonNode? id)
+        {
+            var packages = GetRequiredStringArray(args, id, "packages");
+            var environmentName = args?["name"]?.GetValue<string>();
+            var environmentPrefix = args?["prefix"]?.GetValue<string>();
+            var dryRun = GetBoolean(args, "dry_run", false);
+            var autoYes = GetBoolean(args, "yes", true);
+
+            var segments = new List<string> { "remove" };
+            AppendCondaEnvironmentSelector(segments, environmentName, environmentPrefix, id, "conda_remove");
+
+            foreach (var package in packages)
+            {
+                segments.Add(QuoteForProcess(package));
+            }
+
+            if (autoYes)
+            {
+                segments.Add("--yes");
+            }
+
+            if (dryRun)
+            {
+                segments.Add("--dry-run");
+            }
+
+            return string.Join(" ", segments);
+        }
+
+        private static void AppendCondaEnvironmentSelector(
+            List<string> segments,
+            string? environmentName,
+            string? environmentPrefix,
+            JsonNode? id,
+            string toolName)
+        {
+            if (!string.IsNullOrWhiteSpace(environmentName) && !string.IsNullOrWhiteSpace(environmentPrefix))
+            {
+                throw new McpRequestException(id, -32602, $"{toolName} accepts either name or prefix, not both.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(environmentName))
+            {
+                segments.Add("--name");
+                segments.Add(QuoteForProcess(environmentName));
+            }
+
+            if (!string.IsNullOrWhiteSpace(environmentPrefix))
+            {
+                segments.Add("--prefix");
+                segments.Add(QuoteForProcess(environmentPrefix));
+            }
+        }
+
+        private static string ResolveCondaExecutable(JsonNode? id)
+        {
+            var condaFromEnvironment = Environment.GetEnvironmentVariable("CONDA_EXE");
+            if (!string.IsNullOrWhiteSpace(condaFromEnvironment))
+            {
+                if (File.Exists(condaFromEnvironment))
+                {
+                    return condaFromEnvironment;
+                }
+
+                throw new McpRequestException(id, -32007, $"CONDA_EXE points to '{condaFromEnvironment}', but the file does not exist.");
+            }
+
+            var condaFromPath = ResolveCondaFromPath();
+            if (!string.IsNullOrWhiteSpace(condaFromPath))
+            {
+                return condaFromPath;
+            }
+
+            var condaFromKnownLocations = ResolveCondaFromKnownLocations();
+            if (!string.IsNullOrWhiteSpace(condaFromKnownLocations))
+            {
+                return condaFromKnownLocations;
+            }
+
+            throw new McpRequestException(id, -32007, "Conda executable not found. Install Miniconda/Anaconda or set CONDA_EXE.");
+        }
+
+        private static string? ResolveCondaFromPath()
+        {
+            var pathValue = Environment.GetEnvironmentVariable("PATH");
+            if (string.IsNullOrWhiteSpace(pathValue))
+            {
+                return null;
+            }
+
+            var directories = pathValue.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            foreach (var directory in directories)
+            {
+                foreach (var extension in CondaExecutableExtensions)
+                {
+                    var candidate = Path.Combine(directory, $"{CondaExecutableName}{extension}");
+                    if (File.Exists(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static string? ResolveCondaFromKnownLocations()
+        {
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var roots = new List<string>();
+            if (!string.IsNullOrWhiteSpace(userProfile))
+            {
+                roots.Add(userProfile);
+            }
+
+            if (!string.IsNullOrWhiteSpace(localAppData))
+            {
+                roots.Add(localAppData);
+            }
+
+            foreach (var root in roots)
+            {
+                foreach (var relativePath in CondaRelativeCandidatePaths)
+                {
+                    var candidate = Path.Combine(root, relativePath);
+                    if (File.Exists(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+            }
+
+            return null;
         }
 
 
@@ -1302,7 +1737,7 @@ internal static partial class CliApp
                 : $"checkout -b {QuoteForGit(name)} {QuoteForGit(startPoint)}";
         }
 
-        private static async Task<string> ResolveGitWorkingDirectoryAsync(JsonNode? id, BridgeBinding bridgeBinding)
+        private static async Task<string> ResolveSolutionWorkingDirectoryAsync(JsonNode? id, BridgeBinding bridgeBinding)
         {
             var state = await SendBridgeAsync(id, bridgeBinding, "state", string.Empty).ConfigureAwait(false);
             var data = state["Data"] as JsonObject;
@@ -1310,7 +1745,7 @@ internal static partial class CliApp
             var directory = Path.GetDirectoryName(solutionPath);
             if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
             {
-                throw new McpRequestException(id, -32004, "Could not determine solution directory for git operations. Ensure a solution is open.");
+                throw new McpRequestException(id, -32004, "Could not determine solution directory for local package/git operations. Ensure a solution is open.");
             }
 
             return directory;
@@ -1318,9 +1753,14 @@ internal static partial class CliApp
 
         private static async Task<JsonObject> RunGitAsync(string workingDirectory, string arguments)
         {
+            return await RunProcessAsync(GitExecutableName, arguments, workingDirectory).ConfigureAwait(false);
+        }
+
+        private static async Task<JsonObject> RunProcessAsync(string command, string arguments, string workingDirectory)
+        {
             var startInfo = new ProcessStartInfo
             {
-                FileName = "git",
+                FileName = command,
                 Arguments = arguments,
                 WorkingDirectory = workingDirectory,
                 RedirectStandardOutput = true,
@@ -1342,6 +1782,7 @@ internal static partial class CliApp
             {
                 ["success"] = process.ExitCode == 0,
                 ["exitCode"] = process.ExitCode,
+                ["command"] = command,
                 ["workingDirectory"] = workingDirectory,
                 ["args"] = arguments,
                 ["stdout"] = stdout,
@@ -1362,8 +1803,7 @@ internal static partial class CliApp
 
         private static int GetIntOrDefault(JsonObject? args, string name, int defaultValue)
         {
-            var value = args?[name]?.GetValue<int?>();
-            return value.GetValueOrDefault(defaultValue);
+            return args?[name]?.GetValue<int?>() ?? defaultValue;
         }
 
         private static List<string> GetRequiredPaths(JsonObject? args, JsonNode? id, string name)
@@ -1379,8 +1819,24 @@ internal static partial class CliApp
 
         private static List<string> GetOptionalPaths(JsonObject? args, string name)
         {
+            return GetOptionalStringArray(args, name);
+        }
+
+        private static List<string> GetRequiredStringArray(JsonObject? args, JsonNode? id, string name)
+        {
+            var values = GetOptionalStringArray(args, name);
+            if (values.Count == 0)
+            {
+                throw new McpRequestException(id, -32602, $"tools/call arguments missing required array '{name}'.");
+            }
+
+            return values;
+        }
+
+        private static List<string> GetOptionalStringArray(JsonObject? args, string name)
+        {
             return args?[name] is JsonArray array
-                ? [.. array.OfType<JsonNode>().Select(node => node.GetValue<string>()).Where(path => !string.IsNullOrWhiteSpace(path))]
+                ? [.. array.OfType<JsonNode>().Select(node => node.GetValue<string>()).Where(value => !string.IsNullOrWhiteSpace(value))]
                 : [];
         }
 
@@ -1391,6 +1847,11 @@ internal static partial class CliApp
 
         private static string QuoteForGit(string input)
         {
+            return QuoteForProcess(input);
+        }
+
+        private static string QuoteForProcess(string input)
+        {
             var escaped = input.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
             return $"\"{escaped}\"";
         }
@@ -1398,7 +1859,7 @@ internal static partial class CliApp
 
         private static async Task<JsonNode> CallGitHubToolAsync(JsonNode? id, string toolName, JsonObject? args, BridgeBinding bridgeBinding)
         {
-            var workingDirectory = await ResolveGitWorkingDirectoryAsync(id, bridgeBinding).ConfigureAwait(false);
+            var workingDirectory = await ResolveSolutionWorkingDirectoryAsync(id, bridgeBinding).ConfigureAwait(false);
             var repo = args?["repo"]?.GetValue<string>();
             if (string.IsNullOrWhiteSpace(repo))
             {
@@ -1747,10 +2208,31 @@ internal static partial class CliApp
             await output.FlushAsync().ConfigureAwait(false);
         }
 
-        private sealed class McpRequestException(JsonNode? id, int code, string message) : Exception(message)
+        private sealed class McpRequestException : Exception
         {
-            public JsonNode? Id { get; } = id;
-            public int Code { get; } = code;
+            public McpRequestException()
+            {
+            }
+
+            public McpRequestException(string message)
+                : base(message)
+            {
+            }
+
+            public McpRequestException(string message, Exception innerException)
+                : base(message, innerException)
+            {
+            }
+
+            public McpRequestException(JsonNode? id, int code, string message)
+                : base(message)
+            {
+                Id = id;
+                Code = code;
+            }
+
+            public JsonNode? Id { get; }
+            public int Code { get; }
         }
     }
 }

@@ -11,6 +11,7 @@ internal sealed class IdeBridgeRuntime
         OutputPaneLogger logger,
         BridgeInstanceService bridgeInstanceService,
         BridgeUiSettingsService uiSettings,
+        BridgeWatchdogService bridgeWatchdogService,
         IdeStateService ideStateService,
         FailureContextService failureContextService,
         ReadinessService readinessService,
@@ -27,6 +28,7 @@ internal sealed class IdeBridgeRuntime
         Logger = logger;
         BridgeInstanceService = bridgeInstanceService;
         UiSettings = uiSettings;
+        BridgeWatchdogService = bridgeWatchdogService;
         IdeStateService = ideStateService;
         FailureContextService = failureContextService;
         ReadinessService = readinessService;
@@ -46,6 +48,8 @@ internal sealed class IdeBridgeRuntime
     public BridgeInstanceService BridgeInstanceService { get; }
 
     public BridgeUiSettingsService UiSettings { get; }
+
+    public BridgeWatchdogService BridgeWatchdogService { get; }
 
     public IdeStateService IdeStateService { get; }
 
@@ -102,12 +106,14 @@ internal sealed class IdeBridgeRuntime
         var searchService = new SearchService();
         var errorListService = new ErrorListService(readinessService);
         var buildService = new BuildService(readinessService);
+        var bridgeWatchdogService = new BridgeWatchdogService(package);
 
         var runtime = new IdeBridgeRuntime(
             logger,
             bridgeInstanceService,
             uiSettings,
-            new IdeStateService(bridgeInstanceService),
+            bridgeWatchdogService,
+            new IdeStateService(bridgeInstanceService, bridgeWatchdogService),
             failureContextService,
             readinessService,
             searchService,

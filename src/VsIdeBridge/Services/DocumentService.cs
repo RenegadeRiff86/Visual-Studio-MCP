@@ -1,9 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Runtime.InteropServices;
-using System.Threading.Tasks;
 using EnvDTE;
 using EnvDTE80;
 using Microsoft.VisualStudio.ComponentModelHost;
@@ -12,18 +6,19 @@ using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Text.Editor;
 using Microsoft.VisualStudio.TextManager.Interop;
 using Newtonsoft.Json.Linq;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 
 namespace VsIdeBridge.Services;
 
-internal sealed class DocumentService
+internal sealed class DocumentService(IServiceProvider serviceProvider)
 {
-    private readonly IServiceProvider _serviceProvider;
-
-    public DocumentService(IServiceProvider serviceProvider)
-    {
-        _serviceProvider = serviceProvider;
-    }
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
 
     public async Task<JObject> ListOpenTabsAsync(DTE2 dte)
     {
@@ -196,12 +191,12 @@ internal sealed class DocumentService
             window.Document.Save();
         }
 
-        if ((changedRanges is not null && changedRanges.Count > 0) || (deletedLines is not null && deletedLines.Count > 0))
+        if ((changedRanges?.Count > 0) || (deletedLines?.Count > 0))
         {
             var view = TryGetActiveWpfTextView();
             if (view is not null)
             {
-                BridgeEditHighlightService.Instance.ApplyHighlights(view, changedRanges ?? Array.Empty<(int, int)>(), deletedLines ?? Array.Empty<int>());
+                BridgeEditHighlightService.Instance.ApplyHighlights(view, changedRanges ?? [], deletedLines ?? []);
             }
         }
 
@@ -220,8 +215,7 @@ internal sealed class DocumentService
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var textManager = _serviceProvider.GetService(typeof(SVsTextManager)) as IVsTextManager;
-        if (textManager is null)
+        if (_serviceProvider.GetService(typeof(SVsTextManager)) is not IVsTextManager textManager)
         {
             return null;
         }
@@ -361,12 +355,7 @@ internal sealed class DocumentService
         if (!string.IsNullOrWhiteSpace(filePath))
         {
             var normalized = PathNormalization.NormalizeFilePath(filePath);
-            var document = TryFindOpenDocumentByPath(dte, normalized);
-            if (document is null)
-            {
-                throw new CommandErrorException("document_not_found", $"No open document matching path: {filePath}");
-            }
-
+            var document = TryFindOpenDocumentByPath(dte, normalized) ?? throw new CommandErrorException("document_not_found", $"No open document matching path: {filePath}");
             document.Save();
             return new JObject
             {
@@ -377,12 +366,7 @@ internal sealed class DocumentService
             };
         }
 
-        var active = dte.ActiveDocument;
-        if (active is null)
-        {
-            throw new CommandErrorException("no_active_document", "No active document to save.");
-        }
-
+        var active = dte.ActiveDocument ?? throw new CommandErrorException("no_active_document", "No active document to save.");
         active.Save();
         return new JObject
         {
@@ -452,12 +436,7 @@ internal sealed class DocumentService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        var document = dte.ActiveDocument;
-        if (document is null)
-        {
-            throw new CommandErrorException("document_not_found", "There is no active document.");
-        }
-
+        var document = dte.ActiveDocument ?? throw new CommandErrorException("document_not_found", "There is no active document.");
         if (document.Object("TextDocument") is not TextDocument textDocument)
         {
             throw new CommandErrorException("unsupported_operation", $"Active document is not a text document: {document.FullName}");
@@ -472,7 +451,8 @@ internal sealed class DocumentService
         string? filePath,
         int startLine,
         int endLine,
-        bool includeLineNumbers)
+        bool includeLineNumbers,
+        bool revealInEditor = true)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
@@ -484,6 +464,11 @@ internal sealed class DocumentService
         var clampedEnd = Math.Max(clampedStart, endLine);
         var actualStart = Math.Min(clampedStart, Math.Max(1, lines.Count));
         var actualEnd = Math.Min(clampedEnd, Math.Max(1, lines.Count));
+
+        if (revealInEditor)
+        {
+            _ = await OpenDocumentAsync(dte, resolvedPath, actualStart, 1, allowDiskFallback: false).ConfigureAwait(true);
+        }
 
         var sliceLines = new JArray();
         var builder = new System.Text.StringBuilder();
@@ -550,12 +535,7 @@ internal sealed class DocumentService
             object? arg = null;
             var shell = (Microsoft.VisualStudio.Shell.Interop.IVsUIShell)
                 Microsoft.VisualStudio.Shell.Package.GetGlobalService(
-                    typeof(Microsoft.VisualStudio.Shell.Interop.SVsUIShell));
-            if (shell is null)
-            {
-                throw new CommandErrorException("unsupported_operation", "IVsUIShell service not available.");
-            }
-
+                    typeof(Microsoft.VisualStudio.Shell.Interop.SVsUIShell)) ?? throw new CommandErrorException("unsupported_operation", "IVsUIShell service not available.");
             shell.PostExecCommand(ref goToDefnGuid, goToDefnId, 0, ref arg);
             // PostExecCommand is asynchronous — give VS a moment to navigate.
             await Task.Delay(500).ConfigureAwait(true);
@@ -814,8 +794,8 @@ internal sealed class DocumentService
         return result;
     }
 
-    private static readonly HashSet<vsCMElement> s_outlineKinds = new HashSet<vsCMElement>
-    {
+    private static readonly HashSet<vsCMElement> s_outlineKinds =
+    [
         vsCMElement.vsCMElementFunction,
         vsCMElement.vsCMElementClass,
         vsCMElement.vsCMElementStruct,
@@ -824,7 +804,7 @@ internal sealed class DocumentService
         vsCMElement.vsCMElementInterface,
         vsCMElement.vsCMElementProperty,
         vsCMElement.vsCMElementVariable,
-    };
+    ];
 
     private static void CollectOutlineSymbols(CodeElement element, JArray symbols, int depth, int maxDepth, string? kindFilter = null)
     {
@@ -953,13 +933,13 @@ internal sealed class DocumentService
         }
 
         var allMatches = SolutionFileLocator.FindMatches(dte, filePath)
-            .Concat(allowDiskFallback ? SolutionFileLocator.FindDiskMatches(dte, filePath, maxResults: 250) : Array.Empty<SolutionFileLocator.Match>())
+            .Concat(allowDiskFallback ? SolutionFileLocator.FindDiskMatches(dte, filePath, maxResults: 250) : [])
             .GroupBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
             .Select(group => new
             {
                 Path = group.Key,
                 Score = group.Max(item => item.Score),
-                Source = group.OrderByDescending(item => item.Score).First().Source,
+                group.OrderByDescending(item => item.Score).First().Source,
             })
             .OrderByDescending(item => item.Score)
             .ThenBy(item => item.Path.Length)
@@ -1077,10 +1057,12 @@ internal sealed class DocumentService
     private static IReadOnlyList<Document> EnumerateOpenDocuments(DTE2 dte)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        return dte.Documents
-            .Cast<Document>()
-            .Where(HasDocumentPath)
-            .ToArray();
+        return
+        [
+            .. dte.Documents
+                .Cast<Document>()
+                .Where(HasDocumentPath),
+        ];
     }
 
     private static (List<Document> Documents, string MatchedBy) ResolveDocumentMatches(
@@ -1108,7 +1090,7 @@ internal sealed class DocumentService
         }
 
         var rawQuery = query!.Trim();
-        var queryLooksLikePath = rawQuery.IndexOfAny(new[] { '\\', '/', ':' }) >= 0;
+        var queryLooksLikePath = rawQuery.IndexOfAny(['\\', '/', ':']) >= 0;
         if (queryLooksLikePath)
         {
             var normalizedQueryPath = PathNormalization.NormalizeFilePath(rawQuery);
@@ -1154,7 +1136,7 @@ internal sealed class DocumentService
             throw new CommandErrorException("invalid_arguments", $"Document query is ambiguous. Matches: {options}");
         }
 
-        return allowMultiple ? (matches, matchedBy) : (new List<Document> { matches[0] }, matchedBy);
+        return allowMultiple ? (matches, matchedBy) : ([matches[0]], matchedBy);
     }
 
     private static string ReadDocumentText(DTE2 dte, string resolvedPath)
@@ -1219,11 +1201,13 @@ internal sealed class DocumentService
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        return matches
-            .Select(document => TryGetDocumentName(document) ?? Path.GetFileName(TryGetDocumentFullName(document) ?? string.Empty))
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        return
+        [
+            .. matches
+                .Select(document => TryGetDocumentName(document) ?? Path.GetFileName(TryGetDocumentFullName(document) ?? string.Empty))
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase),
+        ];
     }
 
     private static Document? TryFindOpenDocumentByPath(DTE2 dte, string resolvedPath)
@@ -1255,7 +1239,7 @@ internal sealed class DocumentService
     private static List<string> SplitLines(string text)
     {
         var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
-        return normalized.Split('\n').ToList();
+        return [.. normalized.Split('\n')];
     }
 
     private static JObject CreateDocumentInfo(Document document, string? activePath, int? tabIndex = null)
@@ -1274,7 +1258,7 @@ internal sealed class DocumentService
             ["tabIndex"] = tabIndex,
             ["isActive"] = !string.IsNullOrWhiteSpace(normalizedPath) &&
                 string.Equals(normalizedPath, normalizedActivePath, StringComparison.OrdinalIgnoreCase),
-            ["saved"] = saved.HasValue ? saved.Value : JValue.CreateNull(),
+            ["saved"] = (JToken?)saved ?? JValue.CreateNull(),
         };
     }
 

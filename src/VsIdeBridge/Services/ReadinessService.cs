@@ -1,9 +1,9 @@
-using System;
-using System.Threading.Tasks;
 using Microsoft.VisualStudio.OperationProgress;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using Newtonsoft.Json.Linq;
+using System;
+using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 
 namespace VsIdeBridge.Services;

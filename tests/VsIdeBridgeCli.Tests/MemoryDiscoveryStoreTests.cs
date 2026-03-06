@@ -1,14 +1,14 @@
-using System.Diagnostics;
-using System.IO;
-using System.IO.MemoryMappedFiles;
-using System.Text;
-using System.Threading;
 using Newtonsoft.Json.Linq;
+using System.Diagnostics;
+using System.IO.MemoryMappedFiles;
+using System.Runtime.Versioning;
+using System.Text;
 using VsIdeBridge.Services;
 using Xunit;
 
 namespace VsIdeBridgeCli.Tests;
 
+[SupportedOSPlatform("windows")]
 public class MemoryDiscoveryStoreTests
 {
     [Fact]
@@ -19,7 +19,7 @@ public class MemoryDiscoveryStoreTests
             return;
         }
 
-        var store = new MemoryDiscoveryStore(
+        using var store = new MemoryDiscoveryStore(
             mapName: "VsIdeBridge.Tests.NoopMap",
             mutexName: "VsIdeBridge.Tests.NoopMap.mutex",
             capacityBytes: 4096,
@@ -85,6 +85,7 @@ public class MemoryDiscoveryStoreTests
         }
         finally
         {
+            store.Dispose();
             if (File.Exists(mapFilePath))
             {
                 File.Delete(mapFilePath);
@@ -104,7 +105,7 @@ public class MemoryDiscoveryStoreTests
         var mapName = $"VsIdeBridge.Tests.Locked.{suffix}";
         var mutexName = $"{mapName}.mutex";
         const int capacityBytes = 64 * 1024;
-        var store = CreateStore(mapName, mutexName, capacityBytes, TimeSpan.FromMilliseconds(50));
+        using var store = CreateStore(mapName, mutexName, capacityBytes, TimeSpan.FromMilliseconds(50));
 
         using var holderMutex = new Mutex(false, mutexName);
         using var mutexAcquired = new ManualResetEventSlim(false);
@@ -139,6 +140,7 @@ public class MemoryDiscoveryStoreTests
             $"Upsert took {stopwatch.ElapsedMilliseconds}ms while lock timeout should be bounded.");
     }
 
+    [SupportedOSPlatform("windows")]
     private static MemoryDiscoveryStore CreateStore(
         string mapName,
         string mutexName,
@@ -208,6 +210,6 @@ public class MemoryDiscoveryStoreTests
 
     private static IEnumerable<JObject> GetItems(JObject root)
     {
-        return (root["items"] as JArray)?.OfType<JObject>() ?? Enumerable.Empty<JObject>();
+        return (root["items"] as JArray)?.OfType<JObject>() ?? [];
     }
 }

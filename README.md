@@ -171,13 +171,19 @@ Optional parameters:
 
 ## Command Surface
 
-The tables below list the preferred simple pipe names. The live `catalog` command also returns the legacy `Tools.Ide*` names for compatibility.
+The tables below list the preferred simple pipe names. The live `catalog` command returns a standardized payload for LLM callers:
+
+- `schemaVersion` and `generatedAtUtc` at the top level
+- `catalog.commands[]` as the canonical list
+- per-command fields: `name`, `canonicalName`, `description`, `example`, `aliases`
+
+Compatibility fields (`commands[]`, `legacyCommands[]`, `commandDetails[]`) are still emitted.
 
 ### Core
 
 | Command | Description |
 |---------|-------------|
-| `help` | List all registered commands |
+| `help` | List all registered commands (`catalog` is an alias) |
 | `state` | Snapshot of IDE state (solution path, active document, etc.) |
 | `ready` | Block until IntelliSense is available |
 | `open-solution` | Open a solution file |
@@ -563,6 +569,7 @@ Exposed MCP tools use simple names:
 - `state`
 - `ready`
 - `tool_help`
+- `help` (alias of `tool_help`)
 - `bridge_health`
 - `list_instances`
 - `bind_instance`
@@ -617,7 +624,7 @@ Exposed MCP tools use simple names:
 - `github_issue_search`
 - `github_issue_close`
 
-Use `tool_help` to retrieve descriptions, schemas, and examples for every MCP tool in one call.
+Use `tool_help` to retrieve descriptions, schemas, examples, and bridge command metadata (`bridgeCommand`, `bridgeExample`) for every MCP tool in one call.
 
 Exposed MCP resources:
 

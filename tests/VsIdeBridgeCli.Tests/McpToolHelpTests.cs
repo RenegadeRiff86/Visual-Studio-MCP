@@ -59,6 +59,7 @@ public sealed class McpToolHelpTests
         [
             "ready",
             "tool_help",
+            "help",
             "debug_threads",
             "debug_stack",
             "debug_locals",
@@ -70,6 +71,11 @@ public sealed class McpToolHelpTests
             "set_build_configuration",
             "count_references",
             "bridge_health",
+            "nuget_restore",
+            "nuget_add_package",
+            "nuget_remove_package",
+            "conda_install",
+            "conda_remove",
         ];
 
         foreach (var tool in requiredTools)
@@ -88,14 +94,40 @@ public sealed class McpToolHelpTests
         AssertContainsSchemaProperty(toolMap["find_files"], "extensions");
         AssertContainsSchemaProperty(toolMap["find_files"], "max_results");
         AssertContainsSchemaProperty(toolMap["find_files"], "include_non_project");
+        AssertContainsSchemaProperty(toolMap["read_file"], "reveal_in_editor");
+        AssertContainsSchemaProperty(toolMap["nuget_restore"], "path");
+        AssertContainsSchemaProperty(toolMap["nuget_add_package"], "project");
+        AssertContainsSchemaProperty(toolMap["nuget_add_package"], "package");
+        AssertContainsSchemaProperty(toolMap["nuget_add_package"], "version");
+        AssertContainsSchemaProperty(toolMap["nuget_remove_package"], "project");
+        AssertContainsSchemaProperty(toolMap["nuget_remove_package"], "package");
+        AssertContainsSchemaProperty(toolMap["conda_install"], "packages");
+        AssertContainsSchemaProperty(toolMap["conda_install"], "channels");
+        AssertContainsSchemaProperty(toolMap["conda_install"], "yes");
+        AssertContainsSchemaProperty(toolMap["conda_remove"], "packages");
+        AssertContainsSchemaProperty(toolMap["conda_remove"], "yes");
+
+        AssertBridgeMetadata(toolMap["state"], "state");
+        AssertBridgeMetadata(toolMap["ready"], "ready");
+        AssertBridgeMetadata(toolMap["find_files"], "find-files");
+        AssertBridgeMetadata(toolMap["open_file"], "open-document");
+        AssertBridgeMetadata(toolMap["debug_threads"], "debug-threads");
+        AssertBridgeMetadata(toolMap["diagnostics_snapshot"], "diagnostics-snapshot");
+        AssertBridgeMetadata(toolMap["set_build_configuration"], "set-build-configuration");
+        AssertBridgeMetadata(toolMap["count_references"], "count-references");
     }
 
     [Theory]
+    [InlineData("help")]
     [InlineData("tool_help")]
     [InlineData("bridge_health")]
     [InlineData("count_references")]
     [InlineData("set_build_configuration")]
     [InlineData("diagnostics_snapshot")]
+    [InlineData("nuget_add_package")]
+    [InlineData("nuget_remove_package")]
+    [InlineData("conda_install")]
+    [InlineData("conda_remove")]
     public async Task ToolHelp_FocusedLookup_ReturnsSingleMatch(string toolName)
     {
         using var response = await CallToolAsync("tool_help", new { name = toolName });
@@ -112,6 +144,15 @@ public sealed class McpToolHelpTests
     {
         var properties = tool.GetProperty("inputSchema").GetProperty("properties");
         Assert.True(properties.TryGetProperty(propertyName, out _), $"Expected schema property '{propertyName}'.");
+    }
+
+    private static void AssertBridgeMetadata(JsonElement tool, string expectedCommand)
+    {
+        Assert.True(tool.TryGetProperty("bridgeCommand", out var bridgeCommand));
+        Assert.Equal(expectedCommand, bridgeCommand.GetString());
+
+        Assert.True(tool.TryGetProperty("bridgeExample", out var bridgeExample));
+        Assert.False(string.IsNullOrWhiteSpace(bridgeExample.GetString()));
     }
 
     private static async Task<JsonDocument> CallToolAsync(string toolName, object arguments)

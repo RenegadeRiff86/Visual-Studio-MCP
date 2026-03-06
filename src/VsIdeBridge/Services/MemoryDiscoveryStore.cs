@@ -1,26 +1,34 @@
+using Newtonsoft.Json.Linq;
 using System;
+using System.IO;
 using System.IO.MemoryMappedFiles;
 using System.Linq;
+#if NET5_0_OR_GREATER
+using System.Runtime.Versioning;
+#endif
 using System.Text;
 using System.Threading;
-using Newtonsoft.Json.Linq;
 
 namespace VsIdeBridge.Services;
 
-internal sealed class MemoryDiscoveryStore
+#if NET5_0_OR_GREATER
+[SupportedOSPlatform("windows")]
+#endif
+internal sealed class MemoryDiscoveryStore : IDisposable
 {
-    private const string DefaultMapName = @"Global\VsIdeBridge.Discovery.v1";
-    private const string DefaultMutexName = @"Global\VsIdeBridge.Discovery.v1.mutex";
+    private const string DefaultMapName = @"Local\VsIdeBridge.Discovery.v1";
+    private const string DefaultMutexName = @"Local\VsIdeBridge.Discovery.v1.mutex";
     private const int DefaultCapacityBytes = 1024 * 1024;
     private static readonly TimeSpan EntryTtl = TimeSpan.FromHours(6);
     private static readonly TimeSpan DefaultLockTimeout = TimeSpan.FromMilliseconds(100);
-    private static readonly UTF8Encoding Utf8NoBom = new UTF8Encoding(false);
+    private static readonly UTF8Encoding Utf8NoBom = new(false);
     private readonly string _mapName;
     private readonly string _mutexName;
     private readonly int _capacityBytes;
     private readonly TimeSpan _lockTimeout;
     private readonly Func<string, Mutex> _mutexFactory;
     private readonly Func<string, int, MemoryMappedFile> _mapFactory;
+    private readonly Lazy<MemoryMappedFile?> _sharedMap;
 
     public MemoryDiscoveryStore()
         : this(
@@ -47,6 +55,7 @@ internal sealed class MemoryDiscoveryStore
         _lockTimeout = lockTimeout > TimeSpan.Zero ? lockTimeout : DefaultLockTimeout;
         _mutexFactory = mutexFactory ?? throw new ArgumentNullException(nameof(mutexFactory));
         _mapFactory = mapFactory ?? throw new ArgumentNullException(nameof(mapFactory));
+        _sharedMap = new Lazy<MemoryMappedFile?>(CreateSharedMap, LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     public void Upsert(object discoveryRecord)
@@ -110,7 +119,7 @@ internal sealed class MemoryDiscoveryStore
             return items;
         }
 
-        items = new JArray();
+        items = [];
         root["items"] = items;
         return items;
     }
@@ -144,6 +153,7 @@ internal sealed class MemoryDiscoveryStore
         var hasLock = false;
         try
         {
+            Trace($"ExecuteWithStore start map='{_mapName}' mutex='{_mutexName}'.");
             mutex = _mutexFactory(_mutexName);
             try
             {
@@ -156,18 +166,27 @@ internal sealed class MemoryDiscoveryStore
 
             if (!hasLock)
             {
+                Trace("ExecuteWithStore lock timeout.");
                 return;
             }
 
-            using var map = _mapFactory(_mapName, _capacityBytes);
+            var map = _sharedMap.Value;
+            if (map is null)
+            {
+                Trace("ExecuteWithStore shared map unavailable.");
+                return;
+            }
+
             using var view = map.CreateViewStream(0, _capacityBytes, MemoryMappedFileAccess.ReadWrite);
             var root = ReadRoot(view, _capacityBytes);
             mutate(root);
             WriteRoot(view, root, _capacityBytes);
+            Trace("ExecuteWithStore write completed.");
         }
-        catch
+        catch (Exception ex)
         {
             // Best-effort store. Discovery JSON remains the compatibility fallback.
+            Trace($"ExecuteWithStore error: {ex}");
         }
         finally
         {
@@ -183,6 +202,54 @@ internal sealed class MemoryDiscoveryStore
             }
 
             mutex?.Dispose();
+        }
+    }
+
+    private MemoryMappedFile? CreateSharedMap()
+    {
+        try
+        {
+            return _mapFactory(_mapName, _capacityBytes);
+        }
+        catch (Exception ex)
+        {
+            Trace($"CreateSharedMap error: {ex}");
+            return null;
+        }
+    }
+
+    private static void Trace(string message)
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable("VS_IDE_BRIDGE_TRACE_DISCOVERY"), "true", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "vs-ide-bridge");
+            Directory.CreateDirectory(directory);
+            var logPath = Path.Combine(directory, "memory-discovery-trace.log");
+            File.AppendAllText(logPath, $"[{DateTimeOffset.UtcNow:O}] {message}{Environment.NewLine}");
+        }
+        catch
+        {
+        }
+    }
+
+    public void Dispose()
+    {
+        if (!_sharedMap.IsValueCreated)
+        {
+            return;
+        }
+
+        try
+        {
+            _sharedMap.Value?.Dispose();
+        }
+        catch
+        {
         }
     }
 
