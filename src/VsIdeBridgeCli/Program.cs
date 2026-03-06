@@ -2271,6 +2271,7 @@ internal static class HelpText
           discovery-mode defaults to memory-first with JSON fallback compatibility.
           --tools-only advertises MCP tools capability only; resources/prompts methods remain callable.
           Use MCP tool `tool_help` to retrieve all MCP tools with schemas and examples.
+          Emits optional service control events over named pipe `VsIdeBridgeServiceControl` when the service host is running.
 
         Example
           vs-ide-bridge mcp-server --instance <instanceId>

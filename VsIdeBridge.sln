@@ -42,4 +42,7 @@ Global
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
-EndGlobal
+EndProject("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "VsIdeBridgeService", "src\VsIdeBridgeService\VsIdeBridgeService.csproj", "{C38E51A7-8C5B-4E20-8A41-6F4C03F0F4A9}"
+EndProject
+Global
+
