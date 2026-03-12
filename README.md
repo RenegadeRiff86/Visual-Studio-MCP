@@ -72,51 +72,7 @@ This is enough to produce:
 - `src\VsIdeBridge\bin\Debug\net472\VsIdeBridge.dll`
 - `src\VsIdeBridgeCli\bin\Debug\net8.0\vs-ide-bridge.exe`
 
-### Installer EXE (Preferred)
-
-Build release artifacts:
-
-```bat
-scripts\build.bat Release
-dotnet build src\VsIdeBridgeService\VsIdeBridgeService.csproj -c Release
-dotnet build src\VsIdeBridgeInstaller\VsIdeBridgeInstaller.csproj -c Release
-```
-
-Install (single EXE command, elevated terminal):
-
-```powershell
-src\VsIdeBridgeInstaller\bin\Release\net8.0-windows\vs-ide-bridge-installer.exe
-```
-
-Uninstall:
-
-```powershell
-src\VsIdeBridgeInstaller\bin\Release\net8.0-windows\vs-ide-bridge-installer.exe uninstall
-```
-
-Default installer behavior:
-
-- Copies bridge CLI + service binaries to `C:\Program Files\VsIdeBridge`
-- Registers `VsIdeBridgeService` as an automatic-start Windows service
-- Installs/updates VSIX `RenegadeRiff86.VsIdeBridge` and removes the legacy `StanElston.VsIdeBridge` identity if present
-
-Idle policy enforced by service host:
-
-- Activity tracked from MCP request traffic, in-flight commands, and connected client stream state
-- Never stops while commands are in-flight
-- Logs final `service going idle` event before stop
-- Restarts automatically with Windows service startup, or on manual recovery if the service is stopped
-
-Logs and recovery:
-
-```powershell
-Get-Content C:\ProgramData\VsIdeBridge\service.log -Tail 200
-sc.exe query VsIdeBridgeService
-sc.exe start VsIdeBridgeService
-sc.exe stop VsIdeBridgeService
-```
-
-### Wizard Setup.exe (End-User Friendly)
+### Installer (Preferred)
 
 Create a standard Windows installer wizard (`Setup.exe`):
 
@@ -143,6 +99,28 @@ What users see:
 - Standard installer wizard pages (welcome/license/install folder/progress/finish) plus a post-install stage that names the active service/VSIX step
 - Installed app appears in Apps & Features with uninstall entry
 - Installs bridge files, registers the service (`Automatic`), starts it after install, removes the legacy VSIX identity if present, and installs the current VSIX
+
+Default behavior:
+
+- Copies bridge CLI + service binaries to `C:\Program Files\VsIdeBridge`
+- Registers `VsIdeBridgeService` as an automatic-start Windows service
+- Installs/updates VSIX `RenegadeRiff86.VsIdeBridge` and removes the legacy `StanElston.VsIdeBridge` identity if present
+
+Idle policy enforced by service host:
+
+- Activity tracked from MCP request traffic, in-flight commands, and connected client stream state
+- Never stops while commands are in-flight
+- Restarts automatically on Windows service startup or manual recovery
+
+Logs and recovery:
+
+```powershell
+Get-Content C:\ProgramData\VsIdeBridge\service.log -Tail 200
+sc.exe query VsIdeBridgeService
+sc.exe start VsIdeBridgeService
+sc.exe stop VsIdeBridgeService
+```
+
 ### Legacy Manual VSIX Update (Troubleshooting)
 
 **Prerequisites - before running the installer:**
@@ -245,15 +223,26 @@ Optional parameters:
 The MCP facade is the preferred interface for agent workflows. Use `tool_help` for the authoritative live schema and examples. Current MCP commands:
 
 ```text
+activate_document
+activate_window
+add_file_to_project
+add_project
 apply_diff
 bind_instance
 bind_solution
 bridge_health
 build
 build_configurations
+build_errors
+call_hierarchy
+clear_breakpoints
+close_document
+close_file
+close_others
 conda_install
 conda_remove
 count_references
+create_solution
 debug_exceptions
 debug_locals
 debug_modules
@@ -261,11 +250,17 @@ debug_stack
 debug_threads
 debug_watch
 diagnostics_snapshot
+disable_all_breakpoints
+disable_breakpoint
+enable_all_breakpoints
+enable_breakpoint
 errors
+execute_command
 file_outline
 find_files
 find_references
 find_text
+format_document
 git_add
 git_branch_list
 git_checkout
@@ -290,22 +285,45 @@ git_status
 git_tag_list
 github_issue_close
 github_issue_search
+goto_definition
+goto_implementation
 help
+list_breakpoints
+list_documents
 list_instances
+list_projects
 list_tabs
+list_windows
 nuget_add_package
 nuget_remove_package
 nuget_restore
 open_file
 open_solution
 peek_definition
+query_project_configurations
+query_project_items
+query_project_outputs
+query_project_properties
+query_project_references
 quick_info
 read_file
 ready
+remove_breakpoint
+remove_file_from_project
+remove_project
+save_document
+search_solutions
 search_symbols
+set_breakpoint
 set_build_configuration
+set_startup_project
+set_version
+shell_exec
 state
 tool_help
+vs_close
+vs_open
+wait_for_instance
 warnings
 ```
 
@@ -327,6 +345,7 @@ Compatibility fields (`commands[]`, `legacyCommands[]`, `commandDetails[]`) are 
 | `state` | Snapshot of IDE state (solution path, active document, etc.) |
 | `ready` | Block until IntelliSense is available |
 | `open-solution` | Open a solution file |
+| `create-solution` | Create and open a new `.sln` solution |
 | `close` | Close the targeted Visual Studio instance gracefully |
 | `batch` | Execute multiple commands in one pipe round-trip |
 
@@ -356,14 +375,14 @@ Compatibility fields (`commands[]`, `legacyCommands[]`, `commandDetails[]`) are 
 | `close-document` | Close a document by name |
 | `close-file` | Close a document by full path |
 | `close-others` | Close all tabs except the active one |
+| `save-document` | Save one document or all open documents |
 | `activate-window` | Activate a tool window |
 | `list-windows` | List tool windows |
 | `execute-command` | Execute any native VS command by name |
+| `format-document` | Format the current document or a specific file |
 | `apply-diff` | Apply a unified diff through the live VS editor |
 
 ### Breakpoints
-
-> These are pipe commands, not first-class CLI verbs. Use `send --command <name>` to invoke them.
 
 | Command | Description |
 |---------|-------------|
@@ -396,9 +415,31 @@ Compatibility fields (`commands[]`, `legacyCommands[]`, `commandDetails[]`) are 
 | Command | Description |
 |---------|-------------|
 | `build` | Build the solution |
+| `build-errors` | Build then capture diagnostics in one call |
 | `warnings` | Capture warnings from the Error List, or Build Output fallback, as JSON |
 | `errors` | Capture errors from the Error List, or Build Output fallback, as JSON |
-| `build-errors` | Build then capture diagnostics in one call |
+| `build-configurations` | List available build configurations/platforms |
+| `set-build-configuration` | Activate one build configuration/platform pair |
+| `diagnostics-snapshot` | IDE state + debugger + build + errors/warnings in one call |
+
+### Solution and Projects
+
+| Command | Description |
+|---------|-------------|
+| `search-solutions` | Search for `.sln`/`.slnx` files on disk under a root directory |
+| `open-solution` | Open a solution file in the current VS instance |
+| `create-solution` | Create and open a new solution in the current VS instance |
+| `list-projects` | List all projects in the open solution |
+| `add-project` | Add an existing project file to the solution |
+| `remove-project` | Remove a project from the solution |
+| `set-startup-project` | Set the solution startup project |
+| `add-file-to-project` | Add an existing file to a project |
+| `remove-file-from-project` | Remove a file from a project |
+| `query-project-items` | List items in a project with paths and item types |
+| `query-project-properties` | Read MSBuild project properties |
+| `query-project-configurations` | List project configurations and platforms |
+| `query-project-references` | List project references |
+| `query-project-outputs` | Resolve primary output artifact and output directory |
 
 ## Argument Contract
 
@@ -414,6 +455,7 @@ Compatibility fields (`commands[]`, `legacyCommands[]`, `commandDetails[]`) are 
 ready --timeout-ms 120000 --out "C:\temp\ready.json"
 state --out "C:\temp\state.json"
 open-solution --solution "C:\path\to\your.sln" --out "C:\temp\open.json"
+create-solution --directory "C:\path\to\scratch" --name "ScratchApp" --out "C:\temp\create.json"
 
 find-files --query "GUI_App.cpp" --out "C:\temp\files.json"
 find-text --query "OnInit" --scope solution --path "src\libslic3r" --out "C:\temp\find.json"
@@ -441,8 +483,8 @@ list-windows --query "Error List" --out "C:\temp\windows.json"
 execute-command --command "View.SolutionExplorer" --out "C:\temp\exec.json"
 apply-diff --patch-file "C:\temp\change.diff" --out "C:\temp\apply.json"
 
-send --command set-breakpoint --args "--file \"C:\repo\src\foo.cpp\" --line 42 --condition \"count == 12\"" --out "C:\temp\bp.json"
-send --command list-breakpoints --out "C:\temp\breakpoints.json"
+set-breakpoint --file "C:\repo\src\foo.cpp" --line 42 --condition "count == 12" --out "C:\temp\bp.json"
+list-breakpoints --out "C:\temp\breakpoints.json"
 send --command debug-start --args "--wait-for-break true --timeout-ms 120000" --out "C:\temp\debug-start.json"
 send --command debug-continue --args "--wait-for-break true --timeout-ms 30000" --out "C:\temp\continue.json"
 
@@ -680,10 +722,28 @@ Supported verbs:
 - `list-windows`
 - `activate-window`
 - `apply-diff` (alias: `patch`)
+- `set-breakpoint`
+- `list-breakpoints`
+- `remove-breakpoint`
+- `clear-breakpoints`
+- `enable-breakpoint`
+- `disable-breakpoint`
+- `enable-all-breakpoints`
+- `disable-all-breakpoints`
 - `build`
+- `build-errors`
 - `warnings` (alias: `warning`)
 - `errors`
-- `build-errors`
+- `search-solutions`
+- `open-solution`
+- `create-solution`
+- `shell-exec`
+- `set-version`
+- `vs-open`
+- `vs-close`
+- `nuget-restore`
+- `nuget-add-package`
+- `nuget-remove-package`
 - `send` (alias: `call`)
 - `batch`
 - `request`
@@ -725,65 +785,39 @@ Run a stdio MCP server on Windows next to Visual Studio:
 "C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe" mcp-server --instance <instanceId>
 ```
 
-Exposed MCP tools use simple names:
+Exposed MCP tools use simple names (102 total — see MCP Command Catalog for the full sorted list):
 
-- `state`
-- `ready`
-- `tool_help`
-- `help` (alias of `tool_help`)
-- `bridge_health`
-- `list_instances`
-- `bind_instance`
-- `bind_solution`
-- `errors`
-- `warnings`
-- `list_tabs`
-- `open_file`
-- `find_files`
-- `find_text`
-- `read_file`
-- `search_symbols`
-- `count_references`
-- `find_references`
-- `peek_definition`
-- `file_outline`
-- `quick_info`
-- `apply_diff`
-- `debug_threads`
-- `debug_stack`
-- `debug_locals`
-- `debug_modules`
-- `debug_watch`
-- `debug_exceptions`
-- `diagnostics_snapshot`
-- `build_configurations`
-- `set_build_configuration`
-- `build`
-- `open_solution`
-- `git_status`
-- `git_current_branch`
-- `git_remote_list`
-- `git_tag_list`
-- `git_stash_list`
-- `git_diff_unstaged`
-- `git_diff_staged`
-- `git_log`
-- `git_show`
-- `git_branch_list`
-- `git_checkout`
-- `git_create_branch`
-- `git_add`
-- `git_restore`
-- `git_commit`
-- `git_commit_amend`
-- `git_reset`
-- `git_fetch`
-- `git_stash_push`
-- `git_stash_pop`
-- `git_pull`
-- `git_push`
-- `github_issue_search`
-- `github_issue_close`
+**IDE state and binding**: `state`, `ready`, `tool_help`, `help`, `bridge_health`, `list_instances`, `bind_instance`, `bind_solution`
+
+**Diagnostics**: `errors`, `warnings`, `diagnostics_snapshot`
+
+**Editing and navigation**: `apply_diff`, `read_file`, `find_text`, `find_files`, `search_symbols`, `find_references`, `count_references`, `peek_definition`, `goto_definition`, `goto_implementation`, `call_hierarchy`, `quick_info`, `file_outline`, `format_document`, `execute_command`
+
+**Documents and tabs**: `open_file`, `list_tabs`, `list_documents`, `activate_document`, `close_document`, `close_file`, `close_others`, `save_document`, `list_windows`, `activate_window`
+
+**Build**: `build`, `build_errors`, `build_configurations`, `set_build_configuration`
+
+**Debugger**: `debug_threads`, `debug_stack`, `debug_locals`, `debug_modules`, `debug_watch`, `debug_exceptions`
+
+**Breakpoints**: `set_breakpoint`, `list_breakpoints`, `remove_breakpoint`, `clear_breakpoints`, `enable_breakpoint`, `disable_breakpoint`, `enable_all_breakpoints`, `disable_all_breakpoints`
+
+**Solution**: `search_solutions`, `open_solution`, `create_solution`, `list_projects`, `add_project`, `remove_project`, `set_startup_project`, `add_file_to_project`, `remove_file_from_project`
+
+**Project query**: `query_project_items`, `query_project_properties`, `query_project_configurations`, `query_project_references`, `query_project_outputs`
+
+**VS lifecycle**: `vs_open`, `vs_close`, `wait_for_instance`
+
+**Version**: `set_version`
+
+**Shell**: `shell_exec`
+
+**NuGet**: `nuget_restore`, `nuget_add_package`, `nuget_remove_package`
+
+**Conda**: `conda_install`, `conda_remove`
+
+**Git**: `git_status`, `git_current_branch`, `git_remote_list`, `git_tag_list`, `git_stash_list`, `git_diff_unstaged`, `git_diff_staged`, `git_log`, `git_show`, `git_branch_list`, `git_checkout`, `git_create_branch`, `git_add`, `git_restore`, `git_commit`, `git_commit_amend`, `git_reset`, `git_fetch`, `git_stash_push`, `git_stash_pop`, `git_pull`, `git_push`
+
+**GitHub**: `github_issue_search`, `github_issue_close`
 
 Use `tool_help` to retrieve descriptions, schemas, examples, and bridge command metadata (`bridgeCommand`, `bridgeExample`) for every MCP tool in one call.
 
@@ -996,6 +1030,7 @@ Use the discovery file to find the current pipe name, then send newline-delimite
 | Script | Purpose |
 |--------|---------|
 | `scripts\build.bat` | Build the solution |
+| `scripts\build-setup.ps1` | Build the Inno Setup installer `vs-ide-bridge-setup-<version>.exe` |
 | `scripts\start_bridge.ps1` | Thin PowerShell wrapper over `vs-ide-bridge ensure` |
 
 ## Repo Layout
@@ -1014,17 +1049,7 @@ output/                   Local smoke-test artifacts (git-ignored)
 - `execute-command` is the escape hatch for native VS commands that have no first-class bridge equivalent.
 - Simple pipe names are the preferred public contract. The legacy `Tools.Ide*` names remain supported for compatibility.
 
-
-
-
-
-
-
-
-
 ## Third-Party Notices
 
 See `THIRD_PARTY_NOTICES.md` for third-party attributions used by the build and packaging workflow.
-
-
 
