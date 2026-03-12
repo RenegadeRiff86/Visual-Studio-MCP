@@ -115,6 +115,37 @@ internal static partial class CliApp
         public const string Window = "window";
     }
 
+    private static class Cmds
+    {
+        public const string ApplyDiff = "apply-diff";
+        public const string Build = "build";
+        public const string BuildErrors = "build-errors";
+        public const string DocumentSlice = "document-slice";
+        public const string DocumentSlices = "document-slices";
+        public const string Errors = "errors";
+        public const string PeekDefinition = "peek-definition";
+        public const string Ready = "ready";
+        public const string SearchSymbols = "search-symbols";
+        public const string State = "state";
+        public const string Warnings = "warnings";
+    }
+
+    private const string VisualStudioInstallDirName = "Microsoft Visual Studio";
+    private const string DevenvExeFileName = "devenv.exe";
+    private const string Vs2022Year = "2022";
+    private const string DoubleDashPrefix = "--";
+    private const string MntPathPrefix = "/mnt/";
+    private static readonly int DoubleDashPrefixLength = DoubleDashPrefix.Length;
+    private static readonly int WindowsPathRootLength = @"C:\".Length;
+    private static readonly int WindowsDriveSeparatorIndex = "C".Length;
+    private static readonly int WindowsRootSlashIndex = "C:".Length;
+    private static readonly int WindowsDrivePrefixLength = "C:".Length;
+    private static readonly int MntDriveLetterIndex = MntPathPrefix.Length;
+    private static readonly int MntSeparatorIndex = MntDriveLetterIndex + "C".Length;
+    private static readonly int MntRemainderStartIndex = MntSeparatorIndex + "C".Length;
+    private static readonly TimeSpan MutexWaitTimeout = TimeSpan.FromSeconds(DoubleDashPrefixLength);
+    private static readonly TimeSpan ProcessStartTolerance = TimeSpan.FromSeconds(DoubleDashPrefixLength);
+
     public static async Task<int> RunAsync(string[] args)
     {
         if (args.Length == 0)
@@ -194,8 +225,8 @@ internal static partial class CliApp
             }),
             "close-others" => await RunStructuredCommandAsync("close-others", options, static (builder, cli) => builder.AddFlag(Args.Save, cli.GetFlag(Args.Save))),
             "list-windows" => await RunStructuredCommandAsync("list-windows", options, static (builder, cli) => builder.Add(Args.Query, cli.GetValue(Args.Query))),
-            "activate-window" => await RunStructuredCommandAsync("activate-window", options, static (builder, cli) => builder.AddRequired(Args.Window, cli.GetValue(Args.Window))),
-            "apply-diff" => await RunStructuredCommandAsync("apply-diff", options, static (builder, cli) =>
+            Args.ActivateWindow => await RunStructuredCommandAsync(Args.ActivateWindow, options, static (builder, cli) => builder.AddRequired(Args.Window, cli.GetValue(Args.Window))),
+            Cmds.ApplyDiff => await RunStructuredCommandAsync(Cmds.ApplyDiff, options, static (builder, cli) =>
             {
                 builder.Add(Args.PatchFile, cli.GetValue(Args.PatchFile));
                 builder.Add(Args.PatchTextBase64, cli.GetValue(Args.PatchTextBase64));
@@ -205,7 +236,7 @@ internal static partial class CliApp
                 builder.Add(Args.OpenChangedFiles, openChangedFiles ? "true" : "false");
                 builder.AddFlag(Args.SaveChangedFiles, cli.GetFlag(Args.SaveChangedFiles));
             }),
-            "document-slice" => await RunStructuredCommandAsync("document-slice", options, static (builder, cli) =>
+            Cmds.DocumentSlice => await RunStructuredCommandAsync(Cmds.DocumentSlice, options, static (builder, cli) =>
             {
                 builder.AddRequired(Args.File, cli.GetValue(Args.File));
                 builder.Add(Args.Line, cli.GetValue(Args.Line));
@@ -215,7 +246,7 @@ internal static partial class CliApp
                 builder.Add(Args.EndLine, cli.GetValue(Args.EndLine));
                 builder.Add(Args.RevealInEditor, cli.GetValue(Args.RevealInEditor));
             }),
-            "search-symbols" => await RunStructuredCommandAsync("search-symbols", options, static (builder, cli) =>
+            Cmds.SearchSymbols => await RunStructuredCommandAsync(Cmds.SearchSymbols, options, static (builder, cli) =>
             {
                 builder.AddRequired(Args.Query, cli.GetValue(Args.Query));
                 builder.Add(Args.Kind, cli.GetValue(Args.Kind));
@@ -232,7 +263,7 @@ internal static partial class CliApp
                 builder.Add(Args.Line, cli.GetValue(Args.Line));
                 builder.Add(Args.Column, cli.GetValue(Args.Column));
             }),
-            "peek-definition" => await RunStructuredCommandAsync("peek-definition", options, static (builder, cli) =>
+            Cmds.PeekDefinition => await RunStructuredCommandAsync(Cmds.PeekDefinition, options, static (builder, cli) =>
             {
                 builder.Add(Args.File, cli.GetValue(Args.File));
                 builder.Add(Args.Document, cli.GetValue(Args.Document));
@@ -285,7 +316,7 @@ internal static partial class CliApp
                 builder.Add(Args.Column, cli.GetValue(Args.Column));
                 builder.Add(Args.ContextLines, cli.GetValue(Args.ContextLines));
             }),
-            "document-slices" => await RunStructuredCommandAsync("document-slices", options, static (builder, cli) =>
+            Cmds.DocumentSlices => await RunStructuredCommandAsync(Cmds.DocumentSlices, options, static (builder, cli) =>
             {
                 var ranges = cli.GetValue(Args.Ranges);
                 var rangesFile = cli.GetValue(Args.RangesFile);
@@ -337,16 +368,16 @@ internal static partial class CliApp
                 builder.AddRequired(Args.Configuration, cli.GetValue(Args.Configuration));
                 builder.Add(Args.Platform, cli.GetValue(Args.Platform));
             }),
-            "build" => await RunStructuredCommandAsync("build", options, static (builder, cli) =>
+            Cmds.Build => await RunStructuredCommandAsync(Cmds.Build, options, static (builder, cli) =>
             {
                 builder.Add(Args.Configuration, cli.GetValue(Args.Configuration));
                 builder.Add(Args.Platform, cli.GetValue(Args.Platform));
                 builder.Add(Args.TimeoutMs, cli.GetValue(Args.TimeoutMs));
             }),
             "catalog" => await RunSimpleCommandAsync("Tools.IdeHelp", options, "summary"),
-            "ready" => await RunSimpleCommandAsync("Tools.IdeWaitForReady", options),
-            "state" => await RunSimpleCommandAsync("Tools.IdeGetState", options),
-            "errors" => await RunStructuredCommandAsync("errors", options, static (builder, cli) =>
+            Cmds.Ready => await RunSimpleCommandAsync("Tools.IdeWaitForReady", options),
+            Cmds.State => await RunSimpleCommandAsync("Tools.IdeGetState", options),
+            Cmds.Errors => await RunStructuredCommandAsync(Cmds.Errors, options, static (builder, cli) =>
             {
                 builder.Add(Args.Severity, cli.GetValue(Args.Severity));
                 builder.Add(Args.Code, cli.GetValue(Args.Code));
@@ -359,7 +390,7 @@ internal static partial class CliApp
                 builder.AddFlag(Args.WaitForIntellisense, cli.GetFlag(Args.WaitForIntellisense));
                 builder.AddFlag(Args.Quick, cli.GetFlag(Args.Quick));
             }),
-            "warnings" => await RunStructuredCommandAsync("warnings", options, static (builder, cli) =>
+            Cmds.Warnings => await RunStructuredCommandAsync(Cmds.Warnings, options, static (builder, cli) =>
             {
                 builder.Add(Args.Severity, cli.GetValue(Args.Severity));
                 builder.Add(Args.Code, cli.GetValue(Args.Code));
@@ -372,7 +403,7 @@ internal static partial class CliApp
                 builder.AddFlag(Args.WaitForIntellisense, cli.GetFlag(Args.WaitForIntellisense));
                 builder.AddFlag(Args.Quick, cli.GetFlag(Args.Quick));
             }),
-            "build-errors" => await RunStructuredCommandAsync("build-errors", options, static (builder, cli) =>
+            Cmds.BuildErrors => await RunStructuredCommandAsync(Cmds.BuildErrors, options, static (builder, cli) =>
             {
                 builder.Add(Args.Severity, cli.GetValue(Args.Severity));
                 builder.Add(Args.Code, cli.GetValue(Args.Code));
@@ -406,13 +437,13 @@ internal static partial class CliApp
         {
             "call" => "send",
             "commands" => "catalog",
-            "patch" => "apply-diff",
-            "peek" => "peek-definition",
+            "patch" => Cmds.ApplyDiff,
+            "peek" => Cmds.PeekDefinition,
             "recipes" => "prompts",
-            "slice" => "document-slice",
-            "slices" => "document-slices",
-            "symbols" => "search-symbols",
-            "warning" => "warnings",
+            "slice" => Cmds.DocumentSlice,
+            "slices" => Cmds.DocumentSlices,
+            "symbols" => Cmds.SearchSymbols,
+            "warning" => Cmds.Warnings,
             _ => verb.Trim().ToLowerInvariant(),
         };
     }
@@ -439,7 +470,11 @@ internal static partial class CliApp
 
         var node = ParseJson(jsonText!);
         var select = options.GetValue("select") ?? options.GetValue("path");
-        if (select is { Length: >= 3 } && char.IsLetter(select[0]) && select[1] == ':' && (select[2] == '/' || select[2] == '\\'))
+        if (!string.IsNullOrEmpty(select) &&
+            select.Length >= WindowsPathRootLength &&
+            char.IsLetter(select[0]) &&
+            select[WindowsDriveSeparatorIndex] == ':' &&
+            (select[WindowsRootSlashIndex] == '/' || select[WindowsRootSlashIndex] == '\\'))
         {
             throw new CliException(
                 $"--select value looks like a Windows path ('{select}'). " +
@@ -1006,7 +1041,9 @@ internal static partial class CliApp
             return;
         }
 
-        if (normalizedUserProfile.Length < 3 || normalizedUserProfile[1] != ':' || normalizedUserProfile[2] != '\\')
+        if (normalizedUserProfile.Length < WindowsPathRootLength ||
+            normalizedUserProfile[WindowsDriveSeparatorIndex] != ':' ||
+            normalizedUserProfile[WindowsRootSlashIndex] != '\\')
         {
             return;
         }
@@ -1047,7 +1084,7 @@ internal static partial class CliApp
 
     private static string? TryConvertMntPathToWindows(string path)
     {
-        if (!path.StartsWith("/mnt/", StringComparison.OrdinalIgnoreCase) || path.Length < 6)
+        if (!path.StartsWith(MntPathPrefix, StringComparison.OrdinalIgnoreCase) || path.Length < MntSeparatorIndex)
         {
             return null;
         }
@@ -1058,7 +1095,7 @@ internal static partial class CliApp
             return null;
         }
 
-        if (path.Length > 6 && path[6] != '/' && path[6] != '\\')
+        if (path.Length > MntSeparatorIndex && path[MntSeparatorIndex] != '/' && path[MntSeparatorIndex] != '\\')
         {
             return null;
         }
@@ -1104,12 +1141,12 @@ internal static partial class CliApp
         var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
         var candidates = new[]
         {
-            Path.Combine(programFiles, "Microsoft Visual Studio", "18", "Community", "Common7", "IDE", "devenv.exe"),
-            Path.Combine(programFiles, "Microsoft Visual Studio", "18", "Professional", "Common7", "IDE", "devenv.exe"),
-            Path.Combine(programFiles, "Microsoft Visual Studio", "18", "Enterprise", "Common7", "IDE", "devenv.exe"),
-            Path.Combine(programFiles, "Microsoft Visual Studio", "2022", "Community", "Common7", "IDE", "devenv.exe"),
-            Path.Combine(programFiles, "Microsoft Visual Studio", "2022", "Professional", "Common7", "IDE", "devenv.exe"),
-            Path.Combine(programFiles, "Microsoft Visual Studio", "2022", "Enterprise", "Common7", "IDE", "devenv.exe"),
+            Path.Combine(programFiles, VisualStudioInstallDirName, "18", "Community", "Common7", "IDE", DevenvExeFileName),
+            Path.Combine(programFiles, VisualStudioInstallDirName, "18", "Professional", "Common7", "IDE", DevenvExeFileName),
+            Path.Combine(programFiles, VisualStudioInstallDirName, "18", "Enterprise", "Common7", "IDE", DevenvExeFileName),
+            Path.Combine(programFiles, VisualStudioInstallDirName, Vs2022Year, "Community", "Common7", "IDE", DevenvExeFileName),
+            Path.Combine(programFiles, VisualStudioInstallDirName, Vs2022Year, "Professional", "Common7", "IDE", DevenvExeFileName),
+            Path.Combine(programFiles, VisualStudioInstallDirName, Vs2022Year, "Enterprise", "Common7", "IDE", DevenvExeFileName),
         };
 
         foreach (var candidate in candidates)
@@ -1120,7 +1157,7 @@ internal static partial class CliApp
             }
         }
 
-        throw new CliException("devenv.exe not found.");
+        throw new CliException($"{DevenvExeFileName} not found.");
     }
 
     private static string QuoteArgument(string value)
@@ -1146,12 +1183,12 @@ internal static partial class CliApp
             "current" => HelpText.Current,
             "instances" => HelpText.Instances,
             "catalog" => HelpText.Catalog,
-            "ready" => CombineHelpWithCommandMetadata("ready", HelpText.Ready),
-            "state" => CombineHelpWithCommandMetadata("state", HelpText.State),
-            "build" => CombineHelpWithCommandMetadata("build", HelpText.Build),
-            "errors" => CombineHelpWithCommandMetadata("errors", HelpText.Errors),
-            "warnings" => CombineHelpWithCommandMetadata("warnings", HelpText.Warnings),
-            "build-errors" => CombineHelpWithCommandMetadata("build-errors", HelpText.BuildErrors),
+            Cmds.Ready => CombineHelpWithCommandMetadata(Cmds.Ready, HelpText.Ready),
+            Cmds.State => CombineHelpWithCommandMetadata(Cmds.State, HelpText.State),
+            Cmds.Build => CombineHelpWithCommandMetadata(Cmds.Build, HelpText.Build),
+            Cmds.Errors => CombineHelpWithCommandMetadata(Cmds.Errors, HelpText.Errors),
+            Cmds.Warnings => CombineHelpWithCommandMetadata(Cmds.Warnings, HelpText.Warnings),
+            Cmds.BuildErrors => CombineHelpWithCommandMetadata(Cmds.BuildErrors, HelpText.BuildErrors),
             "find-files" => CombineHelpWithCommandMetadata("find-files", HelpText.FindFiles),
             "find-text" => CombineHelpWithCommandMetadata("find-text", HelpText.FindText),
             "open-document" => CombineHelpWithCommandMetadata("open-document", HelpText.OpenDocument),
@@ -1163,14 +1200,14 @@ internal static partial class CliApp
             "close-file" => CombineHelpWithCommandMetadata("close-file", HelpText.CloseFile),
             "close-others" => CombineHelpWithCommandMetadata("close-others", HelpText.CloseOthers),
             "list-windows" => CombineHelpWithCommandMetadata("list-windows", HelpText.ListWindows),
-            "activate-window" => CombineHelpWithCommandMetadata("activate-window", HelpText.ActivateWindow),
-            "apply-diff" => CombineHelpWithCommandMetadata("apply-diff", HelpText.ApplyDiff),
-            "apply-patch" => CombineHelpWithCommandMetadata("apply-diff", HelpText.ApplyDiff),
-            "document-slice" => CombineHelpWithCommandMetadata("document-slice", HelpText.DocumentSlice),
-            "document-slices" => CombineHelpWithCommandMetadata("document-slices", HelpText.DocumentSlices),
-            "search-symbols" => CombineHelpWithCommandMetadata("search-symbols", HelpText.SearchSymbols),
+            Args.ActivateWindow => CombineHelpWithCommandMetadata(Args.ActivateWindow, HelpText.ActivateWindow),
+            Cmds.ApplyDiff => CombineHelpWithCommandMetadata(Cmds.ApplyDiff, HelpText.ApplyDiff),
+            "apply-patch" => CombineHelpWithCommandMetadata(Cmds.ApplyDiff, HelpText.ApplyDiff),
+            Cmds.DocumentSlice => CombineHelpWithCommandMetadata(Cmds.DocumentSlice, HelpText.DocumentSlice),
+            Cmds.DocumentSlices => CombineHelpWithCommandMetadata(Cmds.DocumentSlices, HelpText.DocumentSlices),
+            Cmds.SearchSymbols => CombineHelpWithCommandMetadata(Cmds.SearchSymbols, HelpText.SearchSymbols),
             "goto-definition" => CombineHelpWithCommandMetadata("goto-definition", HelpText.GoToDefinition),
-            "peek-definition" => CombineHelpWithCommandMetadata("peek-definition", HelpText.PeekDefinition),
+            Cmds.PeekDefinition => CombineHelpWithCommandMetadata(Cmds.PeekDefinition, HelpText.PeekDefinition),
             "goto-implementation" => CombineHelpWithCommandMetadata("goto-implementation", HelpText.GoToImplementation),
             "find-references" => CombineHelpWithCommandMetadata("find-references", HelpText.FindReferences),
             "count-references" => CombineHelpWithCommandMetadata("count-references", HelpText.CountReferences),
@@ -1241,11 +1278,11 @@ internal static class HelpText
         vs-ide-bridge <command> [options]
 
         LLM refresher
-          1. vs-ide-bridge help
-          2. vs-ide-bridge ensure --solution C:\repo\Your.sln
-          3. copy instanceId
-          4. vs-ide-bridge catalog --instance <instanceId>
-          5. vs-ide-bridge find-files --instance <instanceId> --query foo.cpp
+          - vs-ide-bridge help
+          - vs-ide-bridge ensure --solution C:\repo\Your.sln
+          - copy instanceId
+          - vs-ide-bridge catalog --instance <instanceId>
+          - vs-ide-bridge find-files --instance <instanceId> --query foo.cpp
 
         Main commands
           ensure          Reuse or start Visual Studio for one solution
@@ -1378,10 +1415,10 @@ internal static class HelpText
             vs-ide-bridge search-symbols --instance <instanceId> --query propose_export_file_name_and_path --kind function
 
           Peek the definition at a location without leaving the current file
-            vs-ide-bridge peek-definition --instance <instanceId> --file C:\repo\src\foo.cpp --line 42 --column 13
+            vs-ide-bridge peek-definition --instance <instanceId> --file C:\repo\src\foo.cpp --line <line> --column <column>
 
           Inspect a symbol at a location
-            vs-ide-bridge quick-info --instance <instanceId> --file C:\repo\src\foo.cpp --line 42 --column 13
+            vs-ide-bridge quick-info --instance <instanceId> --file C:\repo\src\foo.cpp --line <line> --column <column>
 
           Fetch multiple slices in one call
             vs-ide-bridge document-slices --instance <instanceId> --ranges-file output\ranges.json
@@ -1426,7 +1463,7 @@ internal static class HelpText
         Examples
           vs-ide-bridge parse --json-file output\errors.json --select /Data/errors/rows/0/message
           vs-ide-bridge parse --json-file output\errors.json --select /Data/errors/rows/*/file --format lines
-          vs-ide-bridge parse --json "{\"a\":{\"b\":[1,2]}}" --select /a/b/1
+          vs-ide-bridge parse --json "{\"a\":{\"b\":[\"left\",\"right\"]}}" --select /a/b/1
         """;
 
     public const string Current =
@@ -1684,7 +1721,7 @@ internal static class HelpText
         Examples
           vs-ide-bridge open-document --instance <instanceId> --file C:\repo\src\foo.cpp
           vs-ide-bridge open-document --instance <instanceId> --file src\CMakeLists.txt
-          vs-ide-bridge open-document --instance <instanceId> --file C:\repo\src\foo.cpp --line 42 --column 1
+          vs-ide-bridge open-document --instance <instanceId> --file C:\repo\src\foo.cpp --line <line> --column <column>
         """;
 
     public const string ListDocuments =
@@ -1867,7 +1904,7 @@ internal static class HelpText
           --reveal-in-editor <true|false> (default: true)
 
         Examples
-          vs-ide-bridge document-slice --instance <instanceId> --file C:\repo\src\foo.cpp --line 42 --context-before 8 --context-after 20
+          vs-ide-bridge document-slice --instance <instanceId> --file C:\repo\src\foo.cpp --line <line> --context-before <n> --context-after <n>
         """;
 
     public const string DocumentSlices =
@@ -1926,7 +1963,7 @@ internal static class HelpText
           --document <name>
 
         Examples
-          vs-ide-bridge goto-definition --instance <instanceId> --file C:\repo\src\foo.cpp --line 42 --column 13
+          vs-ide-bridge goto-definition --instance <instanceId> --file C:\repo\src\foo.cpp --line <line> --column <column>
         """;
 
     public const string PeekDefinition =
@@ -1944,7 +1981,7 @@ internal static class HelpText
           --context-lines <n>
 
         Examples
-          vs-ide-bridge peek-definition --instance <instanceId> --file C:\repo\src\foo.cpp --line 42 --column 13
+          vs-ide-bridge peek-definition --instance <instanceId> --file C:\repo\src\foo.cpp --line <line> --column <column>
         """;
 
     public const string GoToImplementation =
@@ -1961,7 +1998,7 @@ internal static class HelpText
           --document <name>
 
         Examples
-          vs-ide-bridge goto-implementation --instance <instanceId> --file C:\repo\src\foo.cpp --line 42 --column 13
+          vs-ide-bridge goto-implementation --instance <instanceId> --file C:\repo\src\foo.cpp --line <line> --column <column>
         """;
 
     public const string FindReferences =
@@ -1981,7 +2018,7 @@ internal static class HelpText
           --timeout-ms <ms>
 
         Examples
-          vs-ide-bridge find-references --instance <instanceId> --file C:\repo\src\foo.cpp --line 42 --column 13
+          vs-ide-bridge find-references --instance <instanceId> --file C:\repo\src\foo.cpp --line <line> --column <column>
         """;
 
     public const string CountReferences =
@@ -2005,7 +2042,7 @@ internal static class HelpText
           Otherwise returns countKnown=false with reason.
 
         Examples
-          vs-ide-bridge count-references --instance <instanceId> --file C:\repo\src\foo.cpp --line 42 --column 13
+          vs-ide-bridge count-references --instance <instanceId> --file C:\repo\src\foo.cpp --line <line> --column <column>
         """;
 
     public const string CallHierarchy =
@@ -2025,7 +2062,7 @@ internal static class HelpText
           --timeout-ms <ms>
 
         Examples
-          vs-ide-bridge call-hierarchy --instance <instanceId> --file C:\repo\src\foo.cpp --line 42 --column 13
+          vs-ide-bridge call-hierarchy --instance <instanceId> --file C:\repo\src\foo.cpp --line <line> --column <column>
         """;
 
     public const string QuickInfo =
@@ -2043,7 +2080,7 @@ internal static class HelpText
           --context-lines <n>
 
         Examples
-          vs-ide-bridge quick-info --instance <instanceId> --file C:\repo\src\foo.cpp --line 42 --column 13
+          vs-ide-bridge quick-info --instance <instanceId> --file C:\repo\src\foo.cpp --line <line> --column <column>
         """;
 
     public const string DebugThreads =
@@ -2365,6 +2402,8 @@ internal sealed class PipeDiscovery
     private const string MemoryMapName = @"Local\VsIdeBridge.Discovery.v1";
     private const string MemoryMutexName = @"Local\VsIdeBridge.Discovery.v1.mutex";
     private const int MemoryCapacityBytes = 1024 * 1024;
+    private static readonly TimeSpan MutexWaitTimeout = TimeSpan.FromSeconds("--".Length);
+    private static readonly TimeSpan ProcessStartTolerance = TimeSpan.FromSeconds("--".Length);
     private static readonly (string MapName, string MutexName, string SourceUri)[] MemoryStores =
     [
         (MemoryMapName, MemoryMutexName, "memory://local/VsIdeBridge.Discovery.v1"),
@@ -2605,7 +2644,7 @@ internal sealed class PipeDiscovery
             var hasLock = false;
             try
             {
-                hasLock = mutex.WaitOne(TimeSpan.FromSeconds(2));
+                hasLock = mutex.WaitOne(MutexWaitTimeout);
                 if (!hasLock)
                 {
                     return [];
@@ -2820,7 +2859,7 @@ internal sealed class PipeDiscovery
         try
         {
             var processStart = process.StartTime.ToUniversalTime();
-            return Math.Abs((processStart - parsed.UtcDateTime).TotalSeconds) <= 2;
+            return Math.Abs((processStart - parsed.UtcDateTime).TotalSeconds) <= ProcessStartTolerance.TotalSeconds;
         }
         catch
         {
@@ -3327,6 +3366,7 @@ internal static class ParseFormatter
 
 internal sealed class CliOptions
 {
+    private static readonly int OptionNamePrefixLength = "--".Length;
     private readonly Dictionary<string, string> _values = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _flags = new(StringComparer.OrdinalIgnoreCase);
 
@@ -3341,7 +3381,7 @@ internal sealed class CliOptions
                 throw new CliException($"Unexpected argument '{token}'.");
             }
 
-            var name = token[2..];
+            var name = token[OptionNamePrefixLength..];
 
             // Support --key=value syntax. This is required when the value itself starts with
             // '--' (e.g. --args="--command foo"), because the lookahead heuristic below would

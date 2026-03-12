@@ -1,10 +1,12 @@
-name: New MCP server
-version: 0.0.1
-schema: v1
+name: VS IDE Bridge (Auto-Discovery)
+version: 2.1.10
+schema: v11
 mcpServers:
-  - name: New MCP server
-    command: npx
+  - name: vs-ide-bridge
+    command: "C:\\Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe"
     args:
-      - -y
-      - <your-mcp-server>
+      - mcp-server
+      - --discovery-mode
+      - memory-first
+      - --tools-only
     env: {}

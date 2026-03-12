@@ -622,6 +622,83 @@
           <LocCanonicalName>.Tools.IdeOpenSolution</LocCanonicalName>
         </Strings>
       </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeCreateSolution" priority="0x023D" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Create Solution</ButtonText>
+          <CommandName>IdeCreateSolution</CommandName>
+          <CanonicalName>Tools.IdeCreateSolution</CanonicalName>
+          <LocCanonicalName>.Tools.IdeCreateSolution</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeListProjects" priority="0x023E" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE List Projects</ButtonText>
+          <CommandName>IdeListProjects</CommandName>
+          <CanonicalName>Tools.IdeListProjects</CanonicalName>
+          <LocCanonicalName>.Tools.IdeListProjects</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeAddProject" priority="0x023F" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Add Project</ButtonText>
+          <CommandName>IdeAddProject</CommandName>
+          <CanonicalName>Tools.IdeAddProject</CanonicalName>
+          <LocCanonicalName>.Tools.IdeAddProject</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeRemoveProject" priority="0x0240" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Remove Project</ButtonText>
+          <CommandName>IdeRemoveProject</CommandName>
+          <CanonicalName>Tools.IdeRemoveProject</CanonicalName>
+          <LocCanonicalName>.Tools.IdeRemoveProject</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeSetStartupProject" priority="0x0241" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Set Startup Project</ButtonText>
+          <CommandName>IdeSetStartupProject</CommandName>
+          <CanonicalName>Tools.IdeSetStartupProject</CanonicalName>
+          <LocCanonicalName>.Tools.IdeSetStartupProject</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeAddFileToProject" priority="0x0242" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Add File To Project</ButtonText>
+          <CommandName>IdeAddFileToProject</CommandName>
+          <CanonicalName>Tools.IdeAddFileToProject</CanonicalName>
+          <LocCanonicalName>.Tools.IdeAddFileToProject</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeRemoveFileFromProject" priority="0x0243" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Remove File From Project</ButtonText>
+          <CommandName>IdeRemoveFileFromProject</CommandName>
+          <CanonicalName>Tools.IdeRemoveFileFromProject</CanonicalName>
+          <LocCanonicalName>.Tools.IdeRemoveFileFromProject</LocCanonicalName>
+        </Strings>
+      </Button>
       <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeBatchCommands" priority="0x0225" type="Button">
         <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
         <CommandFlag>CommandWellOnly</CommandFlag>
@@ -808,6 +885,7 @@
       <IDSymbol name="cmdidIdeGetWarnings" value="0x0230" />
       <IDSymbol name="cmdidIdeBuildAndCaptureErrors" value="0x0214" />
       <IDSymbol name="cmdidIdeOpenSolution" value="0x0224" />
+      <IDSymbol name="cmdidIdeCreateSolution" value="0x023D" />
       <IDSymbol name="cmdidIdeBatchCommands" value="0x0225" />
       <IDSymbol name="cmdidIdeSearchSymbols" value="0x0226" />
       <IDSymbol name="cmdidIdeGetQuickInfo" value="0x0227" />
@@ -819,6 +897,12 @@
       <IDSymbol name="cmdidIdeDisableAllBreakpoints" value="0x022C" />
       <IDSymbol name="cmdidIdeCloseIde" value="0x0231" />
       <IDSymbol name="cmdidIdeSaveDocument" value="0x0232" />
+      <IDSymbol name="cmdidIdeListProjects" value="0x023E" />
+      <IDSymbol name="cmdidIdeAddProject" value="0x023F" />
+      <IDSymbol name="cmdidIdeRemoveProject" value="0x0240" />
+      <IDSymbol name="cmdidIdeSetStartupProject" value="0x0241" />
+      <IDSymbol name="cmdidIdeAddFileToProject" value="0x0242" />
+      <IDSymbol name="cmdidIdeRemoveFileFromProject" value="0x0243" />
     </GuidSymbol>
   </Symbols>
 </CommandTable>

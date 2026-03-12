@@ -75,8 +75,14 @@ internal sealed class IdeBridgeRuntime
 
     public ErrorListService ErrorListService { get; }
 
-    private readonly Dictionary<string, IdeCommandBase> _dispatcher =
-        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IdeCommandBase> _dispatcher = CreateDispatcher();
+
+#pragma warning disable IDE0028 // Preserving the comparer requires the explicit dictionary constructor.
+    private static Dictionary<string, IdeCommandBase> CreateDispatcher()
+    {
+        return new Dictionary<string, IdeCommandBase>(StringComparer.OrdinalIgnoreCase);
+    }
+#pragma warning restore IDE0028
 
     internal void RegisterCommand(IdeCommandBase cmd)
     {

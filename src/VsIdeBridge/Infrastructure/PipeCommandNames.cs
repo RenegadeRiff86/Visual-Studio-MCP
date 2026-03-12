@@ -13,6 +13,7 @@ internal static class PipeCommandNames
         ["Tools.IdeGetState"] = ["state"],
         ["Tools.IdeWaitForReady"] = ["ready"],
         ["Tools.IdeOpenSolution"] = ["open-solution"],
+        ["Tools.IdeCreateSolution"] = ["create-solution"],
         ["Tools.IdeCloseIde"] = ["close-ide"],
         ["Tools.IdeBatchCommands"] = ["batch"],
         ["Tools.IdeFindText"] = ["find-text"],
@@ -70,6 +71,18 @@ internal static class PipeCommandNames
         ["Tools.IdeGetErrorList"] = ["errors"],
         ["Tools.IdeGetWarnings"] = ["warnings"],
         ["Tools.IdeBuildAndCaptureErrors"] = ["build-errors"],
+        ["Tools.IdeListProjects"] = ["list-projects"],
+        ["Tools.IdeQueryProjectItems"] = ["query-project-items"],
+        ["Tools.IdeQueryProjectProperties"] = ["query-project-properties"],
+        ["Tools.IdeQueryProjectConfigurations"] = ["query-project-configurations"],
+        ["Tools.IdeQueryProjectReferences"] = ["query-project-references"],
+        ["Tools.IdeQueryProjectOutputs"] = ["query-project-outputs"],
+        ["Tools.IdeAddProject"] = ["add-project"],
+        ["Tools.IdeRemoveProject"] = ["remove-project"],
+        ["Tools.IdeSetStartupProject"] = ["set-startup-project"],
+        ["Tools.IdeAddFileToProject"] = ["add-file-to-project"],
+        ["Tools.IdeRemoveFileFromProject"] = ["remove-file-from-project"],
+        ["Tools.IdeSearchSolutions"] = ["search-solutions"],
     };
 
     public static string GetPrimaryName(string canonicalName)

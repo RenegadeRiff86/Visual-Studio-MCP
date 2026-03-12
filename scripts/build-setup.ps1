@@ -1,34 +1,86 @@
 param(
-    [string]$IsccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+    [switch]$Build,
+    [string]$Configuration = "Release",
+    [string]$IsccPath = "",
     [string]$ScriptPath = "installer\inno\vs-ide-bridge.iss"
 )
 
-$ErrorActionPreference = "Stop"
-$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+function Normalize-ExtendedPath {
+    param([string]$Path)
 
-$iscc = if ([System.IO.Path]::IsPathRooted($IsccPath)) {
-    $IsccPath
-} else {
-    [System.IO.Path]::GetFullPath((Join-Path $repoRoot $IsccPath))
-}
-
-if (-not (Test-Path $iscc)) {
-    $fallback = "C:\Program Files\Inno Setup 6\ISCC.exe"
-    if (Test-Path $fallback) {
-        $iscc = $fallback
-    } else {
-        throw "ISCC.exe not found. Install Inno Setup 6 first: https://jrsoftware.org/isdl.php"
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $Path
     }
+
+    if ($Path.StartsWith('\\?\')) {
+        return $Path.Substring(4)
+    }
+
+    return $Path
 }
 
+$ErrorActionPreference = "Stop"
+$scriptFilePath = if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+    $PSCommandPath
+} elseif (-not [string]::IsNullOrWhiteSpace($MyInvocation.MyCommand.Path)) {
+    $MyInvocation.MyCommand.Path
+} else {
+    throw "Unable to determine the path of build-setup.ps1."
+}
+
+$scriptFilePath = Normalize-ExtendedPath $scriptFilePath
+
+$scriptRoot = [System.IO.Path]::GetDirectoryName($scriptFilePath)
+if ([string]::IsNullOrWhiteSpace($scriptRoot)) {
+    $currentDirectory = Normalize-ExtendedPath ((Get-Location).ProviderPath)
+    if (Test-Path ([System.IO.Path]::Combine($currentDirectory, "installer", "inno", "vs-ide-bridge.iss"))) {
+        $repoRoot = [System.IO.Path]::GetFullPath($currentDirectory)
+        $scriptRoot = [System.IO.Path]::Combine($repoRoot, "scripts")
+    } else {
+        throw "Unable to determine the repository root for build-setup.ps1."
+    }
+} else {
+    $repoRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($scriptRoot, ".."))
+}
+
+# ── Optional build step ────────────────────────────────────────────────────────
+if ($Build) {
+    $buildBat = [System.IO.Path]::Combine($scriptRoot, "build.bat")
+    Write-Host "Building $Configuration..." -ForegroundColor Cyan
+    & cmd /c "`"$buildBat`" $Configuration"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Build failed (exit $LASTEXITCODE). Aborting installer package."
+    }
+    Write-Host "Build succeeded." -ForegroundColor Green
+}
+
+# ── Locate ISCC.exe ───────────────────────────────────────────────────────────
+$isccCandidates = @(
+    $IsccPath,
+    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+    "C:\Program Files\Inno Setup 6\ISCC.exe"
+) | Where-Object { $_ -ne "" }
+
+$iscc = $isccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (-not $iscc) {
+    throw "ISCC.exe not found. Install Inno Setup 6: https://jrsoftware.org/isdl.php"
+}
+
+# ── Locate .iss script ────────────────────────────────────────────────────────
 $script = if ([System.IO.Path]::IsPathRooted($ScriptPath)) {
     $ScriptPath
 } else {
-    [System.IO.Path]::GetFullPath((Join-Path $repoRoot $ScriptPath))
+    [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($repoRoot, $ScriptPath))
 }
 
 if (-not (Test-Path $script)) {
     throw "Inno Setup script not found: $script"
 }
 
+Write-Host "ISCC    : $iscc" -ForegroundColor Cyan
+Write-Host "Script  : $script" -ForegroundColor Cyan
+Write-Host ""
+
 & $iscc $script
+exit $LASTEXITCODE

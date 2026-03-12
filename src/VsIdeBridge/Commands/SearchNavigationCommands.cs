@@ -339,12 +339,14 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var baseLine = args.GetInt32("line", 1);
+            var requestedLine = args.GetNullableInt32("line");
+            var baseLine = requestedLine ?? 1;
             var contextBefore = args.GetInt32("context-before", 0);
             var contextAfter = args.GetInt32("context-after", 0);
             var startLine = args.GetInt32("start-line", Math.Max(1, baseLine - contextBefore));
             var endLine = args.GetInt32("end-line", Math.Max(startLine, baseLine + contextAfter));
             var revealInEditor = args.GetBoolean("reveal-in-editor", true);
+            var revealLine = requestedLine ?? (startLine + ((endLine - startLine) / 2));
 
             var data = await context.Runtime.DocumentService.GetDocumentSliceAsync(
                 context.Dte,
@@ -352,7 +354,8 @@ internal static class SearchNavigationCommands
                 startLine,
                 endLine,
                 args.GetBoolean("include-line-numbers", true),
-                revealInEditor)
+                revealInEditor,
+                revealLine)
                 .ConfigureAwait(true);
 
             return new CommandExecutionResult(

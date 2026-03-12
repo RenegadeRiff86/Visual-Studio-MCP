@@ -65,6 +65,7 @@ internal sealed class BridgeService : ServiceBase
 {
     private const string ServiceControlPipeName = "VsIdeBridgeServiceControl";
     private const int ControlPipeBufferSize = 4096;
+    private const int ShutdownWaitTimeoutSeconds = 5;
 
     private readonly TimeSpan _idleSoftTimeout;
     private readonly TimeSpan _idleHardTimeout;
@@ -113,8 +114,23 @@ internal sealed class BridgeService : ServiceBase
         Log("service stopping");
         _stopCts?.Cancel();
 
-        try { _acceptLoop?.Wait(TimeSpan.FromSeconds(5)); } catch { }
-        try { _idleLoop?.Wait(TimeSpan.FromSeconds(5)); } catch { }
+        try
+        {
+            _acceptLoop?.Wait(TimeSpan.FromSeconds(ShutdownWaitTimeoutSeconds));
+        }
+        catch (Exception ex)
+        {
+            Log($"accept loop shutdown wait failed: {ex.Message}");
+        }
+
+        try
+        {
+            _idleLoop?.Wait(TimeSpan.FromSeconds(ShutdownWaitTimeoutSeconds));
+        }
+        catch (Exception ex)
+        {
+            Log($"idle loop shutdown wait failed: {ex.Message}");
+        }
 
         Log("service stopped");
         _stopCts?.Dispose();

@@ -1,9 +1,12 @@
+using EnvDTE;
+using EnvDTE80;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using System;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+using VsIdeBridge.Infrastructure;
 using VsIdeBridge.Services;
 
 namespace VsIdeBridge;
@@ -17,6 +20,7 @@ namespace VsIdeBridge;
 public sealed class VsIdeBridgePackage : AsyncPackage
 {
     public const string PackageGuidString = "D8F750B1-5FB7-4A52-8D75-ED5A7F576088";
+    private const int DiagnosticsWarmupTimeoutMilliseconds = 30_000;
 
     private IdeBridgeRuntime? _runtime;
     private PipeServerService? _pipeServer;
@@ -68,6 +72,30 @@ public sealed class VsIdeBridgePackage : AsyncPackage
         {
             ActivityLog.LogWarning(nameof(VsIdeBridgePackage), $"Pipe server failed to start: {ex.Message}");
         }
+
+        _ = JoinableTaskFactory.RunAsync(async () =>
+        {
+            try
+            {
+                await JoinableTaskFactory.SwitchToMainThreadAsync(CancellationToken.None);
+                var dte = await GetServiceAsync(typeof(DTE)).ConfigureAwait(true) as DTE2;
+                if (dte?.Solution?.IsOpen != true)
+                {
+                    return;
+                }
+
+                var context = new IdeCommandContext(this, dte, runtime.Logger, runtime, CancellationToken.None);
+                await runtime.ErrorListService.GetErrorListAsync(
+                    context,
+                    waitForIntellisense: true,
+                    DiagnosticsWarmupTimeoutMilliseconds,
+                    query: new ErrorListQuery { Max = 1 }).ConfigureAwait(true);
+            }
+            catch (Exception ex)
+            {
+                ActivityLog.LogWarning(nameof(VsIdeBridgePackage), $"Diagnostics warmup failed: {ex.Message}");
+            }
+        });
     }
 
     protected override void Dispose(bool disposing)

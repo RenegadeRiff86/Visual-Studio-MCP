@@ -2,6 +2,7 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
+    <Description>Windows background service that manages VS IDE Bridge named-pipe instances.</Description>
     <UseWindowsService>true</UseWindowsService>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

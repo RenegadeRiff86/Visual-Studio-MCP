@@ -2,6 +2,7 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
+    <Description>MCP CLI client and server for VS IDE Bridge.</Description>
     <AssemblyName>vs-ide-bridge</AssemblyName>
     <RootNamespace>VsIdeBridgeCli</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>

@@ -7,6 +7,13 @@ namespace VsIdeBridge.Commands;
 
 internal static class BreakpointCommands
 {
+    private const string BreakpointCountSuffix = " breakpoint(s).";
+
+    private static string FormatBreakpointCountMessage(string action, object? count)
+    {
+        return $"{action} {count}{BreakpointCountSuffix}";
+    }
+
     internal sealed class IdeSetBreakpointCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0206)
     {
         protected override string CanonicalName => "Tools.IdeSetBreakpoint";
@@ -21,7 +28,9 @@ internal static class BreakpointCommands
                 args.GetString("condition"),
                 args.GetEnum("condition-type", "when-true", "when-true", "changed"),
                 args.GetInt32("hit-count", 0),
-                args.GetEnum("hit-type", "none", "none", "equal", "multiple", "greater-or-equal")).ConfigureAwait(true);
+                args.GetEnum("hit-type", "none", "none", "equal", "multiple", "greater-or-equal"),
+                args.GetString("trace-message"),
+                args.GetBoolean("continue-execution", false)).ConfigureAwait(true);
 
             if (args.GetBoolean("reveal", true))
             {
@@ -48,7 +57,7 @@ internal static class BreakpointCommands
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
             var data = await context.Runtime.BreakpointService.ListBreakpointsAsync(context.Dte).ConfigureAwait(true);
-            return new CommandExecutionResult($"Enumerated {data["count"]} breakpoint(s).", data);
+            return new CommandExecutionResult(FormatBreakpointCountMessage("Enumerated", data["count"]), data);
         }
     }
 
@@ -63,7 +72,7 @@ internal static class BreakpointCommands
                 args.GetRequiredString("file"),
                 args.GetInt32("line", 1)).ConfigureAwait(true);
 
-            return new CommandExecutionResult($"Removed {data["removedCount"]} breakpoint(s).", data);
+            return new CommandExecutionResult(FormatBreakpointCountMessage("Removed", data["removedCount"]), data);
         }
     }
 
@@ -74,7 +83,7 @@ internal static class BreakpointCommands
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
             var data = await context.Runtime.BreakpointService.ClearAllBreakpointsAsync(context.Dte).ConfigureAwait(true);
-            return new CommandExecutionResult($"Removed {data["removedCount"]} breakpoint(s).", data);
+            return new CommandExecutionResult(FormatBreakpointCountMessage("Removed", data["removedCount"]), data);
         }
     }
 
@@ -115,7 +124,7 @@ internal static class BreakpointCommands
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
             var data = await context.Runtime.BreakpointService.EnableAllBreakpointsAsync(context.Dte).ConfigureAwait(true);
-            return new CommandExecutionResult($"Enabled {data["enabledCount"]} breakpoint(s).", data);
+            return new CommandExecutionResult(FormatBreakpointCountMessage("Enabled", data["enabledCount"]), data);
         }
     }
 
@@ -126,7 +135,7 @@ internal static class BreakpointCommands
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
             var data = await context.Runtime.BreakpointService.DisableAllBreakpointsAsync(context.Dte).ConfigureAwait(true);
-            return new CommandExecutionResult($"Disabled {data["disabledCount"]} breakpoint(s).", data);
+            return new CommandExecutionResult(FormatBreakpointCountMessage("Disabled", data["disabledCount"]), data);
         }
     }
 }

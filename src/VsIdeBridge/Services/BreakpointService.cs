@@ -18,7 +18,9 @@ internal sealed class BreakpointService
         string? condition,
         string conditionType,
         int hitCount,
-        string hitType)
+        string hitType,
+        string? traceMessage,
+        bool continueExecution)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
@@ -35,13 +37,16 @@ internal sealed class BreakpointService
             HitCount: hitCount,
             HitCountType: MapHitCountType(hitType));
 
-        existing = FindBreakpoint(dte, normalizedPath, line);
-        if (existing is null)
-        {
-            throw new CommandErrorException("internal_error", "Breakpoint was created but could not be resolved afterward.");
-        }
+        existing = FindBreakpoint(dte, normalizedPath, line)
+            ?? throw new CommandErrorException("internal_error", "Breakpoint was created but could not be resolved afterward.");
 
         existing.Enabled = true;
+        if (existing is Breakpoint2 advancedBreakpoint)
+        {
+            advancedBreakpoint.Message = traceMessage ?? string.Empty;
+            advancedBreakpoint.BreakWhenHit = !continueExecution;
+        }
+
         return SerializeBreakpoint(existing);
     }
 
@@ -184,6 +189,9 @@ internal sealed class BreakpointService
         var hitCountTarget = breakpoint.HitCountTarget;
         var hitCountType = breakpoint.HitCountType.ToString();
         var name = breakpoint.Name ?? string.Empty;
+        var advancedBreakpoint = breakpoint as Breakpoint2;
+        var traceMessage = advancedBreakpoint?.Message;
+        var breakWhenHit = advancedBreakpoint?.BreakWhenHit ?? true;
         return new JObject
         {
             ["file"] = file,
@@ -196,6 +204,8 @@ internal sealed class BreakpointService
             ["hitCountTarget"] = hitCountTarget,
             ["hitCountType"] = hitCountType,
             ["name"] = name,
+            ["traceMessage"] = string.IsNullOrWhiteSpace(traceMessage) ? JValue.CreateNull() : traceMessage,
+            ["breakWhenHit"] = breakWhenHit,
         };
     }
 

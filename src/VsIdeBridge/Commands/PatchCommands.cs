@@ -10,6 +10,8 @@ namespace VsIdeBridge.Commands;
 
 internal static class PatchCommands
 {
+    private const int DiagnosticsRefreshTimeoutMilliseconds = 30_000;
+
     internal sealed class IdeApplyUnifiedDiffCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0221)
     {
         protected override string CanonicalName => "Tools.IdeApplyUnifiedDiff";
@@ -50,7 +52,14 @@ internal static class PatchCommands
                 openChangedFiles,
                 args.GetBoolean("save-changed-files", false)).ConfigureAwait(true);
 
+            await context.Runtime.ErrorListService.GetErrorListAsync(
+                context,
+                waitForIntellisense: true,
+                DiagnosticsRefreshTimeoutMilliseconds,
+                query: new ErrorListQuery { Max = 1 }).ConfigureAwait(true);
+
             data["approval"] = approvedOnce ? "one-time" : "persistent";
+            data["diagnosticsRefreshed"] = true;
 
             return new CommandExecutionResult($"Applied unified diff to {data["count"]} file(s).", data);
         }

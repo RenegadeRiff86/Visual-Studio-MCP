@@ -12,8 +12,13 @@ internal static class DebugBuildCommands
 {
     private const string CountKey = "count";
     private const string TimeoutMillisecondsArgument = "timeout-ms";
+    private const string WaitForIntellisenseArgument = "wait-for-intellisense";
+    private const string RequireCleanDiagnosticsArgument = "require-clean-diagnostics";
     private const int DefaultDebuggerTimeoutMilliseconds = 120000;
     private const int MinimumBuildErrorsTimeoutMilliseconds = 5000;
+    private const int DefaultBuildTimeoutMilliseconds = 600000;
+    private const int DefaultBlockingDiagnosticsMax = 50;
+    private const string DirtyDiagnosticsCode = "dirty_diagnostics";
 
     private static CommandExecutionResult CreateCapturedResult(string itemLabel, JObject data)
     {
@@ -27,7 +32,7 @@ internal static class DebugBuildCommands
 
     private static int GetBuildErrorsTimeout(CommandArguments args)
     {
-        var timeout = args.GetInt32(TimeoutMillisecondsArgument, 600000);
+        var timeout = args.GetInt32(TimeoutMillisecondsArgument, DefaultBuildTimeoutMilliseconds);
         if (timeout < MinimumBuildErrorsTimeoutMilliseconds)
         {
             throw new CommandErrorException(
@@ -36,6 +41,100 @@ internal static class DebugBuildCommands
         }
 
         return timeout;
+    }
+
+    private static int GetPreflightDiagnosticsTimeout(int timeoutMilliseconds)
+    {
+        return Math.Max(MinimumBuildErrorsTimeoutMilliseconds, Math.Min(timeoutMilliseconds, DefaultDebuggerTimeoutMilliseconds));
+    }
+
+    private static int GetTotalSeverityCount(JObject diagnostics, string severity)
+    {
+        return diagnostics["totalSeverityCounts"]?[severity]?.Value<int>() ?? 0;
+    }
+
+    private static (int ErrorCount, int WarningCount, int MessageCount) GetSeverityCounts(JObject diagnostics)
+    {
+        return (
+            GetTotalSeverityCount(diagnostics, "Error"),
+            GetTotalSeverityCount(diagnostics, "Warning"),
+            GetTotalSeverityCount(diagnostics, "Message"));
+    }
+
+    private static string FormatBlockingDiagnosticsSummary(int errorCount, int warningCount, int messageCount)
+    {
+        static string FormatSegment(int count, string singularLabel)
+        {
+            return count == 1
+                ? $"1 {singularLabel}"
+                : $"{count} {singularLabel}s";
+        }
+
+        return string.Join(", ",
+            [
+                FormatSegment(errorCount, "error"),
+                FormatSegment(warningCount, "warning"),
+                FormatSegment(messageCount, "message"),
+            ]);
+    }
+
+    private static async Task EnsureCleanDiagnosticsAsync(IdeCommandContext context, CommandArguments args, int timeoutMilliseconds)
+    {
+        if (!args.GetBoolean(RequireCleanDiagnosticsArgument, true))
+        {
+            return;
+        }
+
+        var diagnostics = await GetDiagnosticsSnapshotAsync(
+            context,
+            args,
+            GetPreflightDiagnosticsTimeout(timeoutMilliseconds),
+            args.GetBoolean(WaitForIntellisenseArgument, true)).ConfigureAwait(true);
+
+        ThrowIfDiagnosticsPresent(diagnostics, "Build blocked by existing diagnostics", args);
+    }
+
+    private static async Task<JObject> GetDiagnosticsSnapshotAsync(IdeCommandContext context, CommandArguments args, int timeoutMilliseconds, bool waitForIntellisense)
+    {
+        return await context.Runtime.ErrorListService.GetErrorListAsync(
+            context,
+            waitForIntellisense,
+            timeoutMilliseconds,
+            query: new ErrorListQuery { Max = args.GetNullableInt32("max") ?? DefaultBlockingDiagnosticsMax }).ConfigureAwait(true);
+    }
+
+    private static void ThrowIfDiagnosticsPresent(JObject diagnostics, string summaryPrefix, CommandArguments args, JObject? extraData = null)
+    {
+        var (errorCount, warningCount, messageCount) = GetSeverityCounts(diagnostics);
+        if (errorCount == 0 && warningCount == 0 && messageCount == 0)
+        {
+            return;
+        }
+
+        var data = new JObject
+        {
+            ["requireCleanDiagnostics"] = args.GetBoolean(RequireCleanDiagnosticsArgument, true),
+            ["diagnostics"] = diagnostics,
+            ["blockingCounts"] = new JObject
+            {
+                ["errors"] = errorCount,
+                ["warnings"] = warningCount,
+                ["messages"] = messageCount,
+            },
+        };
+
+        if (extraData is not null)
+        {
+            foreach (var property in extraData.Properties())
+            {
+                data[property.Name] = property.Value;
+            }
+        }
+
+        throw new CommandErrorException(
+            DirtyDiagnosticsCode,
+            $"{summaryPrefix}: {FormatBlockingDiagnosticsSummary(errorCount, warningCount, messageCount)}. Fix them first or set --{RequireCleanDiagnosticsArgument} false to override.",
+            data);
     }
 
     private static ErrorListQuery CreateErrorListQuery(CommandArguments args, string? defaultSeverity = null)
@@ -309,11 +408,27 @@ internal static class DebugBuildCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
+            var timeout = args.GetInt32(TimeoutMillisecondsArgument, DefaultBuildTimeoutMilliseconds);
+            await EnsureCleanDiagnosticsAsync(context, args, timeout).ConfigureAwait(true);
+
             var data = await context.Runtime.BuildService.BuildSolutionAsync(
                 context,
-                args.GetInt32("timeout-ms", 600000),
+                timeout,
                 args.GetString("configuration"),
                 args.GetString("platform")).ConfigureAwait(true);
+
+            if (args.GetBoolean(RequireCleanDiagnosticsArgument, true))
+            {
+                var diagnostics = await GetDiagnosticsSnapshotAsync(context, args, timeout, waitForIntellisense: false).ConfigureAwait(true);
+                ThrowIfDiagnosticsPresent(
+                    diagnostics,
+                    "Build completed but diagnostics remain",
+                    args,
+                    new JObject
+                    {
+                        ["build"] = data,
+                    });
+            }
 
             return new CommandExecutionResult($"Build completed with LastBuildInfo={data["lastBuildInfo"]}.", data);
         }
@@ -362,10 +477,11 @@ internal static class DebugBuildCommands
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
             var timeout = GetBuildErrorsTimeout(args);
+            await EnsureCleanDiagnosticsAsync(context, args, timeout).ConfigureAwait(true);
             var build = await context.Runtime.BuildService.BuildAndCaptureErrorsAsync(
                 context,
                 timeout,
-                args.GetBoolean("wait-for-intellisense", true)).ConfigureAwait(true);
+                args.GetBoolean(WaitForIntellisenseArgument, true)).ConfigureAwait(true);
             var errors = await context.Runtime.ErrorListService.GetErrorListAsync(
                 context,
                 false,
@@ -377,6 +493,11 @@ internal static class DebugBuildCommands
                 ["build"] = build,
                 ["errors"] = errors,
             };
+
+            if (args.GetBoolean(RequireCleanDiagnosticsArgument, true))
+            {
+                ThrowIfDiagnosticsPresent(errors, "Build completed but diagnostics remain", args, data);
+            }
 
             return new CommandExecutionResult($"Build finished and captured {errors["count"]} Error List row(s).", data);
         }

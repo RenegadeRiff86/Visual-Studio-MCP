@@ -630,11 +630,11 @@ internal sealed class SearchService
             }
         }
 
-        return new JArray(contexts
+        return [.. contexts
             .OrderByDescending(item => item.Score)
             .ThenBy(item => item.FirstLine)
             .Take(limit)
-            .Select(item => item.Context));
+            .Select(item => item.Context)];
     }
 
     private static int ScoreSmartContext(IReadOnlyList<SearchHit> hits)

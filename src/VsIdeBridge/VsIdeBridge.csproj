@@ -2,6 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
     <AssemblyName>VsIdeBridge</AssemblyName>
+    <Description>Visual Studio extension (VSIX) that exposes IDE commands as a named-pipe server for MCP clients.</Description>
     <RootNamespace>VsIdeBridge</RootNamespace>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>

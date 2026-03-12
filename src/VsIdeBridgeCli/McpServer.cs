@@ -3,6 +3,7 @@ using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using VsIdeBridge.Shared;
 
 namespace VsIdeBridgeCli;
@@ -17,7 +18,7 @@ internal static partial class CliApp
         return 0;
     }
 
-    private static class McpServer
+    private static partial class McpServer
     {
         private static readonly string McpLog = Path.Combine(Path.GetTempPath(), "vs-ide-bridge", "mcp-server.log");
         private const string ActivateWindowArgumentName = "activate_window";
@@ -27,18 +28,30 @@ internal static partial class CliApp
         private const int DefaultGitDiffContextLines = 3;
         private const int DefaultGitHubIssueSearchLimit = 20;
         private const int DefaultGitLogMaxCount = 20;
+        private const int DefaultLargeMaxCount = 200;
         private const string DotNetExecutableName = "dotnet";
+        private const string DirectoryArgumentName = "directory";
         private const string FileArgumentName = "file";
         private const string GitExecutableName = "git";
         private const string GroupByArgumentName = "group_by";
         private const int JsonRpcInvalidRequestCode = -32600;
         private const int JsonRpcInvalidParamsCode = -32602;
+        private const int BridgeErrorCode = -32001;
+        private const string VisualStudioInstallDirName = "Microsoft Visual Studio";
+        private const string DevenvExeFileName = "devenv.exe";
+        private const string Vs2022Year = "2022";
         private const int HeaderTerminatorLength = 4;
         private const string LineArgumentName = "line";
         private const string MaxArgumentName = "max";
+        private const string NameArgumentName = "name";
         private const string PathArgumentName = "path";
         private const string PlatformArgumentName = "platform";
         private const string ProjectArgumentName = "project";
+        private const string ProjectArgumentDescription = "Project name, unique name, or full path.";
+        private const string SampleCliProjectName = "VsIdeBridgeCli";
+        private const string SampleCliTestProjectName = "VsIdeBridgeCli.Tests";
+        private const string SampleCliProgramPath = "src\\VsIdeBridgeCli\\Program.cs";
+        private const string SampleCliProjectPath = "src\\VsIdeBridgeCli\\VsIdeBridgeCli.csproj";
         private const string QueryArgumentName = "query";
         private const string QuickArgumentName = "quick";
         private const int RawJsonInitialDepth = 1;
@@ -58,9 +71,13 @@ internal static partial class CliApp
         private const string TimeoutMillisecondsArgumentName = "timeout_ms";
         private const string TimeoutMillisecondsSwitchName = "timeout-ms";
         private const string ToolHelpToolName = "tool_help";
+        private const string OneBasedLineNumberDescription = "1-based line number.";
         private const string UnknownMcpToolMessageFormat = "Unknown MCP tool: {toolName}";
         private const string WaitForIntellisenseArgumentName = "wait_for_intellisense";
         private const string WarningsToolName = "warnings";
+        private const int VsOpenDiscoveryTimeoutMilliseconds = 30000;
+        private const int VsOpenDiscoveryPollMilliseconds = 250;
+        private const int ShortOperationTimeoutMilliseconds = 5000;
         private static readonly string[] GitExecutableExtensions = [".exe", ".cmd", ".bat", string.Empty];
         private static readonly string[] GitRelativeCandidatePaths =
         [
@@ -99,17 +116,27 @@ internal static partial class CliApp
             private string _lastKnownSolutionPath = string.Empty;
             private PipeDiscovery? _cachedDiscovery;
 
-            public async Task<JsonObject> SendAsync(JsonNode? id, string command, string args)
+            public Task<JsonObject> SendAsync(JsonNode? id, string command, string args)
+            {
+                return SendAsync(id, command, args, ignoreSolutionHint: false);
+            }
+
+            public Task<JsonObject> SendIgnoringSolutionHintAsync(JsonNode? id, string command, string args)
+            {
+                return SendAsync(id, command, args, ignoreSolutionHint: true);
+            }
+
+            private async Task<JsonObject> SendAsync(JsonNode? id, string command, string args, bool ignoreSolutionHint)
             {
                 try
                 {
-                    var response = await SendCoreAsync(command, args).ConfigureAwait(false);
+                    var response = await SendCoreAsync(command, args, ignoreSolutionHint).ConfigureAwait(false);
                     RememberSolutionPath(TryGetSolutionPath(response));
                     return response;
                 }
                 catch (CliException ex)
                 {
-                    throw new McpRequestException(id, -32001, ex.Message);
+                    throw new McpRequestException(id, BridgeErrorCode, ex.Message);
                 }
                 catch (TimeoutException ex)
                 {
@@ -117,11 +144,11 @@ internal static partial class CliApp
                 }
                 catch (UnauthorizedAccessException ex)
                 {
-                    return await RetrySendAfterCommunicationFailureAsync(id, command, args, ex, accessDenied: true).ConfigureAwait(false);
+                    return await RetrySendAfterCommunicationFailureAsync(id, command, args, ex, accessDenied: true, ignoreSolutionHint).ConfigureAwait(false);
                 }
                 catch (IOException ex)
                 {
-                    return await RetrySendAfterCommunicationFailureAsync(id, command, args, ex, accessDenied: false).ConfigureAwait(false);
+                    return await RetrySendAfterCommunicationFailureAsync(id, command, args, ex, accessDenied: false, ignoreSolutionHint).ConfigureAwait(false);
                 }
             }
 
@@ -143,7 +170,7 @@ internal static partial class CliApp
                 }
                 catch (CliException ex)
                 {
-                    throw new McpRequestException(id, -32001, ex.Message);
+                    throw new McpRequestException(id, BridgeErrorCode, ex.Message);
                 }
             }
 
@@ -199,9 +226,11 @@ internal static partial class CliApp
                 McpTrace($"selector updated to prefer solution hint '{solutionHint ?? string.Empty}'.");
             }
 
-            private async Task<JsonObject> SendCoreAsync(string command, string args)
+            private async Task<JsonObject> SendCoreAsync(string command, string args, bool ignoreSolutionHint)
             {
-                var discovery = await GetDiscoveryAsync().ConfigureAwait(false);
+                var discovery = ignoreSolutionHint
+                    ? await GetDiscoveryIgnoringSolutionHintAsync().ConfigureAwait(false)
+                    : await GetDiscoveryAsync().ConfigureAwait(false);
                 await using var client = new PipeClient(discovery.PipeName, _options.GetInt32("timeout-ms", 130_000));
                 var request = new JsonObject
                 {
@@ -211,6 +240,37 @@ internal static partial class CliApp
                 };
 
                 return await client.SendAsync(request).ConfigureAwait(false);
+            }
+
+            private async Task<PipeDiscovery> GetDiscoveryIgnoringSolutionHintAsync()
+            {
+                BridgeInstanceSelector selectorSnapshot;
+                PipeDiscovery? cachedDiscovery;
+                lock (_stateGate)
+                {
+                    cachedDiscovery = _cachedDiscovery;
+                    selectorSnapshot = CloneSelector(_selector);
+                }
+
+                if (cachedDiscovery is not null)
+                {
+                    return cachedDiscovery;
+                }
+
+                selectorSnapshot = new BridgeInstanceSelector
+                {
+                    InstanceId = selectorSnapshot.InstanceId,
+                    ProcessId = selectorSnapshot.ProcessId,
+                    PipeName = selectorSnapshot.PipeName,
+                    SolutionHint = null,
+                };
+
+                var discovery = await PipeDiscovery
+                    .SelectAsync(selectorSnapshot, _verbose, ResolveDiscoveryMode(_options))
+                    .ConfigureAwait(false);
+
+                McpTrace($"bound instance={discovery.InstanceId} pipe={discovery.PipeName} source={discovery.Source} solution={discovery.SolutionPath} without solution hint");
+                return discovery;
             }
 
             private async Task<PipeDiscovery> GetDiscoveryAsync()
@@ -244,7 +304,7 @@ internal static partial class CliApp
                 return discovery;
             }
 
-            private async Task<JsonObject> RetrySendAfterCommunicationFailureAsync(JsonNode? id, string command, string args, Exception ex, bool accessDenied)
+            private async Task<JsonObject> RetrySendAfterCommunicationFailureAsync(JsonNode? id, string command, string args, Exception ex, bool accessDenied, bool ignoreSolutionHint)
             {
                 if (ClearCachedDiscovery() is not { } cachedDiscovery)
                 {
@@ -260,13 +320,13 @@ internal static partial class CliApp
 
                 try
                 {
-                    var response = await SendCoreAsync(command, args).ConfigureAwait(false);
+                    var response = await SendCoreAsync(command, args, ignoreSolutionHint).ConfigureAwait(false);
                     RememberSolutionPath(TryGetSolutionPath(response));
                     return response;
                 }
                 catch (CliException retryEx)
                 {
-                    throw new McpRequestException(id, -32001, retryEx.Message);
+                    throw new McpRequestException(id, BridgeErrorCode, retryEx.Message);
                 }
                 catch (TimeoutException retryEx)
                 {
@@ -673,7 +733,7 @@ internal static partial class CliApp
                     RequiredStringProperty("query", "File name or path fragment."),
                     OptionalStringProperty("path", "Optional path fragment filter."),
                     OptionalStringArrayProperty("extensions", "Optional extension filters like ['.cmake','.txt']."),
-                    OptionalIntegerProperty("max_results", "Optional max result count (default 200)."),
+                    OptionalIntegerProperty("max_results", $"Optional max result count (default {DefaultLargeMaxCount})."),
                     OptionalBooleanProperty("include_non_project", "Include disk files under solution root that are not in projects (default true)."))),
             Tool(
                 "search_symbols",
@@ -691,7 +751,7 @@ internal static partial class CliApp
                 "Count symbol references at file/line/column with exact-or-explicit semantics.",
                 ObjectSchema(
                     RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription),
-                    RequiredIntegerProperty("line", "1-based line number."),
+                    RequiredIntegerProperty("line", OneBasedLineNumberDescription),
                     RequiredIntegerProperty("column", "1-based column number."),
                     OptionalBooleanProperty(ActivateWindowArgumentName, "Activate references window while counting (default true)."),
                     OptionalIntegerProperty(TimeoutMillisecondsArgumentName, "Optional window wait timeout in milliseconds."))),
@@ -700,7 +760,7 @@ internal static partial class CliApp
                 "Get quick info at file/line/column.",
                 ObjectSchema(
                     RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription),
-                    RequiredIntegerProperty("line", "1-based line number."),
+                    RequiredIntegerProperty("line", OneBasedLineNumberDescription),
                     RequiredIntegerProperty("column", "1-based column number."))),
             Tool(
                 ApplyDiffToolName,
@@ -746,6 +806,24 @@ internal static partial class CliApp
                 "Activate one window by caption fragment.",
                 ObjectSchema(RequiredStringProperty("window", "Window caption fragment."))),
             Tool(
+                "execute_command",
+                "Execute a Visual Studio command, optionally after positioning the caret in a file or document.",
+                ObjectSchema(
+                    RequiredStringProperty("command", "Visual Studio command name, for example 'Edit.FormatDocument'."),
+                    OptionalStringProperty("args", "Optional command arguments string passed to Visual Studio."),
+                    OptionalStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription),
+                    OptionalStringProperty("document", "Optional open-document query to position before running the command."),
+                    OptionalIntegerProperty(LineArgumentName, "Optional 1-based line number."),
+                    OptionalIntegerProperty(ColumnArgumentName, "Optional 1-based column number."),
+                    OptionalBooleanProperty("select_word", "If true, select the word at the caret before executing the command."))),
+            Tool(
+                "format_document",
+                "Format the current document, or a specific file after opening/positioning it in Visual Studio.",
+                ObjectSchema(
+                    OptionalStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription),
+                    OptionalIntegerProperty(LineArgumentName, "Optional 1-based line number."),
+                    OptionalIntegerProperty(ColumnArgumentName, "Optional 1-based column number."))),
+            Tool(
                 "goto_definition",
                 "Jump to definition at file/line/column.",
                 FileLineColumnSchema()),
@@ -759,10 +837,12 @@ internal static partial class CliApp
                 FileLineColumnSchema()),
             Tool(
                 "build_errors",
-                "Build the solution and capture errors after completion.",
+                "Build the solution and capture errors after completion. By default this refuses to build when diagnostics already exist and fails if any errors, warnings, or messages remain after the build.",
                 ObjectSchema(
                     OptionalIntegerProperty(TimeoutMillisecondsArgumentName, "Optional build timeout in milliseconds."),
-                    OptionalIntegerProperty(MaxArgumentName, "Optional max error rows."))),
+                    OptionalIntegerProperty(MaxArgumentName, "Optional max error rows."),
+                    OptionalBooleanProperty(WaitForIntellisenseArgumentName, "Wait for IntelliSense readiness before checking for blocking diagnostics (default true)."),
+                    OptionalBooleanProperty("require_clean_diagnostics", "Refuse to build when the Error List contains any errors, warnings, or messages (default true)."))),
             Tool("debug_threads", "Get debugger thread snapshot.", EmptySchema()),
             Tool(
                 "debug_stack",
@@ -773,7 +853,7 @@ internal static partial class CliApp
             Tool(
                 "debug_locals",
                 "Get local variables for the current stack frame.",
-                ObjectSchema(OptionalIntegerProperty(MaxArgumentName, "Optional max locals (default 200)."))),
+                ObjectSchema(OptionalIntegerProperty(MaxArgumentName, $"Optional max locals (default {DefaultLargeMaxCount})."))),
             Tool("debug_modules", "Get debugger modules snapshot (best effort).", EmptySchema()),
             Tool(
                 "debug_watch",
@@ -932,6 +1012,37 @@ internal static partial class CliApp
                     OptionalBooleanProperty("dry_run", "If true, run with --dry-run."),
                     OptionalBooleanProperty("yes", "Auto-confirm remove (default true)."))),
             Tool(
+                "shell_exec",
+                "Execute a process and capture its stdout, stderr, and exit code. Working directory defaults to the solution directory.",
+                ObjectSchema(
+                    RequiredStringProperty("exe", "Executable path or name (e.g. 'powershell', 'cmd', 'ISCC.exe')."),
+                    OptionalStringProperty("args", "Arguments string to pass to the executable."),
+                    OptionalStringProperty("cwd", "Working directory. Defaults to the solution directory."),
+                    OptionalIntegerProperty(TimeoutMillisecondsArgumentName, "Timeout in milliseconds (default 60000)."))),
+            Tool(
+                "set_version",
+                "Update the version string across all version files (Directory.Build.props, source.extension.vsixmanifest, and installer/inno/vs-ide-bridge.iss). Keeps every version location in sync.",
+                ObjectSchema(
+                    RequiredStringProperty("version", "New version string, e.g. '2.1.0'."))),
+            Tool(
+                "vs_close",
+                "Close a Visual Studio instance. Targets the currently bound instance unless 'process_id' is supplied. Uses CloseMainWindow (graceful, VS may prompt to save) unless 'force' is true.",
+                ObjectSchema(
+                    OptionalIntegerProperty("process_id", "VS process ID to close. Defaults to the bound instance."),
+                    OptionalBooleanProperty("force", "If true, forcibly kill the process instead of requesting a graceful close (default false)."))),
+            Tool(
+                "vs_open",
+                "Launch a new Visual Studio instance, optionally opening a solution file. Returns immediately after the launch request is issued.",
+                ObjectSchema(
+                    OptionalStringProperty(SolutionArgumentName, "Absolute path to a .sln or .slnx file to open."),
+                    OptionalStringProperty("devenv_path", $"Explicit path to {DevenvExeFileName}. Auto-detected via vswhere if omitted."))),
+            Tool(
+                "wait_for_instance",
+                "Wait for a Visual Studio bridge instance to appear. Use after vs_open for MCP hosts that cannot hold a long launch call open.",
+                ObjectSchema(
+                    OptionalStringProperty(SolutionArgumentName, "Absolute path to a .sln or .slnx file to open."),
+                    OptionalIntegerProperty(TimeoutMillisecondsArgumentName, $"How long to wait in milliseconds (default {VsOpenDiscoveryTimeoutMilliseconds})."))),
+            Tool(
                 "find_text",
                 "Full-text search across the solution or a path subtree. Returns file paths, line numbers and preview text.",
                 ObjectSchema(
@@ -968,16 +1079,144 @@ internal static partial class CliApp
                 ObjectSchema(RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription))),
             Tool(
                 "build",
-                "Trigger a solution build and return errors/warnings. Builds may take several minutes.",
+                "Trigger a solution build and return errors/warnings. By default this refuses to build when diagnostics already exist and fails if any errors, warnings, or messages remain after the build.",
                 ObjectSchema(
                     OptionalStringProperty(ConfigurationArgumentName, "Optional build configuration (e.g. Debug, Release)."),
-                    OptionalStringProperty(PlatformArgumentName, "Optional build platform (e.g. x64)."))),
+                    OptionalStringProperty(PlatformArgumentName, "Optional build platform (e.g. x64)."),
+                    OptionalBooleanProperty(WaitForIntellisenseArgumentName, "Wait for IntelliSense readiness before checking for blocking diagnostics (default true)."),
+                    OptionalBooleanProperty("require_clean_diagnostics", "Refuse to build when the Error List contains any errors, warnings, or messages (default true)."))),
             Tool(
                 "open_solution",
                 "Open a solution file in the current Visual Studio instance without opening a new window.",
                 ObjectSchema(
                     RequiredStringProperty(SolutionArgumentName, "Absolute path to the .sln file to open."),
-                    OptionalBooleanProperty("wait_for_ready", "Wait for readiness after opening the solution (default true).")))
+                    OptionalBooleanProperty("wait_for_ready", "Wait for readiness after opening the solution (default true)."))),
+            Tool(
+                "create_solution",
+                "Create and open a new solution in the current Visual Studio instance.",
+                ObjectSchema(
+                    RequiredStringProperty(DirectoryArgumentName, "Absolute directory where the new solution should be created."),
+                    RequiredStringProperty(NameArgumentName, "Solution name. '.sln' is optional."),
+                    OptionalBooleanProperty("wait_for_ready", "Wait for readiness after opening the solution (default true)."))),
+            Tool(
+                "search_solutions",
+                "Search for solution files (.sln/.slnx) on disk under a given root directory. Defaults to %USERPROFILE%\\source\\repos.",
+                ObjectSchema(
+                    OptionalStringProperty(PathArgumentName, "Root directory to search (default: %USERPROFILE%\\source\\repos)."),
+                    OptionalStringProperty(QueryArgumentName, "Filter by solution name (case-insensitive substring)."),
+                    OptionalIntegerProperty("max_depth", "Max directory depth to recurse (default 6)."),
+                    OptionalIntegerProperty("max", $"Max results to return (default {DefaultLargeMaxCount})."))),
+            Tool(
+                "list_projects",
+                "List all projects in the current solution, including startup-project flags.",
+                EmptySchema()),
+            Tool(
+                "query_project_items",
+                "List items in one project with paths, item types, and VS item metadata.",
+                ObjectSchema(
+                    RequiredStringProperty(ProjectArgumentName, ProjectArgumentDescription),
+                    OptionalStringProperty(PathArgumentName, "Optional file or directory filter within the project."),
+                    OptionalIntegerProperty("max", "Optional max item count (default 500)."))),
+            Tool(
+                "query_project_properties",
+                "Read project properties such as TargetFramework, AssemblyName, OutputType, or RootNamespace.",
+                ObjectSchema(
+                    RequiredStringProperty(ProjectArgumentName, ProjectArgumentDescription),
+                    OptionalStringArrayProperty("names", "Optional property names to read. Omit to return every accessible property."))),
+            Tool(
+                "query_project_configurations",
+                "List available project configurations and platforms, including the active one.",
+                ObjectSchema(
+                    RequiredStringProperty(ProjectArgumentName, ProjectArgumentDescription))),
+            Tool(
+                "query_project_references",
+                "List project references for one project. By default this returns resolved references with framework reference assemblies omitted; pass declared_only for a cleaner project-file view.",
+                ObjectSchema(
+                    RequiredStringProperty(ProjectArgumentName, ProjectArgumentDescription),
+                    OptionalBooleanProperty("include_framework", "Include framework/reference-assembly items in the results (default false)."),
+                    OptionalBooleanProperty("declared_only", "Return only references declared in the project file instead of the fully resolved reference closure (default false)."))),
+            Tool(
+                "query_project_outputs",
+                "Resolve the primary output artifact and output directory for one project using the active or requested build shape.",
+                ObjectSchema(
+                    RequiredStringProperty(ProjectArgumentName, ProjectArgumentDescription),
+                    OptionalStringProperty(ConfigurationArgumentName, "Optional build configuration to evaluate (for example Release)."),
+                    OptionalStringProperty(PlatformArgumentName, "Optional build platform to evaluate (for example x64)."),
+                    OptionalStringProperty("target_framework", "Optional target framework moniker to evaluate when a project targets multiple frameworks."))),
+            Tool(
+                "add_project",
+                "Add an existing project file to the current solution.",
+                ObjectSchema(
+                    RequiredStringProperty(ProjectArgumentName, "Absolute project path (.csproj/.vcxproj/.fsproj)."),
+                    OptionalStringProperty("solution_folder", "Optional solution folder name to add the project under."))),
+            Tool(
+                "remove_project",
+                "Remove a project from the current solution by name or path.",
+                ObjectSchema(RequiredStringProperty(ProjectArgumentName, ProjectArgumentDescription))),
+            Tool(
+                "set_startup_project",
+                "Set the current solution startup project.",
+                ObjectSchema(RequiredStringProperty(ProjectArgumentName, "Project name, unique name, or full path."))),
+            Tool(
+                "add_file_to_project",
+                "Add an existing file to a project without creating it on disk.",
+                ObjectSchema(
+                    RequiredStringProperty(ProjectArgumentName, "Project name, unique name, or full path."),
+                    RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription))),
+            Tool(
+                "remove_file_from_project",
+                "Remove a file from a project without deleting the file from disk.",
+                ObjectSchema(
+                    RequiredStringProperty(ProjectArgumentName, "Project name, unique name, or full path."),
+                    RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription))),
+            Tool(
+                "set_breakpoint",
+                "Set a breakpoint at file/line with optional condition, hit count, tracepoint message, and reveal in editor.",
+                ObjectSchema(
+                    RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription),
+                    RequiredIntegerProperty(LineArgumentName, OneBasedLineNumberDescription),
+                    OptionalIntegerProperty(ColumnArgumentName, "1-based column number (default 1)."),
+                    OptionalStringProperty("condition", "Breakpoint condition expression."),
+                    OptionalStringProperty("condition_type", "Condition type: 'when-true' (default) or 'changed'."),
+                    OptionalIntegerProperty("hit_count", "Hit count value (default 0 = ignore)."),
+                    OptionalStringProperty("hit_type", "Hit count type: 'none' (default), 'equal', 'multiple', 'greater-or-equal'."),
+                    OptionalStringProperty("trace_message", "Optional tracepoint message to log when the breakpoint is hit."),
+                    OptionalBooleanProperty("continue_execution", "If true, do not break when the breakpoint is hit."),
+                    OptionalBooleanProperty("reveal", "Reveal breakpoint location in editor (default true)."))),
+            Tool(
+                "list_breakpoints",
+                "List all breakpoints in the current debug session.",
+                EmptySchema()),
+            Tool(
+                "remove_breakpoint",
+                "Remove a breakpoint by file and line number.",
+                ObjectSchema(
+                    RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription),
+                    RequiredIntegerProperty(LineArgumentName, OneBasedLineNumberDescription))),
+            Tool(
+                "clear_breakpoints",
+                "Remove all breakpoints.",
+                EmptySchema()),
+            Tool(
+                "enable_breakpoint",
+                "Enable a disabled breakpoint at file/line.",
+                ObjectSchema(
+                    RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription),
+                    RequiredIntegerProperty(LineArgumentName, OneBasedLineNumberDescription))),
+            Tool(
+                "disable_breakpoint",
+                "Disable a breakpoint at file/line without removing it.",
+                ObjectSchema(
+                    RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription),
+                    RequiredIntegerProperty(LineArgumentName, OneBasedLineNumberDescription))),
+            Tool(
+                "enable_all_breakpoints",
+                "Enable all breakpoints.",
+                EmptySchema()),
+            Tool(
+                "disable_all_breakpoints",
+                "Disable all breakpoints without removing them.",
+                EmptySchema())
         ];
 
         private static JsonObject Tool(string name, string description, JsonObject inputSchema) => new()
@@ -1055,6 +1294,31 @@ internal static partial class CliApp
                 return await CallCondaToolAsync(id, toolName, args, bridgeBinding).ConfigureAwait(false);
             }
 
+            if (string.Equals(toolName, "shell_exec", StringComparison.Ordinal))
+            {
+                return await CallShellExecToolAsync(id, args, bridgeBinding).ConfigureAwait(false);
+            }
+
+            if (string.Equals(toolName, "set_version", StringComparison.Ordinal))
+            {
+                return await CallSetVersionToolAsync(id, args, bridgeBinding).ConfigureAwait(false);
+            }
+
+            if (string.Equals(toolName, "vs_close", StringComparison.Ordinal))
+            {
+                return CallVsCloseTool(id, args, bridgeBinding);
+            }
+
+            if (string.Equals(toolName, "vs_open", StringComparison.Ordinal))
+            {
+                return await CallVsOpenToolAsync(id, args).ConfigureAwait(false);
+            }
+
+            if (string.Equals(toolName, "wait_for_instance", StringComparison.Ordinal))
+            {
+                return await CallWaitForInstanceToolAsync(id, args, bridgeBinding).ConfigureAwait(false);
+            }
+
             if (string.Equals(toolName, "list_instances", StringComparison.Ordinal))
             {
                 return await ListInstancesAsync(bridgeBinding).ConfigureAwait(false);
@@ -1082,6 +1346,11 @@ internal static partial class CliApp
                 return await OpenSolutionAsync(id, args, bridgeBinding).ConfigureAwait(false);
             }
 
+            if (string.Equals(toolName, "create_solution", StringComparison.Ordinal))
+            {
+                return await CreateSolutionAsync(id, args, bridgeBinding).ConfigureAwait(false);
+            }
+
             var (command, commandArgs) = toolName switch
             {
                 "state" => ("state", string.Empty),
@@ -1103,20 +1372,19 @@ internal static partial class CliApp
                 "close_others" => ("close-others", BuildSaveOnlyArgs(args)),
                 "list_windows" => ("list-windows", BuildSingleStringSwitchArg(args, QueryArgumentName, QueryArgumentName)),
                 ActivateWindowArgumentName => ("activate-window", BuildSingleStringSwitchArg(args, "window", "window")),
+                "execute_command" => ("execute-command", BuildExecuteCommandArgs(args)),
+                "format_document" => ("execute-command", BuildFormatDocumentArgs(args)),
                 "goto_definition" => ("goto-definition", BuildFileLineColumnArgs(args)),
                 "goto_implementation" => ("goto-implementation", BuildFileLineColumnArgs(args)),
                 "call_hierarchy" => ("call-hierarchy", BuildFileLineColumnArgs(args)),
-                "build_errors" => ("build-errors", BuildArgs((TimeoutMillisecondsSwitchName, GetBuildErrorsTimeoutArgument(id, args)), ("max", GetOptionalArgumentText(args, "max")))),
+                "build_errors" => ("build-errors", BuildBuildErrorsArgs(id, args)),
                 "debug_threads" => ("debug-threads", string.Empty),
-                "debug_stack" => ("debug-stack", BuildArgs(("thread-id", GetOptionalArgumentText(args, "thread_id")), ("max-frames", GetOptionalArgumentText(args, "max_frames")))),
-                "debug_locals" => ("debug-locals", BuildArgs(("max", GetOptionalArgumentText(args, "max")))),
+                "debug_stack" => ("debug-stack", BuildDebugStackArgs(args)),
+                "debug_locals" => ("debug-locals", BuildDebugLocalsArgs(args)),
                 "debug_modules" => ("debug-modules", string.Empty),
-                "debug_watch" => ("debug-watch", BuildArgs(("expression", GetOptionalStringArgument(args, "expression")), (TimeoutMillisecondsSwitchName, GetOptionalArgumentText(args, TimeoutMillisecondsArgumentName)))),
+                "debug_watch" => ("debug-watch", BuildDebugWatchArgs(args)),
                 "debug_exceptions" => ("debug-exceptions", string.Empty),
-                "diagnostics_snapshot" => ("diagnostics-snapshot", BuildArgs(
-                    ("wait-for-intellisense", GetOptionalBooleanArgument(args, WaitForIntellisenseArgumentName, true, true)),
-                    ("quick", GetOptionalBooleanArgument(args, "quick", false, true)),
-                    ("max", GetOptionalArgumentText(args, "max")))),
+                "diagnostics_snapshot" => ("diagnostics-snapshot", BuildDiagnosticsSnapshotToolArgs(args)),
                 "build_configurations" => ("build-configurations", string.Empty),
                 "set_build_configuration" => ("set-build-configuration", BuildConfigurationPlatformArgs(args)),
                 "find_text" => ("find-text", BuildFindTextArgs(args)),
@@ -1124,7 +1392,51 @@ internal static partial class CliApp
                 "find_references" => ("find-references", BuildFileLineColumnArgs(args)),
                 "peek_definition" => ("peek-definition", BuildFileLineColumnArgs(args)),
                 "file_outline" => ("file-outline", BuildSingleStringSwitchArg(args, FileArgumentName, FileArgumentName)),
-                "build" => ("build", BuildConfigurationPlatformArgs(args)),
+                "build" => ("build", BuildBuildArgs(args)),
+                "search_solutions" => ("search-solutions", BuildSearchSolutionsToolArgs(args)),
+                "list_projects" => ("list-projects", string.Empty),
+                "query_project_items" => ("query-project-items", BuildQueryProjectItemsToolArgs(args)),
+                "query_project_properties" => ("query-project-properties", BuildQueryProjectPropertiesToolArgs(args)),
+                "query_project_configurations" => ("query-project-configurations", BuildQueryProjectConfigurationsToolArgs(args)),
+                "query_project_references" => ("query-project-references", BuildQueryProjectReferencesToolArgs(args)),
+                "query_project_outputs" => ("query-project-outputs", BuildQueryProjectOutputsToolArgs(args)),
+                "add_project" => ("add-project", BuildArgs(
+                    (ProjectArgumentName, GetOptionalStringArgument(args, ProjectArgumentName)),
+                    ("solution-folder", GetOptionalStringArgument(args, "solution_folder")))),
+                "remove_project" => ("remove-project", BuildArgs((ProjectArgumentName, GetOptionalStringArgument(args, ProjectArgumentName)))),
+                "set_startup_project" => ("set-startup-project", BuildArgs((ProjectArgumentName, GetOptionalStringArgument(args, ProjectArgumentName)))),
+                "add_file_to_project" => ("add-file-to-project", BuildArgs(
+                    (ProjectArgumentName, GetOptionalStringArgument(args, ProjectArgumentName)),
+                    (FileArgumentName, GetOptionalStringArgument(args, FileArgumentName)))),
+                "remove_file_from_project" => ("remove-file-from-project", BuildArgs(
+                    (ProjectArgumentName, GetOptionalStringArgument(args, ProjectArgumentName)),
+                    (FileArgumentName, GetOptionalStringArgument(args, FileArgumentName)))),
+                "set_breakpoint" => ("set-breakpoint", BuildArgs(
+                [
+                    (FileArgumentName, GetOptionalStringArgument(args, FileArgumentName)),
+                    (LineArgumentName, GetOptionalArgumentText(args, LineArgumentName)),
+                    (ColumnArgumentName, GetOptionalArgumentText(args, ColumnArgumentName)),
+                    ("condition", GetOptionalStringArgument(args, "condition")),
+                    ("condition-type", GetOptionalStringArgument(args, "condition_type")),
+                    ("hit-count", GetOptionalArgumentText(args, "hit_count")),
+                    ("hit-type", GetOptionalStringArgument(args, "hit_type")),
+                    ("trace-message", GetOptionalStringArgument(args, "trace_message")),
+                    .. BuildBooleanArgs(args, ("continue-execution", "continue_execution", false, true)),
+                    .. BuildBooleanArgs(args, ("reveal", "reveal", true, true)),
+                ])),
+                "list_breakpoints" => ("list-breakpoints", string.Empty),
+                "remove_breakpoint" => ("remove-breakpoint", BuildArgs(
+                    (FileArgumentName, GetOptionalStringArgument(args, FileArgumentName)),
+                    (LineArgumentName, GetOptionalArgumentText(args, LineArgumentName)))),
+                "clear_breakpoints" => ("clear-breakpoints", string.Empty),
+                "enable_breakpoint" => ("enable-breakpoint", BuildArgs(
+                    (FileArgumentName, GetOptionalStringArgument(args, FileArgumentName)),
+                    (LineArgumentName, GetOptionalArgumentText(args, LineArgumentName)))),
+                "disable_breakpoint" => ("disable-breakpoint", BuildArgs(
+                    (FileArgumentName, GetOptionalStringArgument(args, FileArgumentName)),
+                    (LineArgumentName, GetOptionalArgumentText(args, LineArgumentName)))),
+                "enable_all_breakpoints" => ("enable-all-breakpoints", string.Empty),
+                "disable_all_breakpoints" => ("disable-all-breakpoints", string.Empty),
                 _ => throw new McpRequestException(id, JsonRpcInvalidParamsCode, FormatUnknownMcpToolMessage(toolName)),
             };
 
@@ -1279,7 +1591,23 @@ internal static partial class CliApp
                 "help" => "{ \"name\": \"open_file\" }",
                 "tool_help" => "{ \"name\": \"open_file\" }",
                 "open_solution" => "{ \"solution\": \"C:\\\\repo\\\\VsIdeBridge.sln\", \"wait_for_ready\": true }",
-                "open_file" => "{ \"file\": \"src\\\\VsIdeBridgeCli\\\\Program.cs\", \"line\": 1 }",
+                "create_solution" => "{ \"directory\": \"C:\\\\repo\\\\Scratch\", \"name\": \"ScratchApp\", \"wait_for_ready\": true }",
+                "list_projects" => "{}",
+                "query_project_items" => ProjectToolExample(SampleCliProjectName, "\"path\": \"src\\\\VsIdeBridgeCli\"", $"\"max\": {DefaultLargeMaxCount}"),
+                "query_project_properties" => ProjectToolExample(SampleCliProjectName, "\"names\": [\"TargetFramework\", \"AssemblyName\"]"),
+                "query_project_configurations" => ProjectToolExample(SampleCliProjectName),
+                "query_project_references" => ProjectToolExample(SampleCliTestProjectName, "\"declared_only\": true"),
+                "query_project_outputs" => ProjectToolExample(SampleCliProjectName, "\"configuration\": \"Release\"", "\"target_framework\": \"net8.0\""),
+                "add_project" => ProjectToolExample("C:\\\\repo\\\\MyLib\\\\MyLib.csproj", "\"solution_folder\": \"Libraries\""),
+                "remove_project" => ProjectToolExample("MyLib"),
+                "set_startup_project" => ProjectToolExample("VsIdeBridge"),
+                "add_file_to_project" => ProjectToolExample(SampleCliProjectName, "\"file\": \"src\\\\VsIdeBridgeCli\\\\Program.cs\""),
+                "remove_file_from_project" => ProjectToolExample(SampleCliProjectName, "\"file\": \"src\\\\VsIdeBridgeCli\\\\Program.cs\""),
+                "open_file" => new JsonObject
+                {
+                    [FileArgumentName] = SampleCliProgramPath,
+                    [LineArgumentName] = 1,
+                }.ToJsonString(JsonOptions),
                 "find_files" => "{ \"query\": \"CMakeLists.txt\", \"include_non_project\": true }",
                 "errors" => "{ \"wait_for_intellisense\": true, \"quick\": false }",
                 "warnings" => "{ \"wait_for_intellisense\": true, \"quick\": false }",
@@ -1288,8 +1616,8 @@ internal static partial class CliApp
                 "set_build_configuration" => "{ \"configuration\": \"Debug\", \"platform\": \"x64\" }",
                 "count_references" => "{ \"file\": \"src\\\\foo.cpp\", \"line\": 42, \"column\": 13 }",
                 "nuget_restore" => "{ \"path\": \"VsIdeBridge.sln\" }",
-                "nuget_add_package" => "{ \"project\": \"src\\\\VsIdeBridgeCli\\\\VsIdeBridgeCli.csproj\", \"package\": \"Newtonsoft.Json\", \"version\": \"13.0.3\" }",
-                "nuget_remove_package" => "{ \"project\": \"src\\\\VsIdeBridgeCli\\\\VsIdeBridgeCli.csproj\", \"package\": \"Newtonsoft.Json\" }",
+                "nuget_add_package" => ProjectToolExample(SampleCliProjectPath, "\"package\": \"Newtonsoft.Json\"", "\"version\": \"13.0.3\""),
+                "nuget_remove_package" => ProjectToolExample(SampleCliProjectPath, "\"package\": \"Newtonsoft.Json\""),
                 "conda_install" => "{ \"packages\": [\"cmake\", \"ninja\"], \"name\": \"superslicer\", \"yes\": true }",
                 "conda_remove" => "{ \"packages\": [\"ninja\"], \"name\": \"superslicer\", \"yes\": true }",
                 _ => string.Empty,
@@ -1315,6 +1643,29 @@ internal static partial class CliApp
                     "array" => new JsonArray("value"),
                     _ => "value",
                 };
+            }
+
+            return example.ToJsonString(JsonOptions);
+        }
+
+        private static string ProjectToolExample(string project, params string[] additionalProperties)
+        {
+            var example = new JsonObject
+            {
+                [ProjectArgumentName] = project,
+            };
+
+            foreach (var additionalProperty in additionalProperties)
+            {
+                if (JsonNode.Parse($"{{{additionalProperty}}}") is not JsonObject additionalObject)
+                {
+                    continue;
+                }
+
+                foreach (var property in additionalObject)
+                {
+                    example[property.Key] = property.Value?.DeepClone();
+                }
             }
 
             return example.ToJsonString(JsonOptions);
@@ -1353,6 +1704,7 @@ internal static partial class CliApp
                 "build" => "build",
                 "build_errors" => "build-errors",
                 "open_solution" => "open-solution",
+                "create_solution" => "create-solution",
                 "list_documents" => "list-documents",
                 "activate_document" => "activate-document",
                 "close_document" => "close-document",
@@ -1361,9 +1713,30 @@ internal static partial class CliApp
                 "close_others" => "close-others",
                 "list_windows" => "list-windows",
                 "activate_window" => "activate-window",
+                "execute_command" => "execute-command",
                 "goto_definition" => "goto-definition",
                 "goto_implementation" => "goto-implementation",
                 "call_hierarchy" => "call-hierarchy",
+                "search_solutions" => "search-solutions",
+                "list_projects" => "list-projects",
+                "query_project_items" => "query-project-items",
+                "query_project_properties" => "query-project-properties",
+                "query_project_configurations" => "query-project-configurations",
+                "query_project_references" => "query-project-references",
+                "query_project_outputs" => "query-project-outputs",
+                "add_project" => "add-project",
+                "remove_project" => "remove-project",
+                "set_startup_project" => "set-startup-project",
+                "add_file_to_project" => "add-file-to-project",
+                "remove_file_from_project" => "remove-file-from-project",
+                "set_breakpoint" => "set-breakpoint",
+                "list_breakpoints" => "list-breakpoints",
+                "remove_breakpoint" => "remove-breakpoint",
+                "clear_breakpoints" => "clear-breakpoints",
+                "enable_breakpoint" => "enable-breakpoint",
+                "disable_breakpoint" => "disable-breakpoint",
+                "enable_all_breakpoints" => "enable-all-breakpoints",
+                "disable_all_breakpoints" => "disable-all-breakpoints",
                 _ => null,
             };
         }
@@ -1406,8 +1779,7 @@ internal static partial class CliApp
 
             var waitForReady = GetBoolean(args, "wait_for_ready", true);
             // Clear solution hint before sending so instance lookup succeeds even when VS has a different solution open.
-            bridgeBinding.PreferSolution(null);
-            var open = await SendBridgeAsync(id, bridgeBinding, "open-solution", BuildArgs(("solution", solution))).ConfigureAwait(false);
+            var open = await SendBridgeIgnoringSolutionHintAsync(id, bridgeBinding, "open-solution", BuildArgs(("solution", solution))).ConfigureAwait(false);
 
             JsonObject? ready = null;
             JsonObject? state = null;
@@ -1430,6 +1802,55 @@ internal static partial class CliApp
             };
 
             return WrapToolResult(result, isError: !ResponseFormatter.IsSuccess(open));
+        }
+
+        private static async Task<JsonNode> CreateSolutionAsync(JsonNode? id, JsonObject? args, BridgeBinding bridgeBinding)
+        {
+            var directory = args?[DirectoryArgumentName]?.GetValue<string>();
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                throw new McpRequestException(id, JsonRpcInvalidParamsCode, "create_solution requires a non-empty directory path.");
+            }
+
+            var name = args?[NameArgumentName]?.GetValue<string>();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new McpRequestException(id, JsonRpcInvalidParamsCode, "create_solution requires a non-empty solution name.");
+            }
+
+            var waitForReady = GetBoolean(args, "wait_for_ready", true);
+            var create = await SendBridgeIgnoringSolutionHintAsync(
+                id,
+                bridgeBinding,
+                "create-solution",
+                BuildArgs((DirectoryArgumentName, directory), (NameArgumentName, name))).ConfigureAwait(false);
+
+            JsonObject? ready = null;
+            JsonObject? state = null;
+            if (ResponseFormatter.IsSuccess(create))
+            {
+                var createdPath = create["Data"]?["solutionPath"]?.GetValue<string>();
+                if (!string.IsNullOrWhiteSpace(createdPath))
+                {
+                    bridgeBinding.PreferSolution(createdPath);
+                }
+
+                if (waitForReady)
+                {
+                    ready = await SendBridgeAsync(id, bridgeBinding, "ready", string.Empty).ConfigureAwait(false);
+                }
+
+                state = await SendBridgeAsync(id, bridgeBinding, "state", string.Empty).ConfigureAwait(false);
+            }
+
+            var result = new JsonObject
+            {
+                ["create"] = create,
+                ["ready"] = ready,
+                ["state"] = state,
+            };
+
+            return WrapToolResult(result, isError: !ResponseFormatter.IsSuccess(create));
         }
 
         private static async Task<JsonNode> ListInstancesAsync(BridgeBinding bridgeBinding)
@@ -1559,6 +1980,11 @@ internal static partial class CliApp
             return bridgeBinding.SendAsync(id, command, args);
         }
 
+        private static Task<JsonObject> SendBridgeIgnoringSolutionHintAsync(JsonNode? id, BridgeBinding bridgeBinding, string command, string args)
+        {
+            return bridgeBinding.SendIgnoringSolutionHintAsync(id, command, args);
+        }
+
         private static JsonObject DiscoveryToJson(PipeDiscovery discovery)
         {
             return new JsonObject
@@ -1602,6 +2028,11 @@ internal static partial class CliApp
             return args?[name]?.ToString();
         }
 
+        private static (string Name, string? Value) OptionalTextArg(string switchName, JsonObject? args, string argumentName)
+        {
+            return (switchName, GetOptionalArgumentText(args, argumentName));
+        }
+
         private static string? GetOptionalBooleanArgument(JsonObject? args, string name, bool defaultValue, bool emitFalse)
         {
             var value = GetBoolean(args, name, defaultValue);
@@ -1615,6 +2046,18 @@ internal static partial class CliApp
                 (PlatformArgumentName, GetOptionalStringArgument(args, PlatformArgumentName)));
         }
 
+        private static string BuildBuildArgs(JsonObject? args)
+        {
+            return BuildArgs(
+            [
+                (ConfigurationArgumentName, GetOptionalStringArgument(args, ConfigurationArgumentName)),
+                (PlatformArgumentName, GetOptionalStringArgument(args, PlatformArgumentName)),
+                .. BuildBooleanArgs(args,
+                    ("wait-for-intellisense", WaitForIntellisenseArgumentName, true, true),
+                    ("require-clean-diagnostics", "require_clean_diagnostics", true, true)),
+            ]);
+        }
+
         private static string BuildOpenFileArgs(JsonObject? args)
         {
             return BuildArgs(
@@ -1626,40 +2069,148 @@ internal static partial class CliApp
             ]);
         }
 
-        private static string BuildFindFilesArgs(JsonObject? args)
+        private static string BuildBuildErrorsArgs(JsonNode? id, JsonObject? args)
         {
+            var max = GetOptionalArgumentText(args, "max");
             return BuildArgs(
             [
-                (QueryArgumentName, GetOptionalStringArgument(args, QueryArgumentName)),
-                (PathArgumentName, GetOptionalStringArgument(args, PathArgumentName)),
+                (TimeoutMillisecondsSwitchName, GetBuildErrorsTimeoutArgument(id, args)),
+                ("max", max),
+                .. BuildBooleanArgs(args,
+                    ("wait-for-intellisense", WaitForIntellisenseArgumentName, true, true),
+                    ("require-clean-diagnostics", "require_clean_diagnostics", true, true)),
+            ]);
+        }
+
+        private static string BuildDebugStackArgs(JsonObject? args)
+        {
+            var threadId = GetOptionalArgumentText(args, "thread_id");
+            var maxFrames = GetOptionalArgumentText(args, "max_frames");
+            return BuildArgs(("thread-id", threadId), ("max-frames", maxFrames));
+        }
+
+        private static string BuildDebugLocalsArgs(JsonObject? args)
+        {
+            var max = GetOptionalArgumentText(args, "max");
+            return BuildArgs(("max", max));
+        }
+
+        private static string BuildDebugWatchArgs(JsonObject? args)
+        {
+            var expression = GetOptionalStringArgument(args, "expression");
+            var timeout = GetOptionalArgumentText(args, TimeoutMillisecondsArgumentName);
+            return BuildArgs(("expression", expression), (TimeoutMillisecondsSwitchName, timeout));
+        }
+
+        private static string BuildDiagnosticsSnapshotToolArgs(JsonObject? args)
+        {
+            var max = GetOptionalArgumentText(args, "max");
+            return BuildArgs(
+                ("wait-for-intellisense", GetOptionalBooleanArgument(args, WaitForIntellisenseArgumentName, true, true)),
+                ("quick", GetOptionalBooleanArgument(args, "quick", false, true)),
+                ("max", max));
+        }
+
+        private static string BuildSearchSolutionsToolArgs(JsonObject? args)
+        {
+            var path = GetOptionalStringArgument(args, PathArgumentName);
+            var query = GetOptionalStringArgument(args, QueryArgumentName);
+            var maxDepth = GetOptionalArgumentText(args, "max_depth");
+            var max = GetOptionalArgumentText(args, "max");
+            return BuildArgs((PathArgumentName, path), (QueryArgumentName, query), ("max-depth", maxDepth), ("max", max));
+        }
+
+        private static string BuildQueryProjectItemsToolArgs(JsonObject? args)
+        {
+            var project = GetOptionalStringArgument(args, ProjectArgumentName);
+            var path = GetOptionalStringArgument(args, PathArgumentName);
+            var max = GetOptionalArgumentText(args, "max");
+            return BuildArgs((ProjectArgumentName, project), (PathArgumentName, path), ("max", max));
+        }
+
+        private static string BuildQueryProjectPropertiesToolArgs(JsonObject? args)
+        {
+            var project = GetOptionalStringArgument(args, ProjectArgumentName);
+            return BuildArgs((ProjectArgumentName, project), ("names", GetCsv(args?["names"] as JsonArray)));
+        }
+
+        private static string BuildQueryProjectConfigurationsToolArgs(JsonObject? args)
+        {
+            var project = GetOptionalStringArgument(args, ProjectArgumentName);
+            return BuildArgs((ProjectArgumentName, project));
+        }
+
+        private static string BuildQueryProjectReferencesToolArgs(JsonObject? args)
+        {
+            var project = GetOptionalStringArgument(args, ProjectArgumentName);
+            return BuildArgs(
+            [
+                (ProjectArgumentName, project),
+                .. BuildBooleanArgs(args, ("include-framework", "include_framework", false, true)),
+                .. BuildBooleanArgs(args, ("declared-only", "declared_only", false, true)),
+            ]);
+        }
+
+        private static string BuildQueryProjectOutputsToolArgs(JsonObject? args)
+        {
+            var project = GetOptionalStringArgument(args, ProjectArgumentName);
+            var configuration = GetOptionalStringArgument(args, ConfigurationArgumentName);
+            var platform = GetOptionalStringArgument(args, PlatformArgumentName);
+            var targetFramework = GetOptionalStringArgument(args, "target_framework");
+            return BuildArgs(
+                (ProjectArgumentName, project),
+                (ConfigurationArgumentName, configuration),
+                (PlatformArgumentName, platform),
+                ("target-framework", targetFramework));
+        }
+
+        private static string BuildFindFilesArgs(JsonObject? args)
+        {
+            var query = GetOptionalStringArgument(args, QueryArgumentName);
+            var path = GetOptionalStringArgument(args, PathArgumentName);
+            var maxResults = GetOptionalArgumentText(args, "max_results");
+            return BuildArgs(
+            [
+                (QueryArgumentName, query),
+                (PathArgumentName, path),
                 ("extensions", GetCsv(args?["extensions"] as JsonArray)),
-                ("max-results", GetOptionalArgumentText(args, "max_results")),
+                ("max-results", maxResults),
                 .. BuildBooleanArgs(args, ("include-non-project", "include_non_project", true, true)),
             ]);
         }
 
         private static string BuildSearchSymbolsArgs(JsonObject? args)
         {
+            var query = GetOptionalStringArgument(args, QueryArgumentName);
+            var kind = GetOptionalStringArgument(args, "kind");
+            var scope = GetOptionalStringArgument(args, "scope");
+            var project = GetOptionalStringArgument(args, ProjectArgumentName);
+            var path = GetOptionalStringArgument(args, PathArgumentName);
+            var max = GetOptionalArgumentText(args, MaxArgumentName);
             return BuildArgs(
             [
-                (QueryArgumentName, GetOptionalStringArgument(args, QueryArgumentName)),
-                ("kind", GetOptionalStringArgument(args, "kind")),
-                ("scope", GetOptionalStringArgument(args, "scope")),
-                (ProjectArgumentName, GetOptionalStringArgument(args, ProjectArgumentName)),
-                (PathArgumentName, GetOptionalStringArgument(args, PathArgumentName)),
-                (MaxArgumentName, GetOptionalArgumentText(args, MaxArgumentName)),
+                (QueryArgumentName, query),
+                ("kind", kind),
+                ("scope", scope),
+                (ProjectArgumentName, project),
+                (PathArgumentName, path),
+                (MaxArgumentName, max),
                 .. BuildBooleanArgs(args, ("match-case", "match_case", false, false)),
             ]);
         }
 
         private static string BuildCountReferencesArgs(JsonObject? args)
         {
+            var file = GetOptionalStringArgument(args, FileArgumentName);
+            var line = GetOptionalArgumentText(args, LineArgumentName);
+            var column = GetOptionalArgumentText(args, ColumnArgumentName);
+            var timeout = GetOptionalArgumentText(args, TimeoutMillisecondsArgumentName);
             return BuildArgs(
             [
-                (FileArgumentName, GetOptionalStringArgument(args, FileArgumentName)),
-                (LineArgumentName, GetOptionalArgumentText(args, LineArgumentName)),
-                (ColumnArgumentName, GetOptionalArgumentText(args, ColumnArgumentName)),
-                (TimeoutMillisecondsSwitchName, GetOptionalArgumentText(args, TimeoutMillisecondsArgumentName)),
+                (FileArgumentName, file),
+                (LineArgumentName, line),
+                (ColumnArgumentName, column),
+                (TimeoutMillisecondsSwitchName, timeout),
                 .. BuildBooleanArgs(args, ("activate-window", ActivateWindowArgumentName, true, true)),
             ]);
         }
@@ -1706,10 +2257,34 @@ internal static partial class CliApp
                 .. BuildBooleanArgs(args, ("save", "save", false, false)),
             ]);
         }
-
         private static string BuildSaveOnlyArgs(JsonObject? args)
         {
             return BuildArgs([.. BuildBooleanArgs(args, ("save", "save", false, false))]);
+        }
+
+        private static string BuildExecuteCommandArgs(JsonObject? args)
+        {
+            return BuildArgs(
+            [
+                ("command", GetOptionalStringArgument(args, "command")),
+                ("args", GetOptionalStringArgument(args, "args")),
+                (FileArgumentName, GetOptionalStringArgument(args, FileArgumentName)),
+                ("document", GetOptionalStringArgument(args, "document")),
+                (LineArgumentName, GetOptionalArgumentText(args, LineArgumentName)),
+                (ColumnArgumentName, GetOptionalArgumentText(args, ColumnArgumentName)),
+                .. BuildBooleanArgs(args, ("select-word", "select_word", false, false)),
+            ]);
+        }
+
+        private static string BuildFormatDocumentArgs(JsonObject? args)
+        {
+            return BuildArgs(
+            [
+                ("command", "Edit.FormatDocument"),
+                (FileArgumentName, GetOptionalStringArgument(args, FileArgumentName)),
+                (LineArgumentName, GetOptionalArgumentText(args, LineArgumentName)),
+                (ColumnArgumentName, GetOptionalArgumentText(args, ColumnArgumentName)),
+            ]);
         }
 
         private static string BuildDiagnosticsArgs(JsonObject? args)
@@ -1779,6 +2354,11 @@ internal static partial class CliApp
             return args?[name]?.GetValue<string>();
         }
 
+        private static (string Name, string? Value) OptionalStringArg(string switchName, JsonObject? args, string argumentName)
+        {
+            return (switchName, GetOptionalStringArgument(args, argumentName));
+        }
+
         private static bool GetBoolean(JsonObject? args, string name, bool defaultValue)
         {
             return args?[name]?.GetValue<bool?>() ?? defaultValue;
@@ -1802,7 +2382,7 @@ internal static partial class CliApp
         {
             return ObjectSchema(
                 RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription),
-                RequiredIntegerProperty(LineArgumentName, "1-based line number."),
+                RequiredIntegerProperty(LineArgumentName, OneBasedLineNumberDescription),
                 RequiredIntegerProperty(ColumnArgumentName, "1-based column number."));
         }
 
@@ -1955,6 +2535,263 @@ internal static partial class CliApp
             var condaResult = await RunProcessAsync(condaExecutable, condaArgs, workingDirectory).ConfigureAwait(false);
 
             return WrapToolResult(condaResult, !(condaResult["success"]?.GetValue<bool>() ?? false));
+        }
+
+        private static async Task<JsonNode> CallShellExecToolAsync(JsonNode? id, JsonObject? args, BridgeBinding bridgeBinding)
+        {
+            var exe = GetRequiredString(args, id, "exe");
+            var arguments = args?["args"]?.GetValue<string>() ?? string.Empty;
+            var timeoutMs = GetIntOrDefault(args, TimeoutMillisecondsArgumentName, 60_000);
+            var cwdArg = args?["cwd"]?.GetValue<string>();
+            var workingDirectory = !string.IsNullOrWhiteSpace(cwdArg)
+                ? cwdArg
+                : await ResolveSolutionWorkingDirectoryAsync(id, bridgeBinding).ConfigureAwait(false);
+
+            var result = await RunProcessAsync(exe, arguments, workingDirectory, timeoutMs).ConfigureAwait(false);
+            return WrapToolResult(result, !(result["success"]?.GetValue<bool>() ?? false));
+        }
+
+        private static async Task<JsonNode> CallSetVersionToolAsync(JsonNode? id, JsonObject? args, BridgeBinding bridgeBinding)
+        {
+            var version = GetRequiredString(args, id, "version");
+            var solutionDir = await ResolveSolutionWorkingDirectoryAsync(id, bridgeBinding).ConfigureAwait(false);
+
+            var updatedFiles = new JsonArray();
+
+            // Directory.Build.props — update <Version>…</Version>
+            var dbpPath = Path.Combine(solutionDir, "Directory.Build.props");
+            if (File.Exists(dbpPath))
+            {
+                var text = File.ReadAllText(dbpPath);
+                var next = VersionTagRegex().Replace(text, $"<Version>{version}</Version>");
+                if (next != text)
+                    File.WriteAllText(dbpPath, next);
+                updatedFiles.Add(JsonValue.Create("Directory.Build.props"));
+            }
+
+            // source.extension.vsixmanifest — update Version="…" on <Identity …>
+            var manifestPath = Path.Combine(solutionDir, "src", "VsIdeBridge", "source.extension.vsixmanifest");
+            if (File.Exists(manifestPath))
+            {
+                var text = File.ReadAllText(manifestPath);
+                var next = VsixVersionRegex().Replace(text, version);
+                if (next != text)
+                    File.WriteAllText(manifestPath, next);
+                updatedFiles.Add(JsonValue.Create("src/VsIdeBridge/source.extension.vsixmanifest"));
+            }
+
+            // installer/inno/vs-ide-bridge.iss — update #define MyAppVersion "…"
+            var issPath = Path.Combine(solutionDir, "installer", "inno", "vs-ide-bridge.iss");
+            if (File.Exists(issPath))
+            {
+                var text = File.ReadAllText(issPath);
+                var next = IssVersionRegex().Replace(text, version);
+                if (next != text)
+                    File.WriteAllText(issPath, next);
+                updatedFiles.Add(JsonValue.Create("installer/inno/vs-ide-bridge.iss"));
+            }
+
+            var result = new JsonObject
+            {
+                ["version"] = version,
+                ["updated_files"] = updatedFiles,
+                ["file_count"] = updatedFiles.Count,
+            };
+            return WrapToolResult(result, isError: false);
+        }
+
+        private static JsonObject CallVsCloseTool(JsonNode? id, JsonObject? args, BridgeBinding bridgeBinding)
+        {
+            var explicitPid = args?["process_id"]?.GetValue<int?>();
+            var force = GetBoolean(args, "force", false);
+
+            int pid;
+            if (explicitPid.HasValue)
+            {
+                pid = explicitPid.Value;
+            }
+            else
+            {
+                var discovery = bridgeBinding.CurrentDiscovery
+                    ?? throw new McpRequestException(id, BridgeErrorCode, "No bound VS instance. Pass 'process_id' explicitly or call bind_instance first.");
+                pid = discovery.ProcessId;
+            }
+
+            Process process;
+            try
+            {
+                process = Process.GetProcessById(pid);
+            }
+            catch (ArgumentException)
+            {
+                throw new McpRequestException(id, BridgeErrorCode, $"No running process found with ID {pid}.");
+            }
+
+            bool signalSent;
+            if (force)
+            {
+                process.Kill();
+                signalSent = true;
+            }
+            else
+            {
+                signalSent = process.CloseMainWindow();
+            }
+
+            var result = new JsonObject
+            {
+                ["success"] = true,
+                ["pid"] = pid,
+                ["force"] = force,
+                ["signal_sent"] = signalSent,
+            };
+            return WrapToolResult(result, isError: false);
+        }
+
+        private static async Task<JsonObject> CallVsOpenToolAsync(JsonNode? id, JsonObject? args)
+        {
+            var solution = args?[SolutionArgumentName]?.GetValue<string>();
+            var explicitDevenv = args?["devenv_path"]?.GetValue<string>();
+            var devenvPath = !string.IsNullOrWhiteSpace(explicitDevenv)
+                ? explicitDevenv
+                : ResolveDevenvPathForMcp(id);
+
+            var launched = await VisualStudioLauncher.LaunchAsync(devenvPath, solution).ConfigureAwait(false);
+            if (!launched.Success)
+            {
+                var stderr = string.IsNullOrWhiteSpace(launched.Stderr)
+                    ? string.Empty
+                    : $" stderr: {launched.Stderr.Trim()}";
+                throw new McpRequestException(id, BridgeErrorCode, $"Visual Studio launch request failed via {launched.Launcher}.{stderr}");
+            }
+
+            var result = new JsonObject
+            {
+                ["success"] = true,
+                ["pid"] = launched.ProcessId,
+                ["launch_requested"] = true,
+                ["launcher"] = launched.Launcher,
+                ["devenv_path"] = devenvPath,
+                [SolutionArgumentName] = solution ?? string.Empty,
+            };
+            return WrapToolResult(result, isError: false);
+        }
+
+        private static async Task<JsonObject> CallWaitForInstanceToolAsync(JsonNode? id, JsonObject? args, BridgeBinding bridgeBinding)
+        {
+            var requestedSolutionPath = VsOpenInstanceSelector.NormalizePath(args?[SolutionArgumentName]?.GetValue<string>());
+            var timeoutMilliseconds = GetOptionalPositiveInt(args, id, TimeoutMillisecondsArgumentName) ?? VsOpenDiscoveryTimeoutMilliseconds;
+            var existingInstances = await PipeDiscovery.ListAsync(verbose: false, bridgeBinding.DiscoveryMode).ConfigureAwait(false);
+            var existingInstanceIds = existingInstances.Select(item => item.InstanceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var existingProcessIds = existingInstances.Select(item => item.ProcessId).ToHashSet();
+
+            var discovered = SelectWaitForInstanceMatch(existingInstances, requestedSolutionPath)
+                ?? await WaitForVisualStudioInstanceAsync(
+                    existingInstanceIds,
+                    existingProcessIds,
+                    requestedSolutionPath,
+                    bridgeBinding.DiscoveryMode,
+                    timeoutMilliseconds).ConfigureAwait(false)
+                ?? throw new McpRequestException(id, BridgeErrorCode, $"No live VS IDE Bridge instance appeared within {timeoutMilliseconds} ms.");
+
+            var result = DiscoveryToJson(discovered);
+            result["success"] = true;
+            return WrapToolResult(result, isError: false);
+        }
+
+        private static async Task<PipeDiscovery?> WaitForVisualStudioInstanceAsync(
+            IReadOnlyCollection<string> existingInstanceIds,
+            IReadOnlyCollection<int> existingProcessIds,
+            string? requestedSolutionPath,
+            DiscoveryMode discoveryMode,
+            int timeoutMilliseconds)
+        {
+            using var timeout = new CancellationTokenSource(timeoutMilliseconds);
+            while (!timeout.IsCancellationRequested)
+            {
+                var instances = await PipeDiscovery.ListAsync(verbose: false, discoveryMode).ConfigureAwait(false);
+                var discovered = SelectWaitForInstanceMatch(instances, requestedSolutionPath)
+                    ?? VsOpenInstanceSelector.SelectInstance(existingInstanceIds, existingProcessIds, instances, launchedProcessId: 0, requestedSolutionPath: requestedSolutionPath);
+                if (discovered is not null)
+                {
+                    return discovered;
+                }
+
+                try
+                {
+                    await Task.Delay(VsOpenDiscoveryPollMilliseconds, timeout.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+                {
+                    break;
+                }
+            }
+
+            return null;
+        }
+
+        private static PipeDiscovery? SelectWaitForInstanceMatch(IReadOnlyList<PipeDiscovery> instances, string? requestedSolutionPath)
+        {
+            if (!string.IsNullOrWhiteSpace(requestedSolutionPath))
+            {
+                var bySolution = instances.FirstOrDefault(instance => VsOpenInstanceSelector.PathsEqual(instance.SolutionPath, requestedSolutionPath));
+                if (bySolution is not null)
+                {
+                    return bySolution;
+                }
+            }
+
+            return instances
+                .OrderByDescending(instance => instance.LastWriteTimeUtc)
+                .FirstOrDefault();
+        }
+
+        private static string ResolveDevenvPathForMcp(JsonNode? id)
+        {
+            // Try vswhere first for reliable cross-edition detection
+            var vswhereExe = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                VisualStudioInstallDirName, "Installer", "vswhere.exe");
+
+            if (File.Exists(vswhereExe))
+            {
+                try
+                {
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = vswhereExe,
+                        Arguments = "-latest -prerelease -requires Microsoft.Component.MSBuild -find Common7\\IDE\\devenv.exe",
+                        RedirectStandardOutput = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                    };
+                    using var proc = Process.Start(psi)!;
+                    var output = proc.StandardOutput.ReadToEnd().Trim();
+                    proc.WaitForExit(ShortOperationTimeoutMilliseconds);
+                    if (!string.IsNullOrWhiteSpace(output) && File.Exists(output))
+                        return output;
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"vswhere failed: {ex.Message}");
+                }
+            }
+
+            // Fallback: hardcoded edition/year candidates
+            var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            string[] candidates =
+            [
+                Path.Combine(programFiles, VisualStudioInstallDirName, "18", "Community", "Common7", "IDE", DevenvExeFileName),
+                Path.Combine(programFiles, VisualStudioInstallDirName, "18", "Professional", "Common7", "IDE", DevenvExeFileName),
+                Path.Combine(programFiles, VisualStudioInstallDirName, "18", "Enterprise", "Common7", "IDE", DevenvExeFileName),
+                Path.Combine(programFiles, VisualStudioInstallDirName, Vs2022Year, "Community", "Common7", "IDE", DevenvExeFileName),
+                Path.Combine(programFiles, VisualStudioInstallDirName, Vs2022Year, "Professional", "Common7", "IDE", DevenvExeFileName),
+                Path.Combine(programFiles, VisualStudioInstallDirName, Vs2022Year, "Enterprise", "Common7", "IDE", DevenvExeFileName),
+            ];
+            foreach (var candidate in candidates)
+                if (File.Exists(candidate)) return candidate;
+
+            throw new McpRequestException(id, BridgeErrorCode, $"{DevenvExeFileName} not found. Install Visual Studio or pass 'devenv_path' explicitly.");
         }
 
         private static string BuildNuGetRestoreArgs(JsonObject? args)
@@ -2356,6 +3193,22 @@ internal static partial class CliApp
             return args?[name]?.GetValue<int?>() ?? defaultValue;
         }
 
+        private static int? GetOptionalPositiveInt(JsonObject? args, JsonNode? id, string name)
+        {
+            var value = args?[name]?.GetValue<int?>();
+            if (value is null)
+            {
+                return null;
+            }
+
+            if (value.Value <= 0)
+            {
+                throw new McpRequestException(id, JsonRpcInvalidParamsCode, $"tools/call argument '{name}' must be greater than 0.");
+            }
+
+            return value.Value;
+        }
+
         private static string? GetBuildErrorsTimeoutArgument(JsonNode? id, JsonObject? args)
         {
             var timeout = args?["timeout_ms"]?.GetValue<int?>();
@@ -2364,9 +3217,9 @@ internal static partial class CliApp
                 return null;
             }
 
-            if (timeout.Value < 5000)
+            if (timeout.Value < ShortOperationTimeoutMilliseconds)
             {
-                throw new McpRequestException(id, JsonRpcInvalidParamsCode, "tools/call argument 'timeout_ms' must be at least 5000 for build_errors.");
+                throw new McpRequestException(id, JsonRpcInvalidParamsCode, $"tools/call argument 'timeout_ms' must be at least {ShortOperationTimeoutMilliseconds} for build_errors.");
             }
 
             return timeout.Value.ToString();
@@ -2866,5 +3719,16 @@ internal static partial class CliApp
             public JsonNode? Id { get; }
             public int Code { get; }
         }
+
+        [GeneratedRegex("<Version>[^<]*</Version>")]
+        private static partial Regex VersionTagRegex();
+
+        [GeneratedRegex("""(?<=<Identity[^>]+Version=")[^"]*(?=")""")]
+        private static partial Regex VsixVersionRegex();
+
+        [GeneratedRegex("""(?<=#define MyAppVersion ")[^"]*(?=")""")]
+        private static partial Regex IssVersionRegex();
     }
 }
+
+

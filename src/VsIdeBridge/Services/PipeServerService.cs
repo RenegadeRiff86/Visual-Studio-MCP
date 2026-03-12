@@ -377,8 +377,27 @@ internal sealed class PipeServerService : IDisposable
 
                     if (line == null) break; // clean EOF
 
-                    var responseLine = await ExecuteRequestAsync(line, ct).ConfigureAwait(false);
-                    await writer.WriteLineAsync(responseLine).ConfigureAwait(false);
+                    string responseLine;
+                    try
+                    {
+                        responseLine = await ExecuteRequestAsync(line, ct).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        // ExecuteRequestAsync should handle all exceptions internally, but if it
+                        // escapes (e.g. OperationCanceledException from WaitAsync during VS shutdown),
+                        // write an error response so the client never receives a raw EOF.
+                        var msg = ex.Message.Replace("\\", "\\\\").Replace("\"", "\\\"");
+                        responseLine = $"{{\"success\":false,\"summary\":\"{msg}\",\"data\":null,\"error\":{{\"code\":\"internal_error\",\"message\":\"Bridge server interrupted: {msg}\"}}}}";
+                    }
+                    try
+                    {
+                        await writer.WriteLineAsync(responseLine).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        break; // pipe broke during write — client already disconnected
+                    }
                 }
             }
             catch (Exception ex)

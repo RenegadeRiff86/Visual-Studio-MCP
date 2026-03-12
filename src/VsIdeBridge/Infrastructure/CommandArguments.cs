@@ -7,6 +7,7 @@ namespace VsIdeBridge.Infrastructure;
 
 internal sealed class CommandArguments(Dictionary<string, List<string>> values)
 {
+    private const string InvalidArgumentsCode = "invalid_arguments";
     private readonly Dictionary<string, List<string>> _values = values;
 
     public string? GetString(string name, string? defaultValue = null)
@@ -26,7 +27,7 @@ internal sealed class CommandArguments(Dictionary<string, List<string>> values)
         var value = GetString(name);
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new CommandErrorException("invalid_arguments", $"Missing required argument --{name}.");
+            throw new CommandErrorException(InvalidArgumentsCode, $"Missing required argument --{name}.");
         }
 
         return value!;
@@ -42,7 +43,7 @@ internal sealed class CommandArguments(Dictionary<string, List<string>> values)
 
         if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
         {
-            throw new CommandErrorException("invalid_arguments", $"Argument --{name} must be an integer.");
+            throw new CommandErrorException(InvalidArgumentsCode, $"Argument --{name} must be an integer.");
         }
 
         return value;
@@ -58,7 +59,7 @@ internal sealed class CommandArguments(Dictionary<string, List<string>> values)
 
         if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
         {
-            throw new CommandErrorException("invalid_arguments", $"Argument --{name} must be an integer.");
+            throw new CommandErrorException(InvalidArgumentsCode, $"Argument --{name} must be an integer.");
         }
 
         return value;
@@ -77,7 +78,7 @@ internal sealed class CommandArguments(Dictionary<string, List<string>> values)
             return value;
         }
 
-        throw new CommandErrorException("invalid_arguments", $"Argument --{name} must be true or false.");
+        throw new CommandErrorException(InvalidArgumentsCode, $"Argument --{name} must be true or false.");
     }
 
     public string GetEnum(string name, string defaultValue, params string[] allowedValues)
@@ -85,7 +86,7 @@ internal sealed class CommandArguments(Dictionary<string, List<string>> values)
         var value = GetString(name, defaultValue) ?? defaultValue;
         if (!allowedValues.Contains(value, StringComparer.OrdinalIgnoreCase))
         {
-            throw new CommandErrorException("invalid_arguments", $"Argument --{name} must be one of: {string.Join(", ", allowedValues)}.");
+            throw new CommandErrorException(InvalidArgumentsCode, $"Argument --{name} must be one of: {string.Join(", ", allowedValues)}.");
         }
 
         return value.ToLowerInvariant();

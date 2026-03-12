@@ -25,6 +25,7 @@ internal static class CommandRegistrar
         runtime.RegisterCommand(new IdeCoreCommands.IdeGetStateCommand(package, runtime, commandService));
         runtime.RegisterCommand(new IdeCoreCommands.IdeWaitForReadyCommand(package, runtime, commandService));
         runtime.RegisterCommand(new IdeCoreCommands.IdeOpenSolutionCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new IdeCoreCommands.IdeCreateSolutionCommand(package, runtime, commandService));
 
         runtime.RegisterCommand(new SearchNavigationCommands.IdeFindTextCommand(package, runtime, commandService));
         runtime.RegisterCommand(new SearchNavigationCommands.IdeFindFilesCommand(package, runtime, commandService));
@@ -85,5 +86,18 @@ internal static class CommandRegistrar
         runtime.RegisterCommand(new DebugBuildCommands.IdeBuildAndCaptureErrorsCommand(package, runtime, commandService));
         runtime.RegisterCommand(new IdeCoreCommands.IdeCloseIdeCommand(package, runtime, commandService));
         runtime.RegisterCommand(new IdeCoreCommands.IdeBatchCommandsCommand(package, runtime, commandService));
+
+        runtime.RegisterCommand(new SolutionProjectCommands.IdeListProjectsCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new SolutionProjectCommands.IdeAddProjectCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new SolutionProjectCommands.IdeRemoveProjectCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new SolutionProjectCommands.IdeSetStartupProjectCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new SolutionProjectCommands.IdeAddFileToProjectCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new SolutionProjectCommands.IdeRemoveFileFromProjectCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new SolutionProjectCommands.IdeSearchSolutionsCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new SolutionProjectCommands.IdeQueryProjectItemsCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new SolutionProjectCommands.IdeQueryProjectPropertiesCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new SolutionProjectCommands.IdeQueryProjectConfigurationsCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new SolutionProjectCommands.IdeQueryProjectReferencesCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new SolutionProjectCommands.IdeQueryProjectOutputsCommand(package, runtime, commandService));
     }
 }

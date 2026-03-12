@@ -19,8 +19,14 @@ namespace VsIdeBridge.Services;
 internal sealed class DocumentService(IServiceProvider serviceProvider)
 {
     private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private const string DefinitionFoundProperty = "definitionFound";
+    private const string DefinitionLocationProperty = "definitionLocation";
     private const string DocumentNotFoundCode = "document_not_found";
+    private const string ImplementationFoundProperty = "implementationFound";
+    private const string ImplementationLocationProperty = "implementationLocation";
     private const string ResolvedPathProperty = "resolvedPath";
+    private const string SelectedTextProperty = "selectedText";
+    private const string SourceLocationProperty = "sourceLocation";
     private const string TextDocumentKind = "TextDocument";
     private const string UnsupportedOperationCode = "unsupported_operation";
 
@@ -521,7 +527,8 @@ internal sealed class DocumentService(IServiceProvider serviceProvider)
         int startLine,
         int endLine,
         bool includeLineNumbers,
-        bool revealInEditor = true)
+        bool revealInEditor = true,
+        int? revealLine = null)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
@@ -536,7 +543,9 @@ internal sealed class DocumentService(IServiceProvider serviceProvider)
 
         if (revealInEditor)
         {
-            _ = await OpenDocumentAsync(dte, resolvedPath, actualStart, 1, allowDiskFallback: false).ConfigureAwait(true);
+            var requestedRevealLine = Math.Max(1, revealLine ?? actualStart);
+            var actualRevealLine = Math.Min(requestedRevealLine, Math.Max(1, lines.Count));
+            _ = await OpenDocumentAsync(dte, resolvedPath, actualRevealLine, 1, allowDiskFallback: false).ConfigureAwait(true);
         }
 
         var sliceLines = new JArray();
@@ -586,8 +595,20 @@ internal sealed class DocumentService(IServiceProvider serviceProvider)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        var sourceLocation = await PositionTextSelectionAsync(dte, filePath, documentQuery, line, column, selectWord: false)
+        var sourceLocation = await PositionTextSelectionAsync(dte, filePath, documentQuery, line, column, selectWord: true)
             .ConfigureAwait(true);
+
+        var selectedSymbolText = (string?)sourceLocation[SelectedTextProperty] ?? string.Empty;
+        if (!HasNavigableSymbolText(selectedSymbolText))
+        {
+            return new JObject
+            {
+                [SourceLocationProperty] = sourceLocation,
+                [DefinitionLocationProperty] = JValue.CreateNull(),
+                [DefinitionFoundProperty] = false,
+                ["note"] = "No navigable symbol was found under the caret.",
+            };
+        }
 
         // Use IVsUIShell.PostExecCommand with the standard cmdidGotoDefn
         // rather than dte.ExecuteCommand("Edit.GoToDefinition", ...).
@@ -625,22 +646,22 @@ internal sealed class DocumentService(IServiceProvider serviceProvider)
         {
             return new JObject
             {
-                ["sourceLocation"] = sourceLocation,
-                ["definitionLocation"] = null,
-                ["definitionFound"] = false,
+                [SourceLocationProperty] = sourceLocation,
+                [DefinitionLocationProperty] = null,
+                [DefinitionFoundProperty] = false,
             };
         }
 
         var definitionPath = PathNormalization.NormalizeFilePath(activeDoc.FullName);
         int definitionLine = 0, definitionColumn = 0;
-        string selectedText = string.Empty, lineText = string.Empty;
+        string definitionSelectedText = string.Empty, lineText = string.Empty;
 
         if (activeDoc.Object(TextDocumentKind) is TextDocument defTextDoc)
         {
             var selection = defTextDoc.Selection;
             definitionLine = selection.ActivePoint.Line;
             definitionColumn = selection.ActivePoint.DisplayColumn;
-            selectedText = selection.Text ?? string.Empty;
+            definitionSelectedText = selection.Text ?? string.Empty;
             lineText = GetLineText(defTextDoc, definitionLine);
         }
 
@@ -650,7 +671,7 @@ internal sealed class DocumentService(IServiceProvider serviceProvider)
             ["name"] = activeDoc.Name ?? string.Empty,
             ["line"] = definitionLine,
             ["column"] = definitionColumn,
-            ["selectedText"] = selectedText,
+            [SelectedTextProperty] = definitionSelectedText,
             ["lineText"] = lineText,
         };
 
@@ -661,9 +682,9 @@ internal sealed class DocumentService(IServiceProvider serviceProvider)
 
         return new JObject
         {
-            ["sourceLocation"] = sourceLocation,
-            ["definitionLocation"] = definitionLocation,
-            ["definitionFound"] = definitionFound,
+            [SourceLocationProperty] = sourceLocation,
+            [DefinitionLocationProperty] = definitionLocation,
+            [DefinitionFoundProperty] = definitionFound,
         };
     }
 
@@ -678,6 +699,18 @@ internal sealed class DocumentService(IServiceProvider serviceProvider)
 
         var sourceLocation = await PositionTextSelectionAsync(dte, filePath, documentQuery, line, column, selectWord: true)
             .ConfigureAwait(true);
+
+        var selectedText = (string?)sourceLocation[SelectedTextProperty] ?? string.Empty;
+        if (!HasNavigableSymbolText(selectedText))
+        {
+            return new JObject
+            {
+                [SourceLocationProperty] = sourceLocation,
+                [ImplementationLocationProperty] = sourceLocation,
+                [ImplementationFoundProperty] = false,
+                ["note"] = "No navigable symbol was found under the caret.",
+            };
+        }
 
         try
         {
@@ -702,9 +735,9 @@ internal sealed class DocumentService(IServiceProvider serviceProvider)
 
         return new JObject
         {
-            ["sourceLocation"] = sourceLocation,
-            ["implementationLocation"] = implementationLocation,
-            ["implementationFound"] = implementationFound,
+            [SourceLocationProperty] = sourceLocation,
+            [ImplementationLocationProperty] = implementationLocation,
+            [ImplementationFoundProperty] = implementationFound,
         };
     }
 
@@ -764,7 +797,20 @@ internal sealed class DocumentService(IServiceProvider serviceProvider)
 
         var sourcePath = (string?)sourceLocation[ResolvedPathProperty] ?? string.Empty;
         var sourceLine = (int?)sourceLocation["line"] ?? 0;
-        var word = (string?)sourceLocation["selectedText"] ?? string.Empty;
+        var word = (string?)sourceLocation[SelectedTextProperty] ?? string.Empty;
+
+        if (!HasNavigableSymbolText(word))
+        {
+            return new JObject
+            {
+                ["word"] = word,
+                [SourceLocationProperty] = sourceLocation,
+                [DefinitionFoundProperty] = false,
+                [DefinitionLocationProperty] = JValue.CreateNull(),
+                ["definitionContext"] = JValue.CreateNull(),
+                ["note"] = "No symbol was found under the caret.",
+            };
+        }
 
         JObject? defLocation = null;
         JObject? definitionSlice = null;
@@ -774,8 +820,8 @@ internal sealed class DocumentService(IServiceProvider serviceProvider)
             var defResult = await GoToDefinitionAsync(dte, sourcePath, null, sourceLine, (int?)sourceLocation["column"])
                 .ConfigureAwait(true);
 
-            definitionFound = (bool?)defResult["definitionFound"] == true;
-            defLocation = defResult["definitionLocation"] as JObject;
+            definitionFound = (bool?)defResult[DefinitionFoundProperty] == true;
+            defLocation = defResult[DefinitionLocationProperty] as JObject;
 
             if (definitionFound && defLocation is not null)
             {
@@ -804,9 +850,9 @@ internal sealed class DocumentService(IServiceProvider serviceProvider)
         return new JObject
         {
             ["word"] = word,
-            ["sourceLocation"] = sourceLocation,
-            ["definitionFound"] = definitionFound,
-            ["definitionLocation"] = defLocation ?? (JToken)JValue.CreateNull(),
+            [SourceLocationProperty] = sourceLocation,
+            [DefinitionFoundProperty] = definitionFound,
+            [DefinitionLocationProperty] = defLocation ?? (JToken)JValue.CreateNull(),
             ["definitionContext"] = definitionSlice ?? (JToken)JValue.CreateNull(),
         };
     }
@@ -1046,6 +1092,12 @@ internal sealed class DocumentService(IServiceProvider serviceProvider)
         {
             selection.MoveToLineAndOffset(originalLine, originalColumn, false);
         }
+    }
+
+    private static bool HasNavigableSymbolText(string? text)
+    {
+        return !string.IsNullOrWhiteSpace(text)
+            && text.Any(static character => char.IsLetterOrDigit(character) || character == '_');
     }
 
     /// <summary>

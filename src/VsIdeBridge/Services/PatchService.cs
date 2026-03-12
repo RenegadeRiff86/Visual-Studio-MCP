@@ -377,11 +377,11 @@ internal sealed class PatchService
 
     private static JArray CreateChangedRangesArray(IEnumerable<ChangedRange> ranges)
     {
-        return new JArray(ranges.Select(range => new JObject
+        return [.. ranges.Select(range => new JObject
         {
             ["startLine"] = range.StartLine,
             ["endLine"] = range.EndLine,
-        }));
+        })];
     }
 
     private static void EnsurePatchHasMeaningfulOperations(FilePatch patch, PatchPaths paths)
@@ -819,7 +819,7 @@ internal sealed class PatchService
         var matchedLineCount = 0;
         var mutationLineCount = 0;
 
-        foreach (var hunk in patch.Hunks)
+        foreach (var hunk in GetOrderedHunks(patch.Hunks))
         {
             var targetIndex = Math.Max(0, hunk.OriginalStart - 1);
             if (targetIndex < sourceIndex)
@@ -1034,6 +1034,12 @@ internal sealed class PatchService
             MutationLineCount = mutationLineCount,
         };
     }
+
+    private static IEnumerable<Hunk> GetOrderedHunks(IEnumerable<Hunk> hunks) =>
+        [.. hunks
+            .OrderBy(hunk => Math.Max(0, hunk.OriginalStart))
+            .ThenBy(hunk => Math.Max(0, hunk.NewStart))
+            .ThenBy(hunk => hunk.Lines.Count)];
 
     private static int FindSearchBlockStart(string path, IReadOnlyList<string> existingLines, int sourceIndex, SearchBlock block)
     {

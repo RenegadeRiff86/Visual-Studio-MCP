@@ -16,6 +16,7 @@ namespace VsIdeBridge.Commands;
 internal static class IdeCoreCommands
 {
     private const string WarningsCommandName = "warnings";
+    private const string WarningsPropertyName = "warnings";
     private const string ExampleCppPath = @"C:\repo\src\foo.cpp";
     private const string WarningsCommandExample = WarningsCommandName + " --group-by code";
     private const string ExampleLineNumber = "42";
@@ -47,7 +48,7 @@ internal static class IdeCoreCommands
                     ["command"] = string.Empty,
                     ["success"] = false,
                     ["summary"] = "Batch entry must be a JSON object.",
-                    ["warnings"] = new JArray(),
+                    [WarningsPropertyName] = new JArray(),
                     ["data"] = new JObject(),
                     ["error"] = new JObject { ["code"] = "invalid_batch_entry", ["message"] = "Batch entry must be a JSON object." },
                 };
@@ -68,7 +69,7 @@ internal static class IdeCoreCommands
                         ["command"] = commandName,
                         ["success"] = false,
                         ["summary"] = $"Unknown command: {commandName}",
-                        ["warnings"] = new JArray(),
+                        [WarningsPropertyName] = new JArray(),
                         ["data"] = new JObject(),
                         ["error"] = new JObject { ["code"] = "unknown_command", ["message"] = $"Command not registered: {commandName}" },
                     };
@@ -87,7 +88,7 @@ internal static class IdeCoreCommands
                             ["command"] = commandName,
                             ["success"] = true,
                             ["summary"] = result.Summary,
-                            ["warnings"] = result.Warnings,
+                            [WarningsPropertyName] = result.Warnings,
                             ["data"] = result.Data,
                             ["error"] = JValue.CreateNull(),
                         };
@@ -102,7 +103,7 @@ internal static class IdeCoreCommands
                             ["command"] = commandName,
                             ["success"] = false,
                             ["summary"] = ex.Message,
-                            ["warnings"] = new JArray(),
+                            [WarningsPropertyName] = new JArray(),
                             ["data"] = new JObject(),
                             ["error"] = new JObject { ["code"] = ex.Code, ["message"] = ex.Message },
                         };
@@ -117,7 +118,7 @@ internal static class IdeCoreCommands
                             ["command"] = commandName,
                             ["success"] = false,
                             ["summary"] = ex.Message,
-                            ["warnings"] = new JArray(),
+                            [WarningsPropertyName] = new JArray(),
                             ["data"] = new JObject(),
                             ["error"] = new JObject { ["code"] = "internal_error", ["message"] = ex.Message },
                         };
@@ -506,6 +507,67 @@ internal static class IdeCoreCommands
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             context.Dte.Solution.Open(solutionPath);
             return new CommandExecutionResult("Solution opened.", new JObject { ["solutionPath"] = solutionPath });
+        }
+    }
+
+    internal sealed class IdeCreateSolutionCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+        : IdeCommandBase(package, runtime, commandService, 0x023D)
+    {
+        protected override string CanonicalName => "Tools.IdeCreateSolution";
+
+        protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            var directory = Path.GetFullPath(args.GetRequiredString("directory"));
+            var requestedName = args.GetRequiredString("name");
+            var solutionName = NormalizeSolutionName(requestedName);
+            var solutionPath = Path.Combine(directory, solutionName + ".sln");
+
+            if (File.Exists(solutionPath))
+            {
+                throw new CommandErrorException("file_exists", $"Solution file already exists: {solutionPath}");
+            }
+
+            Directory.CreateDirectory(directory);
+
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            context.Dte.Solution.Create(directory, solutionName);
+            context.Dte.Solution.SaveAs(solutionPath);
+
+            return new CommandExecutionResult(
+                "Solution created.",
+                new JObject
+                {
+                    ["solutionName"] = solutionName,
+                    ["solutionPath"] = solutionPath,
+                    ["directory"] = directory,
+                });
+        }
+
+        private static string NormalizeSolutionName(string requestedName)
+        {
+            var trimmedName = requestedName.Trim();
+            if (trimmedName.EndsWith(".sln", StringComparison.OrdinalIgnoreCase) ||
+                trimmedName.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
+            {
+                trimmedName = Path.GetFileNameWithoutExtension(trimmedName);
+            }
+
+            if (string.IsNullOrWhiteSpace(trimmedName))
+            {
+                throw new CommandErrorException("invalid_arguments", "Argument --name must not be empty.");
+            }
+
+            if (!string.Equals(Path.GetFileName(trimmedName), trimmedName, StringComparison.Ordinal))
+            {
+                throw new CommandErrorException("invalid_arguments", "Argument --name must be a solution name, not a path.");
+            }
+
+            if (trimmedName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            {
+                throw new CommandErrorException("invalid_arguments", $"Argument --name contains invalid file name characters: {requestedName}");
+            }
+
+            return trimmedName;
         }
     }
 

@@ -12,9 +12,19 @@ public sealed class McpToolHelpTests
     private const int MinimumToolCount = 50;
     private const string NugetAddPackageToolName = "nuget_add_package";
     private const string CondaInstallToolName = "conda_install";
+    private const string CreateSolutionToolName = "create_solution";
     private const string FindFilesToolName = "find_files";
+    private const string VsOpenToolName = "vs_open";
+    private const string WaitForInstanceToolName = "wait_for_instance";
     private const string WarningsToolName = "warnings";
     private const string SearchSymbolsToolName = "search_symbols";
+    private const string ExecuteCommandToolName = "execute_command";
+    private const string FormatDocumentToolName = "format_document";
+    private const string QueryProjectItemsToolName = "query_project_items";
+    private const string QueryProjectPropertiesToolName = "query_project_properties";
+    private const string QueryProjectConfigurationsToolName = "query_project_configurations";
+    private const string QueryProjectReferencesToolName = "query_project_references";
+    private const string QueryProjectOutputsToolName = "query_project_outputs";
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -83,11 +93,22 @@ public sealed class McpToolHelpTests
             "set_build_configuration",
             "count_references",
             "bridge_health",
+            VsOpenToolName,
+            WaitForInstanceToolName,
             "nuget_restore",
             NugetAddPackageToolName,
             "nuget_remove_package",
             CondaInstallToolName,
             "conda_remove",
+            CreateSolutionToolName,
+            ExecuteCommandToolName,
+            FormatDocumentToolName,
+            "list_projects",
+            QueryProjectItemsToolName,
+            QueryProjectPropertiesToolName,
+            QueryProjectConfigurationsToolName,
+            QueryProjectReferencesToolName,
+            QueryProjectOutputsToolName,
         ];
 
         foreach (var tool in requiredTools)
@@ -106,7 +127,31 @@ public sealed class McpToolHelpTests
         AssertContainsSchemaProperty(toolMap[WarningsToolName], "group_by");
         AssertContainsSchemaProperty(toolMap[WarningsToolName], "timeout_ms");
         AssertContainsSchemaProperty(toolMap["build"], "platform");
+        AssertContainsSchemaProperty(toolMap["build"], "wait_for_intellisense");
+        AssertContainsSchemaProperty(toolMap["build"], "require_clean_diagnostics");
+        AssertContainsSchemaProperty(toolMap["build_errors"], "wait_for_intellisense");
+        AssertContainsSchemaProperty(toolMap["build_errors"], "require_clean_diagnostics");
         AssertContainsSchemaProperty(toolMap["open_solution"], "wait_for_ready");
+        AssertContainsSchemaProperty(toolMap[VsOpenToolName], "solution");
+        AssertContainsSchemaProperty(toolMap[VsOpenToolName], "devenv_path");
+        AssertContainsSchemaProperty(toolMap[WaitForInstanceToolName], "solution");
+        AssertContainsSchemaProperty(toolMap[WaitForInstanceToolName], "timeout_ms");
+        AssertContainsSchemaProperty(toolMap[CreateSolutionToolName], "directory");
+        AssertContainsSchemaProperty(toolMap[CreateSolutionToolName], "name");
+        AssertContainsSchemaProperty(toolMap[CreateSolutionToolName], "wait_for_ready");
+        AssertContainsSchemaProperty(toolMap[QueryProjectItemsToolName], "project");
+        AssertContainsSchemaProperty(toolMap[QueryProjectItemsToolName], "path");
+        AssertContainsSchemaProperty(toolMap[QueryProjectItemsToolName], "max");
+        AssertContainsSchemaProperty(toolMap[QueryProjectPropertiesToolName], "project");
+        AssertContainsSchemaProperty(toolMap[QueryProjectPropertiesToolName], "names");
+        AssertContainsSchemaProperty(toolMap[QueryProjectConfigurationsToolName], "project");
+        AssertContainsSchemaProperty(toolMap[QueryProjectReferencesToolName], "project");
+        AssertContainsSchemaProperty(toolMap[QueryProjectReferencesToolName], "include_framework");
+        AssertContainsSchemaProperty(toolMap[QueryProjectReferencesToolName], "declared_only");
+        AssertContainsSchemaProperty(toolMap[QueryProjectOutputsToolName], "project");
+        AssertContainsSchemaProperty(toolMap[QueryProjectOutputsToolName], "configuration");
+        AssertContainsSchemaProperty(toolMap[QueryProjectOutputsToolName], "platform");
+        AssertContainsSchemaProperty(toolMap[QueryProjectOutputsToolName], "target_framework");
         AssertContainsSchemaProperty(toolMap["open_file"], "allow_disk_fallback");
         AssertContainsSchemaProperty(toolMap[FindFilesToolName], "path");
         AssertContainsSchemaProperty(toolMap[FindFilesToolName], "extensions");
@@ -115,6 +160,15 @@ public sealed class McpToolHelpTests
         AssertContainsSchemaProperty(toolMap["find_text"], "project");
         AssertContainsSchemaProperty(toolMap["find_text"], "results_window");
         AssertContainsSchemaProperty(toolMap["find_text"], "regex");
+        AssertContainsSchemaProperty(toolMap[ExecuteCommandToolName], "command");
+        AssertContainsSchemaProperty(toolMap[ExecuteCommandToolName], "args");
+        AssertContainsSchemaProperty(toolMap[ExecuteCommandToolName], "document");
+        AssertContainsSchemaProperty(toolMap[ExecuteCommandToolName], "select_word");
+        AssertContainsSchemaProperty(toolMap[FormatDocumentToolName], "file");
+        AssertContainsSchemaProperty(toolMap[FormatDocumentToolName], "line");
+        AssertContainsSchemaProperty(toolMap[FormatDocumentToolName], "column");
+        AssertContainsSchemaProperty(toolMap["set_breakpoint"], "trace_message");
+        AssertContainsSchemaProperty(toolMap["set_breakpoint"], "continue_execution");
         AssertContainsSchemaProperty(toolMap[SearchSymbolsToolName], "scope");
         AssertContainsSchemaProperty(toolMap[SearchSymbolsToolName], "project");
         AssertContainsSchemaProperty(toolMap[SearchSymbolsToolName], "path");
@@ -137,6 +191,13 @@ public sealed class McpToolHelpTests
         AssertBridgeMetadata(toolMap["ready"], "ready");
         AssertBridgeMetadata(toolMap[FindFilesToolName], "find-files");
         AssertBridgeMetadata(toolMap["open_file"], "open-document");
+        AssertBridgeMetadata(toolMap[CreateSolutionToolName], "create-solution");
+        AssertBridgeMetadata(toolMap[ExecuteCommandToolName], "execute-command");
+        AssertBridgeMetadata(toolMap[QueryProjectItemsToolName], "query-project-items");
+        AssertBridgeMetadata(toolMap[QueryProjectPropertiesToolName], "query-project-properties");
+        AssertBridgeMetadata(toolMap[QueryProjectConfigurationsToolName], "query-project-configurations");
+        AssertBridgeMetadata(toolMap[QueryProjectReferencesToolName], "query-project-references");
+        AssertBridgeMetadata(toolMap[QueryProjectOutputsToolName], "query-project-outputs");
         AssertBridgeMetadata(toolMap["debug_threads"], "debug-threads");
         AssertBridgeMetadata(toolMap["diagnostics_snapshot"], "diagnostics-snapshot");
         AssertBridgeMetadata(toolMap["set_build_configuration"], "set-build-configuration");
@@ -147,9 +208,15 @@ public sealed class McpToolHelpTests
     [InlineData("help")]
     [InlineData(ToolHelpName)]
     [InlineData("bridge_health")]
+    [InlineData(VsOpenToolName)]
+    [InlineData(WaitForInstanceToolName)]
     [InlineData("count_references")]
     [InlineData("set_build_configuration")]
     [InlineData("diagnostics_snapshot")]
+    [InlineData(ExecuteCommandToolName)]
+    [InlineData(FormatDocumentToolName)]
+    [InlineData(QueryProjectConfigurationsToolName)]
+    [InlineData(QueryProjectReferencesToolName)]
     [InlineData(NugetAddPackageToolName)]
     [InlineData("nuget_remove_package")]
     [InlineData(CondaInstallToolName)]
@@ -442,6 +509,8 @@ public sealed class McpToolHelpTests
         return File.Exists(releasePath) ? releasePath : debugPath;
     }
 }
+
+
 
 
 
