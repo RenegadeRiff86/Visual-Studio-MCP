@@ -13,5 +13,8 @@ src/VsIdeBridgeInstaller/obj/
 src/VsIdeBridgeService/bin/
 src/VsIdeBridgeService/obj/
 .claude/
+.continue/
+.idea/
+.vscode/
 outputcatalog-live.json
 C*/
