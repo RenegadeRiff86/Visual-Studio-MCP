@@ -14,20 +14,19 @@ Commands are invoked through simple pipe names like `state`, `search-symbols`, a
 
 The CLI also includes a Windows-side stdio MCP facade (`vs-ide-bridge mcp-server`) that forwards MCP tool/resource/prompt requests to the existing bridge pipe server. This keeps the VSIX bridge as the source of truth while exposing an LLM-friendly command surface.
 
-## LLM Workflow
+## Getting Started
 
-Use this five-step pattern:
+Install first — see [Quick Start](#quick-start) below.
 
-1. `vs-ide-bridge help`
-2. `vs-ide-bridge ensure --solution C:\path\to\Your.sln`
-3. copy the returned `instanceId`
-4. `vs-ide-bridge catalog --instance <instanceId>`
-5. `vs-ide-bridge search-symbols --instance <instanceId> --query RunAsync`
+Once installed, open Visual Studio with your project, then start Claude Code. You don't need to type any commands — just tell Claude Code what you want in plain English:
 
-If Visual Studio is already open on the right solution, `ensure` reuses it. If more than one Visual Studio bridge instance is live, run `vs-ide-bridge instances` and then use `--instance`.
+> "Open my solution at C:\path\to\Your.sln and show me any build errors."
+> "Find all references to the Login method."
+> "Apply this fix to AuthService.cs."
 
-If you need task-oriented examples, run `vs-ide-bridge prompts`.
-If you need to extract one field from a saved bridge result, run `vs-ide-bridge parse`.
+Claude Code connects to Visual Studio automatically and uses the bridge in the background.
+
+**CLI fallback:** If MCP is unavailable, the `vs-ide-bridge` command exposes the same functionality from any terminal. Run `vs-ide-bridge help` for a full list of commands.
 
 ## Requirements
 
