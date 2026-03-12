@@ -210,20 +210,24 @@ Optional parameters:
 
 1. **Close Visual Studio and Claude Code** before installing.
 2. **Download the installer** (`vs-ide-bridge-setup-<version>.exe`) from [GitHub Releases](https://github.com/RenegadeRiff86/vs-ide-bridge/releases/latest) and run it. The installer sets everything up automatically.
-3. **Create a config file** so Claude Code knows where to find the bridge. In your project folder (or your home folder for all projects), create a file named `.mcp.json` with this content:
+3. **Set up Claude Code.** Open Claude Code, navigate to your project folder, and paste this prompt:
 
-```json
-{
-  "mcpServers": {
-    "vs-ide-bridge": {
-      "command": "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe",
-      "args": ["mcp-server", "--tools-only"]
-    }
-  }
-}
-```
+   > Create a file called `.mcp.json` in this folder with this content:
+   >
+   > ```json
+   > {
+   >   "mcpServers": {
+   >     "vs-ide-bridge": {
+   >       "command": "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe",
+   >       "args": ["mcp-server", "--tools-only"]
+   >     }
+   >   }
+   > }
+   > ```
 
-4. Open Visual Studio, then open Claude Code.
+   Claude Code will create the file for you. You only need to do this once per project.
+
+4. Close Claude Code, open Visual Studio, then reopen Claude Code.
 5. Tell Claude Code which project you want to work on — it will connect to Visual Studio automatically.
 6. If Claude Code ever can't connect, you can use the `vs-ide-bridge` command from any terminal as a fallback.
 
