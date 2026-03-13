@@ -22,10 +22,18 @@ internal static partial class CliApp
     {
         private static readonly string McpLog = Path.Combine(Path.GetTempPath(), "vs-ide-bridge", "mcp-server.log");
         private const string ActivateWindowArgumentName = "activate_window";
+        private const string BasePathArgumentName = "base_path";
         private const string CodeArgumentName = "code";
         private const string ColumnArgumentName = "column";
         private const string ConfigurationArgumentName = "configuration";
-        private const int DefaultGitDiffContextLines = 3;
+        private const string ContextAfterArgumentName = "context_after";
+        private const string ContextBeforeArgumentName = "context_before";
+        private const int DefaultPythonToolTimeoutMilliseconds = ProcessRunner.DefaultTimeoutMilliseconds;
+        private const string DefaultPythonToolTimeoutDescription = "Timeout in milliseconds (default 60000).";
+        private const int DefaultContextLineCount = 3;
+        private const string DefaultContextLineCountDescription = "Optional context line count (default 3).";
+        private const int DefaultReadFileExampleContextAfter = 16;
+        private const int DefaultGitDiffContextLines = DefaultContextLineCount;
         private const int DefaultGitHubIssueSearchLimit = 20;
         private const int DefaultGitLogMaxCount = 20;
         private const int DefaultLargeMaxCount = 200;
@@ -47,6 +55,7 @@ internal static partial class CliApp
         private const string NameArgumentName = "name";
         private const string OptionalProjectFilterDescription = "Optional project filter.";
         private const string PathArgumentName = "path";
+        private const string PackagesArgumentName = "packages";
         private const string PlatformArgumentName = "platform";
         private const string ProjectArgumentName = "project";
         private const string ProjectArgumentDescription = "Project name, unique name, or full path.";
@@ -56,26 +65,59 @@ internal static partial class CliApp
         private const string SampleCliProjectPath = "src\\VsIdeBridgeCli\\VsIdeBridgeCli.csproj";
         private const string QueryArgumentName = "query";
         private const string QuickArgumentName = "quick";
+        private const string StartLineArgumentName = "start_line";
+        private const string ReadOnlyHintPropertyName = "readOnlyHint";
+        private const string TitlePropertyName = "title";
         private const string UiSettingsToolName = "ui_settings";
         private const int RawJsonInitialDepth = 1;
+        private const string AnnotationsPropertyName = "annotations";
         private const string ApplyDiffToolName = "apply_diff";
         private const string BridgeApprovalCommandName = "Tools.VsIdeBridgeRequestApproval";
+        private const string PythonExecutionApprovalOperationName = "python_exec";
+        private const string PythonEnvironmentMutationApprovalOperationName = "python_env_mutation";
         private const string CondaExecutableName = "conda";
+        private const int DefaultReadFileBatchExampleEndLine = 17;
         private const string DescriptionPropertyName = "description";
+        private const string DestructiveHintPropertyName = "destructiveHint";
+        private const string EndLineArgumentName = "end_line";
+        private const string IdempotentHintPropertyName = "idempotentHint";
+        private const string InputSchemaPropertyName = "inputSchema";
+        private const string OutputSchemaPropertyName = "outputSchema";
         private const string AbsoluteOrSolutionRelativeFilePathDescription = "Absolute or solution-relative file path.";
         private static readonly byte[] RawJsonTerminator = [(byte)'\n'];
         private const string ServiceControlPipeName = "VsIdeBridgeServiceControl";
         private const string HelpToolName = "help";
         private static readonly byte[] HeaderTerminator = "\r\n\r\n"u8.ToArray();
+        private const string AddFileToProjectToolName = "add_file_to_project";
+        private const string AddProjectToolName = "add_project";
+        private const string CondaInstallToolName = "conda_install";
+        private const string CondaRemoveToolName = "conda_remove";
+        private const string CountReferencesToolName = "count_references";
+        private const string DebugWatchToolName = "debug_watch";
+        private const string FindFilesToolName = "find_files";
+        private const string FindTextToolName = "find_text";
+        private const string FindTextBatchToolName = "find_text_batch";
+        private const string ListProjectsToolName = "list_projects";
+        private const string QueryProjectConfigurationsToolName = "query_project_configurations";
+        private const string QueryProjectItemsToolName = "query_project_items";
+        private const string QueryProjectOutputsToolName = "query_project_outputs";
+        private const string QueryProjectPropertiesToolName = "query_project_properties";
+        private const string QueryProjectReferencesToolName = "query_project_references";
+        private const string ReadFileToolName = "read_file";
+        private const string ReadFileBatchToolName = "read_file_batch";
+        private const string RemoveFileFromProjectToolName = "remove_file_from_project";
+        private const string RemoveProjectToolName = "remove_project";
         private const string SolutionArgumentName = "solution";
         private const string StructuredContentPropertyName = "structuredContent";
         private static readonly string[] SupportedProtocolVersions = ["2025-03-26", "2024-11-05"];
         private const string SeverityArgumentName = "severity";
+        private const int TwoValue = 2;
         private const string TextArgumentName = "text";
         private const string TimeoutMillisecondsArgumentName = "timeout_ms";
         private const string TimeoutMillisecondsSwitchName = "timeout-ms";
         private const string ToolHelpToolName = "tool_help";
         private const string OneBasedLineNumberDescription = "1-based line number.";
+        private const string UnknownMethodName = "(null)";
         private const string UnknownMcpToolMessageFormat = "Unknown MCP tool: {toolName}";
         private const string WaitForIntellisenseArgumentName = "wait_for_intellisense";
         private const string WarningsToolName = "warnings";
@@ -499,7 +541,7 @@ internal static partial class CliApp
         {
             JsonObject? response;
             var request = incoming.Request;
-            var method = request["method"]?.GetValue<string>() ?? "(null)";
+            var method = request["method"]?.GetValue<string>() ?? UnknownMethodName;
             NotifyService("MCP_REQUEST");
             McpTrace($"got request method={method}");
 
@@ -707,7 +749,9 @@ internal static partial class CliApp
                     OptionalStringProperty("path", "Optional path filter."),
                     OptionalStringProperty("text", "Optional message text filter."),
                     OptionalStringProperty("group_by", "Optional grouping mode."),
-                    OptionalIntegerProperty(TimeoutMillisecondsArgumentName, "Optional wait timeout in milliseconds."))),
+                    OptionalIntegerProperty(TimeoutMillisecondsArgumentName, "Optional wait timeout in milliseconds.")),
+                title: "Error List Diagnostics",
+                annotations: ReadOnlyToolAnnotations()),
             Tool(
                 WarningsToolName,
                 "Capture warning rows with optional code, path, and project filters.",
@@ -721,7 +765,9 @@ internal static partial class CliApp
                     OptionalStringProperty("path", "Optional path filter."),
                     OptionalStringProperty("text", "Optional message text filter."),
                     OptionalStringProperty("group_by", "Optional grouping mode."),
-                    OptionalIntegerProperty(TimeoutMillisecondsArgumentName, "Optional wait timeout in milliseconds."))),
+                    OptionalIntegerProperty(TimeoutMillisecondsArgumentName, "Optional wait timeout in milliseconds.")),
+                title: "Warning List Diagnostics",
+                annotations: ReadOnlyToolAnnotations()),
             Tool("list_tabs", "List open editor tabs.", EmptySchema()),
             Tool(
                 "open_file",
@@ -732,7 +778,7 @@ internal static partial class CliApp
                     OptionalIntegerProperty("column", "Optional 1-based column number."),
                     OptionalBooleanProperty("allow_disk_fallback", "Allow disk fallback under solution root when solution items do not match (default true)."))),
             Tool(
-                "find_files",
+                FindFilesToolName,
                 "Search solution explorer files by name or path fragment.",
                 ObjectSchema(
                     RequiredStringProperty("query", "File name or path fragment."),
@@ -741,7 +787,7 @@ internal static partial class CliApp
                     OptionalIntegerProperty("max_results", $"Optional max result count (default {DefaultLargeMaxCount})."),
                     OptionalBooleanProperty("include_non_project", "Include disk files under solution root that are not in projects (default true)."))),
             Tool(
-                "find_text_batch",
+                FindTextBatchToolName,
                 "Find text for multiple queries in one bridge round-trip, internally chunked when needed.",
                 ObjectSchema(
                     RequiredStringArrayProperty("queries", "Queries to search for in order."),
@@ -752,7 +798,9 @@ internal static partial class CliApp
                     OptionalIntegerProperty("max_queries_per_chunk", "Optional max query count per internal chunk (default 5)."),
                     OptionalBooleanProperty(MatchCaseArgumentName, "Case-sensitive match (default false)."),
                     OptionalBooleanProperty("whole_word", "Match whole word only (default false)."),
-                    OptionalBooleanProperty("regex", "Treat queries as regular expressions (default false)."))),
+                    OptionalBooleanProperty("regex", "Treat queries as regular expressions (default false).")),
+                title: "Batched Text Search",
+                annotations: ReadOnlyToolAnnotations()),
             Tool(
                 "search_symbols",
                 "Search symbol definitions by name across solution scope.",
@@ -765,7 +813,7 @@ internal static partial class CliApp
                     OptionalIntegerProperty("max", "Optional max result count."),
                     OptionalBooleanProperty(MatchCaseArgumentName, "Case-sensitive match (default false)."))),
             Tool(
-                "count_references",
+                CountReferencesToolName,
                 "Count symbol references at file/line/column with exact-or-explicit semantics.",
                 ObjectSchema(
                     RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription),
@@ -785,7 +833,9 @@ internal static partial class CliApp
                 "Apply unified diff text or editor patch text through the live editor so changes are visible in Visual Studio. Changed files open by default.",
                 ObjectSchema(
                     RequiredStringProperty("patch", "Unified diff text or editor patch text."),
-                    OptionalBooleanProperty("post_check", "If true, run ready and errors after applying diff."))),
+                    OptionalBooleanProperty("post_check", "If true, run ready and errors after applying diff.")),
+                title: "Apply Editor Patch",
+                annotations: DestructiveToolAnnotations()),
             Tool("list_documents", "List open documents from the IDE document table.", EmptySchema()),
             Tool(
                 "activate_document",
@@ -874,7 +924,7 @@ internal static partial class CliApp
                 ObjectSchema(OptionalIntegerProperty(MaxArgumentName, $"Optional max locals (default {DefaultLargeMaxCount})."))),
             Tool("debug_modules", "Get debugger modules snapshot (best effort).", EmptySchema()),
             Tool(
-                "debug_watch",
+                DebugWatchToolName,
                 "Evaluate one watch expression in break mode.",
                 ObjectSchema(
                     RequiredStringProperty("expression", "Debugger watch expression."),
@@ -902,11 +952,11 @@ internal static partial class CliApp
             Tool(
                 "git_diff_unstaged",
                 "Show unstaged diff with optional context lines.",
-                ObjectSchema(OptionalIntegerProperty("context", "Optional context line count (default 3)."))),
+                ObjectSchema(OptionalIntegerProperty("context", DefaultContextLineCountDescription))),
             Tool(
                 "git_diff_staged",
                 "Show staged diff with optional context lines.",
-                ObjectSchema(OptionalIntegerProperty("context", "Optional context line count (default 3)."))),
+                ObjectSchema(OptionalIntegerProperty("context", DefaultContextLineCountDescription))),
             Tool(
                 "git_log",
                 "Show recent commits in a compact machine-friendly format.",
@@ -1014,21 +1064,76 @@ internal static partial class CliApp
                 "conda_install",
                 "Install one or more packages into a conda environment.",
                 ObjectSchema(
-                    RequiredStringArrayProperty("packages", "One or more conda package specs (for example ['numpy','cmake>=3.29'])."),
+                    RequiredStringArrayProperty(PackagesArgumentName, "One or more conda package specs (for example ['numpy','cmake>=3.29'])."),
                     OptionalStringProperty("name", "Optional environment name (-n/--name)."),
                     OptionalStringProperty("prefix", "Optional environment prefix path (--prefix)."),
                     OptionalStringArrayProperty("channels", "Optional channels to add with --channel."),
                     OptionalBooleanProperty("dry_run", "If true, run with --dry-run."),
                     OptionalBooleanProperty("yes", "Auto-confirm install (default true)."))),
             Tool(
-                "conda_remove",
+                CondaRemoveToolName,
                 "Remove one or more packages from a conda environment.",
                 ObjectSchema(
-                    RequiredStringArrayProperty("packages", "One or more package names to remove."),
+                    RequiredStringArrayProperty(PackagesArgumentName, "One or more package names to remove."),
                     OptionalStringProperty("name", "Optional environment name (-n/--name)."),
                     OptionalStringProperty("prefix", "Optional environment prefix path (--prefix)."),
                     OptionalBooleanProperty("dry_run", "If true, run with --dry-run."),
                     OptionalBooleanProperty("yes", "Auto-confirm remove (default true)."))),
+            Tool(
+                "python_list_envs",
+                "Discover bridge-managed CPython, system Python installs, virtual environments, and conda environments that the bridge can attach to.",
+                EmptySchema()),
+            Tool(
+                "python_env_info",
+                "Inspect one Python interpreter or environment. Defaults to the selected interpreter, then the managed runtime, then the first discovered interpreter.",
+                ObjectSchema(OptionalStringProperty(PathArgumentName, "Optional interpreter path to inspect."))),
+            Tool(
+                "python_set_active_env",
+                "Select the Python interpreter or environment the bridge should use for future Python tools. This is read-only and does not mutate the environment.",
+                ObjectSchema(RequiredStringProperty(PathArgumentName, "Interpreter path to select."))),
+            Tool(
+                "python_list_packages",
+                "List installed packages from the selected interpreter, or an explicitly provided interpreter path.",
+                ObjectSchema(OptionalStringProperty(PathArgumentName, "Optional interpreter path to query instead of the selected interpreter."))),
+            Tool(
+                "python_repl",
+                "Execute a Python snippet using the selected interpreter. By default the bridge runs Python in restricted scratch mode that blocks file writes, process launch, network access, temp file creation, and unsafe native imports. Unrestricted execution requires IDE Bridge > Allow Bridge Python Unrestricted Execution. Python execution still requires a Visual Studio approval popup unless IDE Bridge > Allow Bridge Python Execution is enabled.",
+                ObjectSchema(
+                    RequiredStringProperty("code", "Python code to execute."),
+                    OptionalStringProperty(PathArgumentName, "Optional interpreter path to use instead of the selected interpreter."),
+                    OptionalStringProperty("cwd", "Working directory for execution. Defaults to the open solution directory when available."),
+                    OptionalIntegerProperty(TimeoutMillisecondsArgumentName, DefaultPythonToolTimeoutDescription))),
+            Tool(
+                "python_run_file",
+                "Execute an existing Python file using the selected interpreter. By default the bridge runs Python in restricted scratch mode that blocks file writes, process launch, network access, temp file creation, and unsafe native imports. Unrestricted execution requires IDE Bridge > Allow Bridge Python Unrestricted Execution. Python execution still requires a Visual Studio approval popup unless IDE Bridge > Allow Bridge Python Execution is enabled.",
+                ObjectSchema(
+                    RequiredStringProperty(FileArgumentName, "Existing Python file to execute."),
+                    OptionalStringArrayProperty("args", "Optional arguments to pass to the script."),
+                    OptionalStringProperty(PathArgumentName, "Optional interpreter path to use instead of the selected interpreter."),
+                    OptionalStringProperty("cwd", "Working directory for execution. Defaults to the open solution directory when available."),
+                    OptionalIntegerProperty(TimeoutMillisecondsArgumentName, DefaultPythonToolTimeoutDescription))),
+            Tool(
+                "python_install_package",
+                "Install one or more Python packages into the selected interpreter environment. Requires a Visual Studio approval popup unless IDE Bridge > Allow Bridge Python Environment Mutation is enabled. Never mutates an existing user environment silently.",
+                ObjectSchema(
+                    RequiredStringArrayProperty(PackagesArgumentName, "One or more Python package specs to install."),
+                    OptionalStringProperty(PathArgumentName, "Optional interpreter path to use instead of the selected interpreter."),
+                    OptionalIntegerProperty(TimeoutMillisecondsArgumentName, DefaultPythonToolTimeoutDescription))),
+            Tool(
+                "python_remove_package",
+                "Remove one or more Python packages from the selected interpreter environment. Requires a Visual Studio approval popup unless IDE Bridge > Allow Bridge Python Environment Mutation is enabled. Never mutates an existing user environment silently.",
+                ObjectSchema(
+                    RequiredStringArrayProperty(PackagesArgumentName, "One or more Python package names to remove."),
+                    OptionalStringProperty(PathArgumentName, "Optional interpreter path to use instead of the selected interpreter."),
+                    OptionalIntegerProperty(TimeoutMillisecondsArgumentName, DefaultPythonToolTimeoutDescription))),
+            Tool(
+                "python_create_env",
+                "Create a new virtual environment using the selected interpreter or an explicitly provided base interpreter. Requires a Visual Studio approval popup unless IDE Bridge > Allow Bridge Python Environment Mutation is enabled.",
+                ObjectSchema(
+                    RequiredStringProperty(PathArgumentName, "Directory where the new environment should be created."),
+                    OptionalStringProperty(BasePathArgumentName, "Optional base interpreter path to use instead of the selected interpreter."),
+                    OptionalStringProperty("cwd", "Working directory used to resolve a relative path. Defaults to the open solution directory when available."),
+                    OptionalIntegerProperty(TimeoutMillisecondsArgumentName, DefaultPythonToolTimeoutDescription))),
             Tool(
                 "shell_exec",
                 "Execute a process and capture its stdout, stderr, and exit code. Working directory defaults to the solution directory. Requires a Visual Studio approval popup unless IDE Bridge > Allow Bridge Shell Exec is enabled.",
@@ -1061,7 +1166,7 @@ internal static partial class CliApp
                     OptionalStringProperty(SolutionArgumentName, "Absolute path to a .sln or .slnx file to open."),
                     OptionalIntegerProperty(TimeoutMillisecondsArgumentName, $"How long to wait in milliseconds (default {VsOpenDiscoveryTimeoutMilliseconds})."))),
             Tool(
-                "find_text",
+                FindTextToolName,
                 "Full-text search across the solution or a path subtree. Returns file paths, line numbers and preview text.",
                 ObjectSchema(
                     RequiredStringProperty(QueryArgumentName, "Search text or regex pattern."),
@@ -1071,33 +1176,39 @@ internal static partial class CliApp
                     OptionalIntegerProperty("results_window", "Optional Find Results window number."),
                     OptionalBooleanProperty(MatchCaseArgumentName, "Case-sensitive match (default false)."),
                     OptionalBooleanProperty("whole_word", "Match whole word only (default false)."),
-                    OptionalBooleanProperty("regex", "Treat query as a regular expression (default false)."))),
+                    OptionalBooleanProperty("regex", "Treat query as a regular expression (default false).")),
+                title: "Text Search",
+                annotations: ReadOnlyToolAnnotations()),
             Tool(
-                "read_file",
-                "Read lines from a file. Use start_line/end_line for a range, or line with context_before/context_after centered on an anchor.",
+                ReadFileToolName,
+                "Take one code slice from a file. Use start_line/end_line for a range, or line with context_before/context_after when a human asks for a slice around a location.",
                 ObjectSchema(
                     RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription),
-                    OptionalIntegerProperty("start_line", "First 1-based line to read. Use with end_line for a range."),
-                    OptionalIntegerProperty("end_line", "Last 1-based line to read (inclusive). Use with start_line."),
+                    OptionalIntegerProperty(StartLineArgumentName, "First 1-based line to read. Use with end_line for a range."),
+                    OptionalIntegerProperty(EndLineArgumentName, "Last 1-based line to read (inclusive). Use with start_line."),
                     OptionalIntegerProperty(LineArgumentName, "Anchor 1-based line. Use with context_before/context_after."),
-                    OptionalIntegerProperty("context_before", "Lines before anchor (default 10)."),
-                    OptionalIntegerProperty("context_after", "Lines after anchor (default 30)."),
-                    OptionalBooleanProperty("reveal_in_editor", "Whether to reveal the slice in the editor (default true)."))),
+                    OptionalIntegerProperty(ContextBeforeArgumentName, "Lines before anchor (default 10)."),
+                    OptionalIntegerProperty(ContextAfterArgumentName, "Lines after anchor (default 30)."),
+                    OptionalBooleanProperty("reveal_in_editor", "Whether to reveal the slice in the editor (default true).")),
+                title: "Read File Slice",
+                annotations: ReadOnlyToolAnnotations()),
             Tool(
-                "read_file_batch",
-                "Read multiple file slices in one bridge request. Each range may use start_line/end_line or line with context_before/context_after.",
+                ReadFileBatchToolName,
+                "Take multiple code slices in one bridge request. Use this instead of repeated read_file calls when a human asks for several slices.",
                 ObjectSchema(
                     ("ranges", ArraySchema(
                         "Ranges to read in order.",
                         ObjectSchema(
                             RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription),
-                            OptionalIntegerProperty("start_line", "First 1-based line to read. Use with end_line for a range."),
-                            OptionalIntegerProperty("end_line", "Last 1-based line to read (inclusive). Use with start_line."),
+                            OptionalIntegerProperty(StartLineArgumentName, "First 1-based line to read. Use with end_line for a range."),
+                            OptionalIntegerProperty(EndLineArgumentName, "Last 1-based line to read (inclusive). Use with start_line."),
                             OptionalIntegerProperty(LineArgumentName, "Anchor 1-based line. Use with context_before/context_after."),
-                            OptionalIntegerProperty("context_before", "Lines before anchor when line is used."),
-                            OptionalIntegerProperty("context_after", "Lines after anchor when line is used.")),
+                            OptionalIntegerProperty(ContextBeforeArgumentName, "Lines before anchor when line is used."),
+                            OptionalIntegerProperty(ContextAfterArgumentName, "Lines after anchor when line is used.")),
                         minItems: 1),
-                     true))),
+                     true)),
+                title: "Read File Slices",
+                annotations: ReadOnlyToolAnnotations()),
             Tool(
                 "find_references",
                 "Find all references to the symbol at file/line/column using VS IntelliSense.",
@@ -1140,36 +1251,36 @@ internal static partial class CliApp
                     OptionalIntegerProperty("max_depth", "Max directory depth to recurse (default 6)."),
                     OptionalIntegerProperty("max", $"Max results to return (default {DefaultLargeMaxCount})."))),
             Tool(
-                "list_projects",
+                ListProjectsToolName,
                 "List all projects in the current solution, including startup-project flags.",
                 EmptySchema()),
             Tool(
-                "query_project_items",
+                QueryProjectItemsToolName,
                 "List items in one project with paths, item types, and VS item metadata.",
                 ObjectSchema(
                     RequiredStringProperty(ProjectArgumentName, ProjectArgumentDescription),
                     OptionalStringProperty(PathArgumentName, "Optional file or directory filter within the project."),
                     OptionalIntegerProperty("max", "Optional max item count (default 500)."))),
             Tool(
-                "query_project_properties",
+                QueryProjectPropertiesToolName,
                 "Read project properties such as TargetFramework, AssemblyName, OutputType, or RootNamespace.",
                 ObjectSchema(
                     RequiredStringProperty(ProjectArgumentName, ProjectArgumentDescription),
                     OptionalStringArrayProperty("names", "Optional property names to read. Omit to return every accessible property."))),
             Tool(
-                "query_project_configurations",
+                QueryProjectConfigurationsToolName,
                 "List available project configurations and platforms, including the active one.",
                 ObjectSchema(
                     RequiredStringProperty(ProjectArgumentName, ProjectArgumentDescription))),
             Tool(
-                "query_project_references",
+                QueryProjectReferencesToolName,
                 "List project references for one project. By default this returns resolved references with framework reference assemblies omitted; pass declared_only for a cleaner project-file view.",
                 ObjectSchema(
                     RequiredStringProperty(ProjectArgumentName, ProjectArgumentDescription),
                     OptionalBooleanProperty("include_framework", "Include framework/reference-assembly items in the results (default false)."),
                     OptionalBooleanProperty("declared_only", "Return only references declared in the project file instead of the fully resolved reference closure (default false)."))),
             Tool(
-                "query_project_outputs",
+                QueryProjectOutputsToolName,
                 "Resolve the primary output artifact and output directory for one project using the active or requested build shape.",
                 ObjectSchema(
                     RequiredStringProperty(ProjectArgumentName, ProjectArgumentDescription),
@@ -1177,13 +1288,13 @@ internal static partial class CliApp
                     OptionalStringProperty(PlatformArgumentName, "Optional build platform to evaluate (for example x64)."),
                     OptionalStringProperty("target_framework", "Optional target framework moniker to evaluate when a project targets multiple frameworks."))),
             Tool(
-                "add_project",
+                AddProjectToolName,
                 "Add an existing project file to the current solution.",
                 ObjectSchema(
                     RequiredStringProperty(ProjectArgumentName, "Absolute project path (.csproj/.vcxproj/.fsproj)."),
                     OptionalStringProperty("solution_folder", "Optional solution folder name to add the project under."))),
             Tool(
-                "remove_project",
+                RemoveProjectToolName,
                 "Remove a project from the current solution by name or path.",
                 ObjectSchema(RequiredStringProperty(ProjectArgumentName, ProjectArgumentDescription))),
             Tool(
@@ -1191,13 +1302,13 @@ internal static partial class CliApp
                 "Set the current solution startup project.",
                 ObjectSchema(RequiredStringProperty(ProjectArgumentName, "Project name, unique name, or full path."))),
             Tool(
-                "add_file_to_project",
+                AddFileToProjectToolName,
                 "Add an existing file to a project without creating it on disk.",
                 ObjectSchema(
                     RequiredStringProperty(ProjectArgumentName, "Project name, unique name, or full path."),
                     RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription))),
             Tool(
-                "remove_file_from_project",
+                RemoveFileFromProjectToolName,
                 "Remove a file from a project without deleting the file from disk.",
                 ObjectSchema(
                     RequiredStringProperty(ProjectArgumentName, "Project name, unique name, or full path."),
@@ -1252,12 +1363,42 @@ internal static partial class CliApp
                 EmptySchema())
         ];
 
-        private static JsonObject Tool(string name, string description, JsonObject inputSchema) => new()
+        private static JsonObject Tool(
+            string name,
+            string description,
+            JsonObject inputSchema,
+            string? title = null,
+            JsonObject? annotations = null,
+            JsonObject? outputSchema = null)
         {
-            ["name"] = name,
-            [DescriptionPropertyName] = ResolveToolDescription(name, description),
-            ["inputSchema"] = inputSchema,
-        };
+            var resolvedTitle = !string.IsNullOrWhiteSpace(title)
+                ? title
+                : BuildDefaultToolTitle(name);
+            var resolvedAnnotations = annotations ?? InferStandardToolAnnotations(name);
+            var tool = new JsonObject
+            {
+                ["name"] = name,
+                [DescriptionPropertyName] = ResolveToolDescription(name, description),
+                [InputSchemaPropertyName] = inputSchema,
+            };
+
+            if (!string.IsNullOrWhiteSpace(resolvedTitle))
+            {
+                tool[TitlePropertyName] = resolvedTitle;
+            }
+
+            if (resolvedAnnotations is not null && resolvedAnnotations.Count > 0)
+            {
+                tool[AnnotationsPropertyName] = resolvedAnnotations.DeepClone();
+            }
+
+            if (outputSchema is not null)
+            {
+                tool[OutputSchemaPropertyName] = outputSchema.DeepClone();
+            }
+
+            return tool;
+        }
 
         private static JsonObject ToolResult(JsonObject result) => new()
         {
@@ -1327,6 +1468,11 @@ internal static partial class CliApp
                 return await CallCondaToolAsync(id, toolName, args, bridgeBinding).ConfigureAwait(false);
             }
 
+            if (toolName.StartsWith("python_", StringComparison.Ordinal))
+            {
+                return await CallPythonToolAsync(id, toolName, args, bridgeBinding).ConfigureAwait(false);
+            }
+
             if (string.Equals(toolName, "shell_exec", StringComparison.Ordinal))
             {
                 return await CallShellExecToolAsync(id, args, bridgeBinding).ConfigureAwait(false);
@@ -1393,10 +1539,10 @@ internal static partial class CliApp
                 WarningsToolName => (WarningsToolName, BuildDiagnosticsArgs(args)),
                 "list_tabs" => ("list-tabs", string.Empty),
                 "open_file" => ("open-document", BuildOpenFileArgs(args)),
-                "find_files" => ("find-files", BuildFindFilesArgs(args)),
-                "find_text_batch" => ("find-text-batch", BuildFindTextBatchArgs(args)),
+                FindFilesToolName => ("find-files", BuildFindFilesArgs(args)),
+                FindTextBatchToolName => ("find-text-batch", BuildFindTextBatchArgs(args)),
                 "search_symbols" => ("search-symbols", BuildSearchSymbolsArgs(args)),
-                "count_references" => ("count-references", BuildCountReferencesArgs(args)),
+                CountReferencesToolName => ("count-references", BuildCountReferencesArgs(args)),
                 "quick_info" => ("quick-info", BuildFileLineColumnArgs(args)),
                 ApplyDiffToolName => ("apply-diff", BuildApplyDiffArgs(args)),
                 "list_documents" => ("list-documents", string.Empty),
@@ -1417,34 +1563,34 @@ internal static partial class CliApp
                 "debug_stack" => ("debug-stack", BuildDebugStackArgs(args)),
                 "debug_locals" => ("debug-locals", BuildDebugLocalsArgs(args)),
                 "debug_modules" => ("debug-modules", string.Empty),
-                "debug_watch" => ("debug-watch", BuildDebugWatchArgs(args)),
+                DebugWatchToolName => ("debug-watch", BuildDebugWatchArgs(args)),
                 "debug_exceptions" => ("debug-exceptions", string.Empty),
                 "diagnostics_snapshot" => ("diagnostics-snapshot", BuildDiagnosticsSnapshotToolArgs(args)),
                 "build_configurations" => ("build-configurations", string.Empty),
                 "set_build_configuration" => ("set-build-configuration", BuildConfigurationPlatformArgs(args)),
-                "find_text" => ("find-text", BuildFindTextArgs(args)),
-                "read_file" => ("document-slice", BuildReadFileArgs(args)),
-                "read_file_batch" => ("document-slices", BuildReadFileBatchArgs(args)),
+                FindTextToolName => ("find-text", BuildFindTextArgs(args)),
+                ReadFileToolName => ("document-slice", BuildReadFileArgs(args)),
+                ReadFileBatchToolName => ("document-slices", BuildReadFileBatchArgs(args)),
                 "find_references" => ("find-references", BuildFileLineColumnArgs(args)),
                 "peek_definition" => ("peek-definition", BuildFileLineColumnArgs(args)),
                 "file_outline" => ("file-outline", BuildSingleStringSwitchArg(args, FileArgumentName, FileArgumentName)),
                 "build" => ("build", BuildBuildArgs(args)),
                 "search_solutions" => ("search-solutions", BuildSearchSolutionsToolArgs(args)),
-                "list_projects" => ("list-projects", string.Empty),
-                "query_project_items" => ("query-project-items", BuildQueryProjectItemsToolArgs(args)),
-                "query_project_properties" => ("query-project-properties", BuildQueryProjectPropertiesToolArgs(args)),
-                "query_project_configurations" => ("query-project-configurations", BuildQueryProjectConfigurationsToolArgs(args)),
-                "query_project_references" => ("query-project-references", BuildQueryProjectReferencesToolArgs(args)),
-                "query_project_outputs" => ("query-project-outputs", BuildQueryProjectOutputsToolArgs(args)),
-                "add_project" => ("add-project", BuildArgs(
+                ListProjectsToolName => ("list-projects", string.Empty),
+                QueryProjectItemsToolName => ("query-project-items", BuildQueryProjectItemsToolArgs(args)),
+                QueryProjectPropertiesToolName => ("query-project-properties", BuildQueryProjectPropertiesToolArgs(args)),
+                QueryProjectConfigurationsToolName => ("query-project-configurations", BuildQueryProjectConfigurationsToolArgs(args)),
+                QueryProjectReferencesToolName => ("query-project-references", BuildQueryProjectReferencesToolArgs(args)),
+                QueryProjectOutputsToolName => ("query-project-outputs", BuildQueryProjectOutputsToolArgs(args)),
+                AddProjectToolName => ("add-project", BuildArgs(
                     (ProjectArgumentName, GetOptionalStringArgument(args, ProjectArgumentName)),
                     ("solution-folder", GetOptionalStringArgument(args, "solution_folder")))),
-                "remove_project" => ("remove-project", BuildArgs((ProjectArgumentName, GetOptionalStringArgument(args, ProjectArgumentName)))),
+                RemoveProjectToolName => ("remove-project", BuildArgs((ProjectArgumentName, GetOptionalStringArgument(args, ProjectArgumentName)))),
                 "set_startup_project" => ("set-startup-project", BuildArgs((ProjectArgumentName, GetOptionalStringArgument(args, ProjectArgumentName)))),
-                "add_file_to_project" => ("add-file-to-project", BuildArgs(
+                AddFileToProjectToolName => ("add-file-to-project", BuildArgs(
                     (ProjectArgumentName, GetOptionalStringArgument(args, ProjectArgumentName)),
                     (FileArgumentName, GetOptionalStringArgument(args, FileArgumentName)))),
-                "remove_file_from_project" => ("remove-file-from-project", BuildArgs(
+                RemoveFileFromProjectToolName => ("remove-file-from-project", BuildArgs(
                     (ProjectArgumentName, GetOptionalStringArgument(args, ProjectArgumentName)),
                     (FileArgumentName, GetOptionalStringArgument(args, FileArgumentName)))),
                 "set_breakpoint" => ("set-breakpoint", BuildArgs(
@@ -1573,7 +1719,7 @@ internal static partial class CliApp
         private static JsonObject BuildToolHelpEntry(JsonObject tool)
         {
             var name = tool["name"]?.GetValue<string>() ?? string.Empty;
-            var inputSchema = tool["inputSchema"] as JsonObject ?? EmptySchema();
+            var inputSchema = tool[InputSchemaPropertyName] as JsonObject ?? EmptySchema();
             var bridgeCommand = ResolveBridgeCommandForTool(name);
             BridgeCommandMetadata? bridgeMetadata = null;
             if (!string.IsNullOrWhiteSpace(bridgeCommand))
@@ -1588,18 +1734,38 @@ internal static partial class CliApp
             var description = hasBridgeMetadata
                 ? bridgeMetadata!.Description
                 : tool["description"]?.GetValue<string>() ?? string.Empty;
+            var title = tool[TitlePropertyName]?.GetValue<string>() ?? BuildDefaultToolTitle(name);
+            var annotations = tool[AnnotationsPropertyName] as JsonObject ?? InferStandardToolAnnotations(name);
+            var outputSchema = tool[OutputSchemaPropertyName] as JsonObject;
 
             string? bridgeCommandValue = hasBridgeMetadata ? bridgeMetadata!.PipeName : null;
             string? bridgeExampleValue = hasBridgeMetadata ? bridgeMetadata!.Example : null;
-            return new JsonObject
+            var entry = new JsonObject
             {
                 ["name"] = name,
                 ["description"] = description,
-                ["inputSchema"] = inputSchema.DeepClone(),
+                [InputSchemaPropertyName] = inputSchema.DeepClone(),
                 ["example"] = GetToolExample(name, inputSchema),
                 ["bridgeCommand"] = bridgeCommandValue,
                 ["bridgeExample"] = bridgeExampleValue,
             };
+
+            if (!string.IsNullOrWhiteSpace(title))
+            {
+                entry[TitlePropertyName] = title;
+            }
+
+            if (annotations is not null && annotations.Count > 0)
+            {
+                entry[AnnotationsPropertyName] = annotations.DeepClone();
+            }
+
+            if (outputSchema is not null)
+            {
+                entry[OutputSchemaPropertyName] = outputSchema.DeepClone();
+            }
+
+            return entry;
         }
 
         private static JsonObject WrapToolResult(JsonObject payload, bool isError)
@@ -1665,6 +1831,7 @@ internal static partial class CliApp
                 if (error["details"] is JsonObject errorDetails)
                 {
                     payload["approvalChoice"] = errorDetails["approvalChoice"]?.DeepClone();
+                    payload["approvalOperation"] = errorDetails["operation"]?.DeepClone();
                     payload["approvalPromptShown"] = errorDetails["promptShown"]?.DeepClone();
                     payload["approvalPersistentSettingEnabled"] = errorDetails["persistentSettingEnabled"]?.DeepClone();
                     payload["approvalResultCode"] = errorDetails["resultCode"]?.DeepClone();
@@ -1702,6 +1869,107 @@ internal static partial class CliApp
             return $"Update Directory.Build.props, src/VsIdeBridge/source.extension.vsixmanifest, and installer/inno/vs-ide-bridge.iss to version {version}.";
         }
 
+        private static JsonObject GetPythonEnvironmentFromInfo(JsonNode? id, JsonObject environmentInfo)
+        {
+            if (environmentInfo["env"] is JsonObject environment)
+            {
+                return environment;
+            }
+
+            throw new McpRequestException(id, BridgeErrorCode, "Python environment metadata was missing from the bridge response.");
+        }
+
+        private static string BuildPythonInterpreterDisplayName(JsonObject environment)
+        {
+            var path = environment["path"]?.GetValue<string>() ?? "selected interpreter";
+            var kind = environment["kind"]?.GetValue<string>();
+            var version = environment["version"]?.GetValue<string>();
+
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(kind))
+            {
+                parts.Add(kind!);
+            }
+
+            if (!string.IsNullOrWhiteSpace(version))
+            {
+                parts.Add(version!);
+            }
+
+            return parts.Count == 0
+                ? path
+                : path + " (" + string.Join(", ", parts) + ")";
+        }
+
+        private static string BuildPythonExecutionApprovalSubject(string action, JsonObject environment, bool allowUnrestrictedExecution)
+        {
+            return action + " (" + (allowUnrestrictedExecution ? "unrestricted" : "restricted") + "): " + BuildPythonInterpreterDisplayName(environment);
+        }
+
+        private static string BuildPythonExecutionApprovalDetails(JsonObject environment, string workingDirectory, int timeoutMs, bool allowUnrestrictedExecution, string? extraDetails = null)
+        {
+            var detailBuilder = new StringBuilder();
+            detailBuilder.Append("executionMode=")
+                .Append(allowUnrestrictedExecution ? "unrestricted" : "restricted");
+            detailBuilder.Append(", cwd=").Append(workingDirectory);
+            detailBuilder.Append(", timeoutMs=").Append(timeoutMs);
+            detailBuilder.Append(", userOwnedEnvironment=")
+                .Append(!string.Equals(environment["kind"]?.GetValue<string>(), "managed", StringComparison.OrdinalIgnoreCase));
+
+            if (!allowUnrestrictedExecution)
+            {
+                detailBuilder.Append(", restrictions=file writes, deletes, process launch, network, temp files, and native imports blocked");
+            }
+
+            if (!string.IsNullOrWhiteSpace(extraDetails))
+            {
+                detailBuilder.Append(", ").Append(extraDetails);
+            }
+
+            return detailBuilder.ToString();
+        }
+
+        private static async Task<bool> IsBridgePythonUnrestrictedExecutionAllowedAsync(JsonNode? id, BridgeBinding bridgeBinding)
+        {
+            var response = await SendBridgeAsync(id, bridgeBinding, "ui-settings", string.Empty).ConfigureAwait(false);
+            if (!ResponseFormatter.IsSuccess(response) || response["Data"] is not JsonObject data)
+            {
+                return false;
+            }
+
+            return data["allowBridgePythonUnrestrictedExecution"] is JsonValue value &&
+                value.TryGetValue<bool>(out var enabled) &&
+                enabled;
+        }
+
+        private static string BuildPythonEnvironmentMutationApprovalSubject(string action, JsonObject environment, string? targetDescription = null)
+        {
+            return string.IsNullOrWhiteSpace(targetDescription)
+                ? action + ": " + BuildPythonInterpreterDisplayName(environment)
+                : action + ": " + targetDescription + " using " + BuildPythonInterpreterDisplayName(environment);
+        }
+
+        private static string BuildPythonEnvironmentMutationApprovalDetails(JsonObject environment, string? workingDirectory, int timeoutMs, string? extraDetails = null)
+        {
+            var detailBuilder = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(workingDirectory))
+            {
+                detailBuilder.Append("cwd=").Append(workingDirectory);
+                detailBuilder.Append(", ");
+            }
+
+            detailBuilder.Append("timeoutMs=").Append(timeoutMs);
+            detailBuilder.Append(", userOwnedEnvironment=")
+                .Append(!string.Equals(environment["kind"]?.GetValue<string>(), "managed", StringComparison.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrWhiteSpace(extraDetails))
+            {
+                detailBuilder.Append(", ").Append(extraDetails);
+            }
+
+            return detailBuilder.ToString();
+        }
+
         private static string GetToolExample(string name, JsonObject inputSchema)
         {
             var overrideExample = name switch
@@ -1711,21 +1979,72 @@ internal static partial class CliApp
                 "tool_help" => "{ \"name\": \"open_file\" }",
                 "open_solution" => "{ \"solution\": \"C:\\\\repo\\\\VsIdeBridge.sln\", \"wait_for_ready\": true }",
                 "create_solution" => "{ \"directory\": \"C:\\\\repo\\\\Scratch\", \"name\": \"ScratchApp\", \"wait_for_ready\": true }",
-                "list_projects" => "{}",
-                "query_project_items" => ProjectToolExample(SampleCliProjectName, "\"path\": \"src\\\\VsIdeBridgeCli\"", $"\"max\": {DefaultLargeMaxCount}"),
-                "query_project_properties" => ProjectToolExample(SampleCliProjectName, "\"names\": [\"TargetFramework\", \"AssemblyName\"]"),
-                "query_project_configurations" => ProjectToolExample(SampleCliProjectName),
-                "query_project_references" => ProjectToolExample(SampleCliTestProjectName, "\"declared_only\": true"),
-                "query_project_outputs" => ProjectToolExample(SampleCliProjectName, "\"configuration\": \"Release\"", "\"target_framework\": \"net8.0\""),
-                "add_project" => ProjectToolExample("C:\\\\repo\\\\MyLib\\\\MyLib.csproj", "\"solution_folder\": \"Libraries\""),
-                "remove_project" => ProjectToolExample("MyLib"),
+                FindTextToolName => "{ \"query\": \"Tool(\", \"path\": \"src\\\\VsIdeBridgeCli\", \"scope\": \"solution\" }",
+                FindTextBatchToolName => $"{{ \"queries\": [\"{ReadFileToolName}\", \"{ReadFileBatchToolName}\", \"{FindTextBatchToolName}\"], \"path\": \"src\\\\VsIdeBridgeCli\", \"scope\": \"solution\", \"max_queries_per_chunk\": 5 }}",
+                "python_list_envs" => "{}",
+                "python_env_info" => "{ \"path\": \"C:\\\\Python313\\\\python.exe\" }",
+                "python_set_active_env" => "{ \"path\": \"C:\\\\Python313\\\\python.exe\" }",
+                "python_list_packages" => "{ \"path\": \"C:\\\\Python313\\\\python.exe\" }",
+                "python_repl" => new JsonObject
+                {
+                    [CodeArgumentName] = "print(sum([1, 4]))",
+                }.ToJsonString(JsonOptions),
+                "python_run_file" => new JsonObject
+                {
+                    [FileArgumentName] = "scripts\\demo.py",
+                    ["args"] = new JsonArray("--flag"),
+                }.ToJsonString(JsonOptions),
+                "python_install_package" => new JsonObject
+                {
+                    [PackagesArgumentName] = new JsonArray("requests"),
+                }.ToJsonString(JsonOptions),
+                "python_remove_package" => new JsonObject
+                {
+                    [PackagesArgumentName] = new JsonArray("requests"),
+                }.ToJsonString(JsonOptions),
+                "python_create_env" => new JsonObject
+                {
+                    [PathArgumentName] = ".venv",
+                }.ToJsonString(JsonOptions),
+                ListProjectsToolName => "{}",
+                QueryProjectItemsToolName => ProjectToolExample(SampleCliProjectName, "\"path\": \"src\\\\VsIdeBridgeCli\"", $"\"max\": {DefaultLargeMaxCount}"),
+                QueryProjectPropertiesToolName => ProjectToolExample(SampleCliProjectName, "\"names\": [\"TargetFramework\", \"AssemblyName\"]"),
+                QueryProjectConfigurationsToolName => ProjectToolExample(SampleCliProjectName),
+                QueryProjectReferencesToolName => ProjectToolExample(SampleCliTestProjectName, "\"declared_only\": true"),
+                QueryProjectOutputsToolName => ProjectToolExample(SampleCliProjectName, "\"configuration\": \"Release\"", "\"target_framework\": \"net8.0\""),
+                AddProjectToolName => ProjectToolExample("C:\\\\repo\\\\MyLib\\\\MyLib.csproj", "\"solution_folder\": \"Libraries\""),
+                RemoveProjectToolName => ProjectToolExample("MyLib"),
                 "set_startup_project" => ProjectToolExample("VsIdeBridge"),
-                "add_file_to_project" => ProjectToolExample(SampleCliProjectName, "\"file\": \"src\\\\VsIdeBridgeCli\\\\Program.cs\""),
-                "remove_file_from_project" => ProjectToolExample(SampleCliProjectName, "\"file\": \"src\\\\VsIdeBridgeCli\\\\Program.cs\""),
+                AddFileToProjectToolName => ProjectToolExample(SampleCliProjectName, "\"file\": \"src\\\\VsIdeBridgeCli\\\\Program.cs\""),
+                RemoveFileFromProjectToolName => ProjectToolExample(SampleCliProjectName, "\"file\": \"src\\\\VsIdeBridgeCli\\\\Program.cs\""),
                 "open_file" => new JsonObject
                 {
                     [FileArgumentName] = SampleCliProgramPath,
                     [LineArgumentName] = 1,
+                }.ToJsonString(JsonOptions),
+                ReadFileToolName => new JsonObject
+                {
+                    [FileArgumentName] = SampleCliProgramPath,
+                    [LineArgumentName] = 1,
+                    [ContextBeforeArgumentName] = 0,
+                    [ContextAfterArgumentName] = DefaultReadFileExampleContextAfter,
+                }.ToJsonString(JsonOptions),
+                ReadFileBatchToolName => new JsonObject
+                {
+                    ["ranges"] = new JsonArray(
+                        new JsonObject
+                        {
+                            [FileArgumentName] = SampleCliProgramPath,
+                            [LineArgumentName] = 1,
+                            [ContextBeforeArgumentName] = 0,
+                            [ContextAfterArgumentName] = 12,
+                        },
+                        new JsonObject
+                        {
+                            [FileArgumentName] = SampleCliProjectPath,
+                            [StartLineArgumentName] = 1,
+                            [EndLineArgumentName] = DefaultReadFileBatchExampleEndLine,
+                        }),
                 }.ToJsonString(JsonOptions),
                 "find_files" => "{ \"query\": \"CMakeLists.txt\", \"include_non_project\": true }",
                 "errors" => "{ \"wait_for_intellisense\": true, \"quick\": false }",
@@ -1802,24 +2121,24 @@ internal static partial class CliApp
                 "warnings" => "warnings",
                 "list_tabs" => "list-tabs",
                 "open_file" => "open-document",
-                "find_files" => "find-files",
+                FindFilesToolName => "find-files",
                 "search_symbols" => "search-symbols",
-                "count_references" => "count-references",
+                CountReferencesToolName => "count-references",
                 "quick_info" => "quick-info",
                 "apply_diff" => "apply-diff",
                 "debug_threads" => "debug-threads",
                 "debug_stack" => "debug-stack",
                 "debug_locals" => "debug-locals",
                 "debug_modules" => "debug-modules",
-                "debug_watch" => "debug-watch",
+                DebugWatchToolName => "debug-watch",
                 "debug_exceptions" => "debug-exceptions",
                 "diagnostics_snapshot" => "diagnostics-snapshot",
                 "build_configurations" => "build-configurations",
                 "set_build_configuration" => "set-build-configuration",
-                "find_text" => "find-text",
-                "find_text_batch" => "find-text-batch",
-                "read_file" => "document-slice",
-                "read_file_batch" => "document-slices",
+                FindTextToolName => "find-text",
+                FindTextBatchToolName => "find-text-batch",
+                ReadFileToolName => "document-slice",
+                ReadFileBatchToolName => "document-slices",
                 "find_references" => "find-references",
                 "peek_definition" => "quick-info",
                 "file_outline" => "file-outline",
@@ -1840,17 +2159,17 @@ internal static partial class CliApp
                 "goto_implementation" => "goto-implementation",
                 "call_hierarchy" => "call-hierarchy",
                 "search_solutions" => "search-solutions",
-                "list_projects" => "list-projects",
-                "query_project_items" => "query-project-items",
-                "query_project_properties" => "query-project-properties",
-                "query_project_configurations" => "query-project-configurations",
-                "query_project_references" => "query-project-references",
-                "query_project_outputs" => "query-project-outputs",
-                "add_project" => "add-project",
-                "remove_project" => "remove-project",
+                ListProjectsToolName => "list-projects",
+                QueryProjectItemsToolName => "query-project-items",
+                QueryProjectPropertiesToolName => "query-project-properties",
+                QueryProjectConfigurationsToolName => "query-project-configurations",
+                QueryProjectReferencesToolName => "query-project-references",
+                QueryProjectOutputsToolName => "query-project-outputs",
+                AddProjectToolName => "add-project",
+                RemoveProjectToolName => "remove-project",
                 "set_startup_project" => "set-startup-project",
-                "add_file_to_project" => "add-file-to-project",
-                "remove_file_from_project" => "remove-file-from-project",
+                AddFileToProjectToolName => "add-file-to-project",
+                RemoveFileFromProjectToolName => "remove-file-from-project",
                 "set_breakpoint" => "set-breakpoint",
                 "list_breakpoints" => "list-breakpoints",
                 "remove_breakpoint" => "remove-breakpoint",
@@ -2474,11 +2793,11 @@ internal static partial class CliApp
             return BuildArgs(
             [
                 (FileArgumentName, GetOptionalStringArgument(args, FileArgumentName)),
-                ("start-line", GetOptionalArgumentText(args, "start_line")),
+                ("start-line", GetOptionalArgumentText(args, StartLineArgumentName)),
                 ("end-line", GetOptionalArgumentText(args, "end_line")),
                 (LineArgumentName, GetOptionalArgumentText(args, LineArgumentName)),
-                ("context-before", GetOptionalArgumentText(args, "context_before")),
-                ("context-after", GetOptionalArgumentText(args, "context_after")),
+                ("context-before", GetOptionalArgumentText(args, ContextBeforeArgumentName)),
+                ("context-after", GetOptionalArgumentText(args, ContextAfterArgumentName)),
                 .. BuildBooleanArgs(args, ("reveal-in-editor", "reveal_in_editor", true, true)),
             ]);
         }
@@ -2509,10 +2828,10 @@ internal static partial class CliApp
                 var normalizedRange = new JsonObject();
                 AddOptionalProperty(normalizedRange, FileArgumentName, GetOptionalNodeClone(range, FileArgumentName));
                 AddOptionalProperty(normalizedRange, LineArgumentName, GetOptionalNodeClone(range, LineArgumentName));
-                AddOptionalProperty(normalizedRange, "startLine", GetOptionalNodeClone(range, "start_line"));
+                AddOptionalProperty(normalizedRange, "startLine", GetOptionalNodeClone(range, StartLineArgumentName));
                 AddOptionalProperty(normalizedRange, "endLine", GetOptionalNodeClone(range, "end_line"));
-                AddOptionalProperty(normalizedRange, "contextBefore", GetOptionalNodeClone(range, "context_before"));
-                AddOptionalProperty(normalizedRange, "contextAfter", GetOptionalNodeClone(range, "context_after"));
+                AddOptionalProperty(normalizedRange, "contextBefore", GetOptionalNodeClone(range, ContextBeforeArgumentName));
+                AddOptionalProperty(normalizedRange, "contextAfter", GetOptionalNodeClone(range, ContextAfterArgumentName));
                 normalized.Add(normalizedRange);
             }
 
@@ -2560,6 +2879,8 @@ internal static partial class CliApp
 
         private static (string Name, JsonObject Schema, bool Required) OptionalStringProperty(string name, string description) => (name, StringSchema(description), false);
 
+        private static (string Name, JsonObject Schema, bool Required) RequiredBooleanProperty(string name, string description) => (name, BooleanSchema(description), true);
+
         private static (string Name, JsonObject Schema, bool Required) RequiredIntegerProperty(string name, string description) => (name, IntegerSchema(description), true);
 
         private static (string Name, JsonObject Schema, bool Required) RequiredStringArrayProperty(string name, string description) => (name, ArrayOfStringsSchema(description), true);
@@ -2572,6 +2893,159 @@ internal static partial class CliApp
                 RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription),
                 RequiredIntegerProperty(LineArgumentName, OneBasedLineNumberDescription),
                 RequiredIntegerProperty(ColumnArgumentName, "1-based column number."));
+        }
+
+        private static JsonObject ReadOnlyToolAnnotations(bool idempotentHint = true) =>
+            ToolAnnotations(readOnlyHint: true, idempotentHint: idempotentHint);
+
+        private static JsonObject DestructiveToolAnnotations(bool idempotentHint = false) =>
+            ToolAnnotations(destructiveHint: true, idempotentHint: idempotentHint);
+
+        private static JsonObject? InferStandardToolAnnotations(string toolName)
+        {
+            return toolName switch
+            {
+                ApplyDiffToolName or
+                "shell_exec" or
+                "set_version" or
+                "format_document" or
+                "save_document" or
+                "git_add" or
+                "git_commit" or
+                "git_commit_amend" or
+                "git_create_branch" or
+                "git_checkout" or
+                "git_pull" or
+                "git_push" or
+                "git_restore" or
+                "git_reset" or
+                "git_stash_pop" or
+                "git_stash_push" or
+                "nuget_add_package" or
+                "nuget_remove_package" or
+                CondaInstallToolName or
+                CondaRemoveToolName or
+                "python_install_package" or
+                "python_remove_package" or
+                "python_create_env" or
+                AddProjectToolName or
+                RemoveProjectToolName or
+                AddFileToProjectToolName or
+                RemoveFileFromProjectToolName or
+                "github_issue_close" => DestructiveToolAnnotations(),
+                "state" or
+                UiSettingsToolName or
+                "ready" or
+                "bridge_health" or
+                "list_instances" or
+                "help" or
+                ToolHelpToolName or
+                ListProjectsToolName or
+                "list_documents" or
+                "list_tabs" or
+                "list_windows" or
+                "list_breakpoints" or
+                "errors" or
+                WarningsToolName or
+                "diagnostics_snapshot" or
+                "build_configurations" or
+                "git_status" or
+                "git_current_branch" or
+                "git_remote_list" or
+                "git_tag_list" or
+                "git_stash_list" or
+                "git_branch_list" or
+                "git_log" or
+                "git_diff_staged" or
+                "git_diff_unstaged" or
+                "search_solutions" or
+                "search_symbols" or
+                FindFilesToolName or
+                FindTextToolName or
+                FindTextBatchToolName or
+                ReadFileToolName or
+                ReadFileBatchToolName or
+                CountReferencesToolName or
+                "find_references" or
+                "quick_info" or
+                "peek_definition" or
+                "goto_definition" or
+                "goto_implementation" or
+                "call_hierarchy" or
+                "file_outline" or
+                "debug_threads" or
+                "debug_stack" or
+                "debug_locals" or
+                "debug_modules" or
+                DebugWatchToolName or
+                "debug_exceptions" or
+                QueryProjectItemsToolName or
+                QueryProjectPropertiesToolName or
+                QueryProjectConfigurationsToolName or
+                QueryProjectReferencesToolName or
+                QueryProjectOutputsToolName or
+                "python_list_envs" or
+                "python_env_info" or
+                "python_list_packages" => ReadOnlyToolAnnotations(),
+                _ => null,
+            };
+        }
+
+        private static string BuildDefaultToolTitle(string toolName)
+        {
+            if (string.IsNullOrWhiteSpace(toolName))
+            {
+                return string.Empty;
+            }
+
+            return string.Join(" ", toolName
+                .Split('_', StringSplitOptions.RemoveEmptyEntries)
+                .Select(HumanizeToolTitleToken));
+        }
+
+        private static string HumanizeToolTitleToken(string token)
+        {
+            return token switch
+            {
+                "ui" => "UI",
+                "vs" => "VS",
+                "vsix" => "VSIX",
+                "mcp" => "MCP",
+                "git" => "Git",
+                "nuget" => "NuGet",
+                "conda" => "Conda",
+                "repl" => "REPL",
+                "env" => "Environment",
+                "envs" => "Environments",
+                "id" => "ID",
+                "ids" => "IDs",
+                "uri" => "URI",
+                "uris" => "URIs",
+                _ when token.Length <= TwoValue => token.ToUpperInvariant(),
+                _ => char.ToUpperInvariant(token[0]) + token[1..],
+            };
+        }
+
+        private static JsonObject ToolAnnotations(bool? readOnlyHint = null, bool? destructiveHint = null, bool? idempotentHint = null)
+        {
+            var annotations = new JsonObject();
+
+            if (readOnlyHint.HasValue)
+            {
+                annotations[ReadOnlyHintPropertyName] = readOnlyHint.Value;
+            }
+
+            if (destructiveHint.HasValue)
+            {
+                annotations[DestructiveHintPropertyName] = destructiveHint.Value;
+            }
+
+            if (idempotentHint.HasValue)
+            {
+                annotations[IdempotentHintPropertyName] = idempotentHint.Value;
+            }
+
+            return annotations;
         }
 
         private static string? GetCsv(JsonArray? values)
@@ -2733,13 +3207,192 @@ internal static partial class CliApp
             var workingDirectory = await ResolveSolutionWorkingDirectoryAsync(id, bridgeBinding).ConfigureAwait(false);
             var condaArgs = toolName switch
             {
-                "conda_install" => BuildCondaInstallArgs(args, id),
-                "conda_remove" => BuildCondaRemoveArgs(args, id),
+                CondaInstallToolName => BuildCondaInstallArgs(args, id),
+                CondaRemoveToolName => BuildCondaRemoveArgs(args, id),
                 _ => throw new McpRequestException(id, JsonRpcInvalidParamsCode, FormatUnknownMcpToolMessage(toolName)),
             };
             var condaResult = await RunProcessAsync(condaExecutable, condaArgs, workingDirectory).ConfigureAwait(false);
 
             return WrapToolResult(condaResult, !(condaResult["success"]?.GetValue<bool>() ?? false));
+        }
+
+        private static async Task<JsonNode> CallPythonToolAsync(JsonNode? id, string toolName, JsonObject? args, BridgeBinding bridgeBinding)
+        {
+            var timeoutMs = GetIntOrDefault(args, TimeoutMillisecondsArgumentName, DefaultPythonToolTimeoutMilliseconds);
+            JsonObject result;
+
+            switch (toolName)
+            {
+                case "python_list_envs":
+                    result = await PythonRuntimeService.ListEnvironmentsAsync().ConfigureAwait(false);
+                    break;
+                case "python_env_info":
+                    result = await PythonRuntimeService.GetEnvironmentInfoAsync(GetOptionalStringArgument(args, PathArgumentName)).ConfigureAwait(false);
+                    break;
+                case "python_set_active_env":
+                    result = await PythonRuntimeService.SetActiveEnvironmentAsync(GetRequiredString(args, id, PathArgumentName)).ConfigureAwait(false);
+                    break;
+                case "python_list_packages":
+                    result = await PythonRuntimeService.ListPackagesAsync(GetOptionalStringArgument(args, PathArgumentName)).ConfigureAwait(false);
+                    break;
+                case "python_repl":
+                {
+                    var interpreterPath = GetOptionalStringArgument(args, PathArgumentName);
+                    var workingDirectory = await ResolvePythonWorkingDirectoryAsync(id, args, bridgeBinding).ConfigureAwait(false);
+                    var environmentInfo = await PythonRuntimeService.GetEnvironmentInfoAsync(interpreterPath).ConfigureAwait(false);
+                    var environment = GetPythonEnvironmentFromInfo(id, environmentInfo);
+                    var allowUnrestrictedExecution = await IsBridgePythonUnrestrictedExecutionAllowedAsync(id, bridgeBinding).ConfigureAwait(false);
+                    var approvalResponse = await RequestBridgeApprovalAsync(
+                        id,
+                        bridgeBinding,
+                        operation: PythonExecutionApprovalOperationName,
+                        subject: BuildPythonExecutionApprovalSubject("Run Python code", environment, allowUnrestrictedExecution),
+                        details: BuildPythonExecutionApprovalDetails(environment, workingDirectory, timeoutMs, allowUnrestrictedExecution)).ConfigureAwait(false);
+                    if (!ResponseFormatter.IsSuccess(approvalResponse))
+                    {
+                        return WrapToolResult(BuildApprovalFailurePayload(approvalResponse), isError: true);
+                    }
+
+                    result = await PythonRuntimeService.ExecuteSnippetAsync(
+                        GetRequiredString(args, id, CodeArgumentName),
+                        interpreterPath,
+                        workingDirectory,
+                        timeoutMs,
+                        approved: true,
+                        allowUnrestrictedExecution).ConfigureAwait(false);
+                    AttachApprovalMetadata(result, approvalResponse);
+                    break;
+                }
+                case "python_run_file":
+                {
+                    var interpreterPath = GetOptionalStringArgument(args, PathArgumentName);
+                    var workingDirectory = await ResolvePythonWorkingDirectoryAsync(id, args, bridgeBinding).ConfigureAwait(false);
+                    var environmentInfo = await PythonRuntimeService.GetEnvironmentInfoAsync(interpreterPath).ConfigureAwait(false);
+                    var environment = GetPythonEnvironmentFromInfo(id, environmentInfo);
+                    var filePath = GetRequiredString(args, id, FileArgumentName);
+                    var allowUnrestrictedExecution = await IsBridgePythonUnrestrictedExecutionAllowedAsync(id, bridgeBinding).ConfigureAwait(false);
+                    var approvalResponse = await RequestBridgeApprovalAsync(
+                        id,
+                        bridgeBinding,
+                        operation: PythonExecutionApprovalOperationName,
+                        subject: BuildPythonExecutionApprovalSubject("Run Python file", environment, allowUnrestrictedExecution),
+                        details: BuildPythonExecutionApprovalDetails(environment, workingDirectory, timeoutMs, allowUnrestrictedExecution, "file=" + filePath)).ConfigureAwait(false);
+                    if (!ResponseFormatter.IsSuccess(approvalResponse))
+                    {
+                        return WrapToolResult(BuildApprovalFailurePayload(approvalResponse), isError: true);
+                    }
+
+                    result = await PythonRuntimeService.RunFileAsync(
+                        filePath,
+                        GetOptionalStringArray(args, "args"),
+                        interpreterPath,
+                        workingDirectory,
+                        timeoutMs,
+                        approved: true,
+                        allowUnrestrictedExecution).ConfigureAwait(false);
+                    AttachApprovalMetadata(result, approvalResponse);
+                    break;
+                }
+                case "python_install_package":
+                {
+                    var packages = GetRequiredStringArray(args, id, PackagesArgumentName);
+                    var interpreterPath = GetOptionalStringArgument(args, PathArgumentName);
+                    var environmentInfo = await PythonRuntimeService.GetEnvironmentInfoAsync(interpreterPath).ConfigureAwait(false);
+                    var environment = GetPythonEnvironmentFromInfo(id, environmentInfo);
+                    var approvalResponse = await RequestBridgeApprovalAsync(
+                        id,
+                        bridgeBinding,
+                        operation: PythonEnvironmentMutationApprovalOperationName,
+                        subject: BuildPythonEnvironmentMutationApprovalSubject("Install Python packages", environment, string.Join(", ", packages)),
+                        details: BuildPythonEnvironmentMutationApprovalDetails(environment, null, timeoutMs, "packageCount=" + packages.Count)).ConfigureAwait(false);
+                    if (!ResponseFormatter.IsSuccess(approvalResponse))
+                    {
+                        return WrapToolResult(BuildApprovalFailurePayload(approvalResponse), isError: true);
+                    }
+
+                    result = await PythonRuntimeService.InstallPackagesAsync(
+                        packages,
+                        interpreterPath,
+                        timeoutMs,
+                        approved: true).ConfigureAwait(false);
+                    AttachApprovalMetadata(result, approvalResponse);
+                    break;
+                }
+                case "python_remove_package":
+                {
+                    var packages = GetRequiredStringArray(args, id, PackagesArgumentName);
+                    var interpreterPath = GetOptionalStringArgument(args, PathArgumentName);
+                    var environmentInfo = await PythonRuntimeService.GetEnvironmentInfoAsync(interpreterPath).ConfigureAwait(false);
+                    var environment = GetPythonEnvironmentFromInfo(id, environmentInfo);
+                    var approvalResponse = await RequestBridgeApprovalAsync(
+                        id,
+                        bridgeBinding,
+                        operation: PythonEnvironmentMutationApprovalOperationName,
+                        subject: BuildPythonEnvironmentMutationApprovalSubject("Remove Python packages", environment, string.Join(", ", packages)),
+                        details: BuildPythonEnvironmentMutationApprovalDetails(environment, null, timeoutMs, "packageCount=" + packages.Count)).ConfigureAwait(false);
+                    if (!ResponseFormatter.IsSuccess(approvalResponse))
+                    {
+                        return WrapToolResult(BuildApprovalFailurePayload(approvalResponse), isError: true);
+                    }
+
+                    result = await PythonRuntimeService.RemovePackagesAsync(
+                        packages,
+                        interpreterPath,
+                        timeoutMs,
+                        approved: true).ConfigureAwait(false);
+                    AttachApprovalMetadata(result, approvalResponse);
+                    break;
+                }
+                case "python_create_env":
+                {
+                    var targetPath = GetRequiredString(args, id, PathArgumentName);
+                    var baseInterpreterPath = GetOptionalStringArgument(args, BasePathArgumentName);
+                    var workingDirectory = await ResolvePythonWorkingDirectoryAsync(id, args, bridgeBinding).ConfigureAwait(false);
+                    var environmentInfo = await PythonRuntimeService.GetEnvironmentInfoAsync(baseInterpreterPath).ConfigureAwait(false);
+                    var environment = GetPythonEnvironmentFromInfo(id, environmentInfo);
+                    var approvalResponse = await RequestBridgeApprovalAsync(
+                        id,
+                        bridgeBinding,
+                        operation: PythonEnvironmentMutationApprovalOperationName,
+                        subject: BuildPythonEnvironmentMutationApprovalSubject("Create Python environment", environment, targetPath),
+                        details: BuildPythonEnvironmentMutationApprovalDetails(environment, workingDirectory, timeoutMs, "targetPath=" + targetPath)).ConfigureAwait(false);
+                    if (!ResponseFormatter.IsSuccess(approvalResponse))
+                    {
+                        return WrapToolResult(BuildApprovalFailurePayload(approvalResponse), isError: true);
+                    }
+
+                    result = await PythonRuntimeService.CreateEnvironmentAsync(
+                        targetPath,
+                        baseInterpreterPath,
+                        workingDirectory,
+                        timeoutMs,
+                        approved: true).ConfigureAwait(false);
+                    AttachApprovalMetadata(result, approvalResponse);
+                    break;
+                }
+                default:
+                    throw new McpRequestException(id, JsonRpcInvalidParamsCode, FormatUnknownMcpToolMessage(toolName));
+            }
+
+            return WrapToolResult(result, !(result["success"]?.GetValue<bool>() ?? false));
+        }
+
+        private static async Task<string> ResolvePythonWorkingDirectoryAsync(JsonNode? id, JsonObject? args, BridgeBinding bridgeBinding)
+        {
+            var requestedWorkingDirectory = GetOptionalStringArgument(args, "cwd");
+            if (!string.IsNullOrWhiteSpace(requestedWorkingDirectory))
+            {
+                return Path.GetFullPath(Environment.ExpandEnvironmentVariables(requestedWorkingDirectory));
+            }
+
+            try
+            {
+                return await ResolveSolutionWorkingDirectoryAsync(id, bridgeBinding).ConfigureAwait(false);
+            }
+            catch (McpRequestException)
+            {
+                return Directory.GetCurrentDirectory();
+            }
         }
 
         private static async Task<JsonNode> CallShellExecToolAsync(JsonNode? id, JsonObject? args, BridgeBinding bridgeBinding)
@@ -3084,7 +3737,7 @@ internal static partial class CliApp
 
         private static string BuildCondaInstallArgs(JsonObject? args, JsonNode? id)
         {
-            var packages = GetRequiredStringArray(args, id, "packages");
+            var packages = GetRequiredStringArray(args, id, PackagesArgumentName);
             var channels = GetOptionalStringArray(args, "channels");
             var environmentName = args?["name"]?.GetValue<string>();
             var environmentPrefix = args?["prefix"]?.GetValue<string>();
@@ -3092,7 +3745,7 @@ internal static partial class CliApp
             var autoYes = GetBoolean(args, "yes", true);
 
             var segments = new List<string> { "install" };
-            AppendCondaEnvironmentSelector(segments, environmentName, environmentPrefix, id, "conda_install");
+            AppendCondaEnvironmentSelector(segments, environmentName, environmentPrefix, id, CondaInstallToolName);
 
             foreach (var channel in channels)
             {
@@ -3120,14 +3773,14 @@ internal static partial class CliApp
 
         private static string BuildCondaRemoveArgs(JsonObject? args, JsonNode? id)
         {
-            var packages = GetRequiredStringArray(args, id, "packages");
+            var packages = GetRequiredStringArray(args, id, PackagesArgumentName);
             var environmentName = args?["name"]?.GetValue<string>();
             var environmentPrefix = args?["prefix"]?.GetValue<string>();
             var dryRun = GetBoolean(args, "dry_run", false);
             var autoYes = GetBoolean(args, "yes", true);
 
             var segments = new List<string> { "remove" };
-            AppendCondaEnvironmentSelector(segments, environmentName, environmentPrefix, id, "conda_remove");
+            AppendCondaEnvironmentSelector(segments, environmentName, environmentPrefix, id, CondaRemoveToolName);
 
             foreach (var package in packages)
             {
@@ -3751,7 +4404,7 @@ internal static partial class CliApp
 
             var lengthLine = header.Split('\n').FirstOrDefault(line => line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase))
                 ?? throw new McpRequestException(null, JsonRpcInvalidRequestCode, "MCP request missing Content-Length header.");
-            if (!int.TryParse(lengthLine.Split(':', 2)[1].Trim(), out var length) || length < 0)
+            if (!int.TryParse(lengthLine.Split(':', TwoValue)[1].Trim(), out var length) || length < 0)
             {
                 throw new McpRequestException(null, JsonRpcInvalidRequestCode, "MCP request has invalid Content-Length.");
             }
@@ -3881,7 +4534,7 @@ internal static partial class CliApp
                 }
 
                 var arr = lastFour.ToArray();
-                if (arr.Length >= 2 && arr[^1] == (byte)'\n' && arr[^2] == (byte)'\n'
+                if (arr.Length >= TwoValue && arr[^1] == (byte)'\n' && arr[^TwoValue] == (byte)'\n'
                     && !(arr.Length >= HeaderTerminatorLength && arr[^HeaderTerminatorLength] == (byte)'\r'))
                 {
                     McpTrace($"ReadHeaderAsync: got LF-only header after {bytes.Count} bytes");

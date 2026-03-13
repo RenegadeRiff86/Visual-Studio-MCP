@@ -18,6 +18,7 @@ public sealed class McpToolHelpTests
     private const string WaitForInstanceToolName = "wait_for_instance";
     private const string WarningsToolName = "warnings";
     private const string SearchSymbolsToolName = "search_symbols";
+    private const string FindTextToolName = "find_text";
     private const string FindTextBatchToolName = "find_text_batch";
     private const string ReadFileBatchToolName = "read_file_batch";
     private const string ExecuteCommandToolName = "execute_command";
@@ -30,6 +31,23 @@ public sealed class McpToolHelpTests
     private const string ShellExecToolName = "shell_exec";
     private const string SetVersionToolName = "set_version";
     private const string UiSettingsToolName = "ui_settings";
+    private const string PythonListEnvsToolName = "python_list_envs";
+    private const string PythonEnvInfoToolName = "python_env_info";
+    private const string PythonSetActiveEnvToolName = "python_set_active_env";
+    private const string PythonListPackagesToolName = "python_list_packages";
+    private const string PythonReplToolName = "python_repl";
+    private const string PythonRunFileToolName = "python_run_file";
+    private const string PythonInstallPackageToolName = "python_install_package";
+    private const string PythonRemovePackageToolName = "python_remove_package";
+    private const string PythonCreateEnvToolName = "python_create_env";
+    private const string ApprovedArgumentLiteral = "approved";
+    private const string PersistApprovalArgumentLiteral = "persist_approval";
+    private const string AnnotationsPropertyName = "annotations";
+    private const string DescriptionPropertyName = "description";
+    private const string DestructiveHintPropertyName = "destructiveHint";
+    private const string ReadOnlyHintPropertyName = "readOnlyHint";
+    private const string TimeoutMillisecondsArgumentName = "timeout_ms";
+    private const string TitlePropertyName = "title";
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -60,9 +78,11 @@ public sealed class McpToolHelpTests
             var description = item.GetProperty("description").GetString();
             var inputSchema = item.GetProperty("inputSchema");
             var example = item.GetProperty("example").GetString();
+            var title = item.GetProperty(TitlePropertyName).GetString();
 
             Assert.False(string.IsNullOrWhiteSpace(name));
             Assert.False(string.IsNullOrWhiteSpace(description));
+            Assert.False(string.IsNullOrWhiteSpace(title));
             Assert.Equal("object", inputSchema.GetProperty("type").GetString());
             Assert.False(string.IsNullOrWhiteSpace(example));
 
@@ -117,6 +137,15 @@ public sealed class McpToolHelpTests
             QueryProjectOutputsToolName,
             FindTextBatchToolName,
             ReadFileBatchToolName,
+            PythonListEnvsToolName,
+            PythonEnvInfoToolName,
+            PythonSetActiveEnvToolName,
+            PythonListPackagesToolName,
+            PythonReplToolName,
+            PythonRunFileToolName,
+            PythonInstallPackageToolName,
+            PythonRemovePackageToolName,
+            PythonCreateEnvToolName,
         ];
 
         foreach (var tool in requiredTools)
@@ -128,12 +157,12 @@ public sealed class McpToolHelpTests
         AssertContainsSchemaProperty(toolMap["errors"], "quick");
         AssertContainsSchemaProperty(toolMap["errors"], "severity");
         AssertContainsSchemaProperty(toolMap["errors"], "group_by");
-        AssertContainsSchemaProperty(toolMap["errors"], "timeout_ms");
+        AssertContainsSchemaProperty(toolMap["errors"], TimeoutMillisecondsArgumentName);
         AssertContainsSchemaProperty(toolMap[WarningsToolName], "wait_for_intellisense");
         AssertContainsSchemaProperty(toolMap[WarningsToolName], "quick");
         AssertContainsSchemaProperty(toolMap[WarningsToolName], "severity");
         AssertContainsSchemaProperty(toolMap[WarningsToolName], "group_by");
-        AssertContainsSchemaProperty(toolMap[WarningsToolName], "timeout_ms");
+        AssertContainsSchemaProperty(toolMap[WarningsToolName], TimeoutMillisecondsArgumentName);
         AssertContainsSchemaProperty(toolMap["build"], "platform");
         AssertContainsSchemaProperty(toolMap["build"], "wait_for_intellisense");
         AssertContainsSchemaProperty(toolMap["build"], "require_clean_diagnostics");
@@ -165,9 +194,9 @@ public sealed class McpToolHelpTests
         AssertContainsSchemaProperty(toolMap[FindFilesToolName], "extensions");
         AssertContainsSchemaProperty(toolMap[FindFilesToolName], "max_results");
         AssertContainsSchemaProperty(toolMap[FindFilesToolName], "include_non_project");
-        AssertContainsSchemaProperty(toolMap["find_text"], "project");
-        AssertContainsSchemaProperty(toolMap["find_text"], "results_window");
-        AssertContainsSchemaProperty(toolMap["find_text"], "regex");
+        AssertContainsSchemaProperty(toolMap[FindTextToolName], "project");
+        AssertContainsSchemaProperty(toolMap[FindTextToolName], "results_window");
+        AssertContainsSchemaProperty(toolMap[FindTextToolName], "regex");
         AssertContainsSchemaProperty(toolMap[FindTextBatchToolName], "queries");
         AssertContainsSchemaProperty(toolMap[FindTextBatchToolName], "results_window");
         AssertContainsSchemaProperty(toolMap[FindTextBatchToolName], "max_queries_per_chunk");
@@ -199,12 +228,59 @@ public sealed class McpToolHelpTests
         AssertContainsSchemaProperty(toolMap[CondaInstallToolName], "yes");
         AssertContainsSchemaProperty(toolMap["conda_remove"], "packages");
         AssertContainsSchemaProperty(toolMap["conda_remove"], "yes");
+        AssertContainsSchemaProperty(toolMap[PythonEnvInfoToolName], "path");
+        AssertContainsSchemaProperty(toolMap[PythonSetActiveEnvToolName], "path");
+        AssertContainsSchemaProperty(toolMap[PythonListPackagesToolName], "path");
+        AssertContainsSchemaProperty(toolMap[PythonReplToolName], "code");
+        AssertDoesNotContainSchemaProperty(toolMap[PythonReplToolName], ApprovedArgumentLiteral);
+        AssertDoesNotContainSchemaProperty(toolMap[PythonReplToolName], PersistApprovalArgumentLiteral);
+        AssertContainsSchemaProperty(toolMap[PythonReplToolName], "cwd");
+        AssertContainsSchemaProperty(toolMap[PythonReplToolName], TimeoutMillisecondsArgumentName);
+        AssertContainsSchemaProperty(toolMap[PythonRunFileToolName], "file");
+        AssertContainsSchemaProperty(toolMap[PythonRunFileToolName], "args");
+        AssertDoesNotContainSchemaProperty(toolMap[PythonRunFileToolName], ApprovedArgumentLiteral);
+        AssertDoesNotContainSchemaProperty(toolMap[PythonRunFileToolName], PersistApprovalArgumentLiteral);
+        AssertContainsSchemaProperty(toolMap[PythonInstallPackageToolName], "packages");
+        AssertDoesNotContainSchemaProperty(toolMap[PythonInstallPackageToolName], ApprovedArgumentLiteral);
+        AssertDoesNotContainSchemaProperty(toolMap[PythonInstallPackageToolName], PersistApprovalArgumentLiteral);
+        AssertContainsSchemaProperty(toolMap[PythonRemovePackageToolName], "packages");
+        AssertDoesNotContainSchemaProperty(toolMap[PythonRemovePackageToolName], ApprovedArgumentLiteral);
+        AssertContainsSchemaProperty(toolMap[PythonCreateEnvToolName], "path");
+        AssertContainsSchemaProperty(toolMap[PythonCreateEnvToolName], "base_path");
+        AssertDoesNotContainSchemaProperty(toolMap[PythonCreateEnvToolName], ApprovedArgumentLiteral);
+        AssertDoesNotContainSchemaProperty(toolMap[PythonCreateEnvToolName], PersistApprovalArgumentLiteral);
+        Assert.Contains("Visual Studio approval popup", toolMap[PythonReplToolName].GetProperty(DescriptionPropertyName).GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Visual Studio approval popup", toolMap[PythonInstallPackageToolName].GetProperty(DescriptionPropertyName).GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("restricted scratch mode", toolMap[PythonReplToolName].GetProperty(DescriptionPropertyName).GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Allow Bridge Python Unrestricted Execution", toolMap[PythonReplToolName].GetProperty(DescriptionPropertyName).GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Allow Bridge Python Execution", toolMap[PythonReplToolName].GetProperty(DescriptionPropertyName).GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Allow Bridge Python Environment Mutation", toolMap[PythonInstallPackageToolName].GetProperty(DescriptionPropertyName).GetString(), StringComparison.OrdinalIgnoreCase);
         AssertContainsSchemaProperty(toolMap[ShellExecToolName], "exe");
         AssertContainsSchemaProperty(toolMap[ShellExecToolName], "cwd");
-        AssertContainsSchemaProperty(toolMap[ShellExecToolName], "timeout_ms");
+        AssertContainsSchemaProperty(toolMap[ShellExecToolName], TimeoutMillisecondsArgumentName);
         AssertContainsSchemaProperty(toolMap[SetVersionToolName], "version");
-        Assert.Contains("approval", toolMap[ShellExecToolName].GetProperty("description").GetString(), StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("approval", toolMap[SetVersionToolName].GetProperty("description").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("approval", toolMap[ShellExecToolName].GetProperty(DescriptionPropertyName).GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("approval", toolMap[SetVersionToolName].GetProperty(DescriptionPropertyName).GetString(), StringComparison.OrdinalIgnoreCase);
+        AssertToolTitle(toolMap[FindTextToolName], "Text Search");
+        AssertToolTitle(toolMap[FindTextBatchToolName], "Batched Text Search");
+        AssertToolTitle(toolMap["read_file"], "Read File Slice");
+        AssertToolTitle(toolMap[ReadFileBatchToolName], "Read File Slices");
+        AssertToolTitle(toolMap["errors"], "Error List Diagnostics");
+        AssertToolTitle(toolMap[WarningsToolName], "Warning List Diagnostics");
+        AssertToolTitle(toolMap["apply_diff"], "Apply Editor Patch");
+        AssertToolTitle(toolMap[UiSettingsToolName], "UI Settings");
+        AssertToolTitle(toolMap[PythonListEnvsToolName], "Python List Environments");
+        AssertToolTitle(toolMap[ShellExecToolName], "Shell Exec");
+        AssertReadOnlyHint(toolMap[FindTextToolName]);
+        AssertReadOnlyHint(toolMap[FindTextBatchToolName]);
+        AssertReadOnlyHint(toolMap["read_file"]);
+        AssertReadOnlyHint(toolMap[ReadFileBatchToolName]);
+        AssertReadOnlyHint(toolMap["errors"]);
+        AssertReadOnlyHint(toolMap[WarningsToolName]);
+        AssertReadOnlyHint(toolMap[UiSettingsToolName]);
+        AssertReadOnlyHint(toolMap[PythonListEnvsToolName]);
+        AssertDestructiveHint(toolMap["apply_diff"]);
+        AssertDestructiveHint(toolMap[ShellExecToolName]);
 
         AssertBridgeMetadata(toolMap["state"], "state");
         AssertBridgeMetadata(toolMap[UiSettingsToolName], "ui-settings");
@@ -394,6 +470,32 @@ public sealed class McpToolHelpTests
     {
         var properties = tool.GetProperty("inputSchema").GetProperty("properties");
         Assert.True(properties.TryGetProperty(propertyName, out _), $"Expected schema property '{propertyName}'.");
+    }
+
+    private static void AssertDoesNotContainSchemaProperty(JsonElement tool, string propertyName)
+    {
+        var properties = tool.GetProperty("inputSchema").GetProperty("properties");
+        Assert.False(properties.TryGetProperty(propertyName, out _), $"Did not expect schema property '{propertyName}'.");
+    }
+
+    private static void AssertToolTitle(JsonElement tool, string expectedTitle)
+    {
+        Assert.True(tool.TryGetProperty(TitlePropertyName, out var title));
+        Assert.Equal(expectedTitle, title.GetString());
+    }
+
+    private static void AssertReadOnlyHint(JsonElement tool)
+    {
+        Assert.True(tool.TryGetProperty(AnnotationsPropertyName, out var annotations));
+        Assert.True(annotations.TryGetProperty(ReadOnlyHintPropertyName, out var readOnlyHint));
+        Assert.True(readOnlyHint.GetBoolean());
+    }
+
+    private static void AssertDestructiveHint(JsonElement tool)
+    {
+        Assert.True(tool.TryGetProperty(AnnotationsPropertyName, out var annotations));
+        Assert.True(annotations.TryGetProperty(DestructiveHintPropertyName, out var destructiveHint));
+        Assert.True(destructiveHint.GetBoolean());
     }
 
     private static void AssertBridgeMetadata(JsonElement tool, string expectedCommand)

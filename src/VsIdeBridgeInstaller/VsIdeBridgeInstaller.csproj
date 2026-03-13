@@ -8,5 +8,20 @@
     <AssemblyName>vs-ide-bridge-installer</AssemblyName>
     <RootNamespace>VsIdeBridgeInstaller</RootNamespace>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="$(ManagedPythonPackageId)" Version="$(ManagedPythonPackageVersion)" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <Target Name="CopyManagedPythonRuntime" AfterTargets="Build" Condition="'$(Pkgpython)' != '' and Exists('$(Pkgpython)\\tools')">
+    <ItemGroup>
+      <ManagedPythonRuntime Include="$(Pkgpython)\tools\**\*" />
+    </ItemGroup>
+
+    <Copy
+      SourceFiles="@(ManagedPythonRuntime)"
+      DestinationFiles="@(ManagedPythonRuntime->'$(OutDir)python-runtime\%(RecursiveDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true" />
+  </Target>
 </Project>
 

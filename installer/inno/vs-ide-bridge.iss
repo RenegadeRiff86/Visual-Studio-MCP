@@ -1,7 +1,7 @@
 #define MyAppName "VS IDE Bridge"
 #define MyAppPublisher "RenegadeRiff86"
 #define MyAppURL "https://github.com/RenegadeRiff86/vs-ide-bridge"
-#define MyAppVersion "2.0.50"
+#define MyAppVersion "2.0.54"
 #define ServiceName "VsIdeBridgeService"
 #define VsixId "RenegadeRiff86.VsIdeBridge"
 #define LegacyVsixId "StanElston.VsIdeBridge"
@@ -42,6 +42,7 @@ Name: "startservice"; Description: "Start service after install"; Check: WizardI
 Source: "..\..\src\VsIdeBridgeCli\bin\Release\net8.0\*"; DestDir: "{app}\cli"; Flags: recursesubdirs createallsubdirs ignoreversion restartreplace uninsrestartdelete; BeforeInstall: KillCliProcesses
 Source: "..\..\src\VsIdeBridgeService\bin\Release\net8.0-windows\*"; DestDir: "{app}\service"; Flags: recursesubdirs createallsubdirs ignoreversion restartreplace uninsrestartdelete
 Source: "..\..\src\VsIdeBridge\bin\Release\net472\VsIdeBridge.vsix"; DestDir: "{app}\vsix"; Flags: ignoreversion
+Source: "..\..\src\VsIdeBridgeInstaller\bin\Release\net8.0-windows\python-runtime\*"; DestDir: "{app}\python\managed-runtime"; Flags: recursesubdirs createallsubdirs ignoreversion uninsrestartdelete; Check: ShouldInstallManagedPython
 
 [UninstallRun]
 Filename: "{sys}\sc.exe"; Parameters: "stop ""{#ServiceName}"""; Flags: runhidden waituntilterminated; RunOnceId: "{#ServiceName}-stop"; StatusMsg: "Stopping VS IDE Bridge service..."
@@ -56,16 +57,147 @@ const
   InstallerDoubleLineBreak = #13#10#13#10;
   PostInstallPageTitle = 'Configuring VS IDE Bridge';
   PostInstallPageDescription = 'Running Windows service and Visual Studio extension setup.';
+  PythonSupportPageTitle = 'Python Runtime Support';
+  PythonSupportPageDescription = 'Choose how VS IDE Bridge should provision Python support.';
+  PythonProvisioningManaged = 'managed';
+  PythonProvisioningSkip = 'skip';
   VsixInstallerLogArgumentPrefix = '/quiet /shutdownprocesses /logFile:';
 
 var
   CachedVsixInstallerPath: string;
   PostInstallProgressPage: TOutputProgressWizardPage;
   PostInstallCompleted: Boolean;
+  PythonSupportPage: TWizardPage;
+  ManagedPythonRadioButton: TRadioButton;
+  SkipManagedPythonRadioButton: TRadioButton;
 
 function GetVsInstallBasePath(): string;
 begin
   Result := ExpandConstant('{pf}\Microsoft Visual Studio') + '\' + VisualStudioMajorVersion;
+end;
+
+function EscapeJsonString(const Value: string): string;
+begin
+  Result := Value;
+  StringChangeEx(Result, '\', '\\', True);
+  StringChangeEx(Result, '"', '\"', True);
+end;
+
+function GetSelectedPythonProvisioningMode(): string;
+begin
+  if (ManagedPythonRadioButton = nil) or ManagedPythonRadioButton.Checked then
+    Result := PythonProvisioningManaged
+  else
+    Result := PythonProvisioningSkip;
+end;
+
+function ShouldInstallManagedPython(): Boolean;
+begin
+  Result := GetSelectedPythonProvisioningMode() = PythonProvisioningManaged;
+end;
+
+function GetManagedPythonInterpreterPath(): string;
+begin
+  Result := ExpandConstant('{app}\python\managed-runtime\python.exe');
+end;
+
+function GetManagedPythonRuntimeVersion(): string;
+begin
+  Result := '';
+  GetVersionNumbersString(GetManagedPythonInterpreterPath(), Result);
+end;
+
+function GetPythonRuntimeConfigPath(): string;
+begin
+  Result := ExpandConstant('{app}\config\python-runtime.json');
+end;
+
+procedure RemoveManagedPythonRuntimeIfPresent();
+begin
+  DelTree(ExpandConstant('{app}\python\managed-runtime'), True, True, True);
+end;
+
+procedure WritePythonRuntimeConfig();
+var
+  ConfigDirectory: string;
+  ConfigPath: string;
+  JsonText: string;
+  ManagedPythonPath: string;
+  ManagedPythonVersion: string;
+begin
+  ConfigPath := GetPythonRuntimeConfigPath();
+  ConfigDirectory := ExtractFileDir(ConfigPath);
+  if ConfigDirectory <> '' then
+    ForceDirectories(ConfigDirectory);
+
+  if ShouldInstallManagedPython() then
+  begin
+    ManagedPythonPath := EscapeJsonString(GetManagedPythonInterpreterPath());
+    ManagedPythonVersion := EscapeJsonString(GetManagedPythonRuntimeVersion());
+    JsonText :=
+      '{' + InstallerLineBreak +
+      '  "provisioningMode": "' + PythonProvisioningManaged + '",' + InstallerLineBreak +
+      '  "managedRuntimeVersion": "' + ManagedPythonVersion + '",' + InstallerLineBreak +
+      '  "managedEnvironmentPath": "' + ManagedPythonPath + '",' + InstallerLineBreak +
+      '  "managedBaseInterpreterPath": "' + ManagedPythonPath + '"' + InstallerLineBreak +
+      '}';
+  end
+  else
+  begin
+    RemoveManagedPythonRuntimeIfPresent();
+    JsonText :=
+      '{' + InstallerLineBreak +
+      '  "provisioningMode": "' + PythonProvisioningSkip + '"' + InstallerLineBreak +
+      '}';
+  end;
+
+  SaveStringToFile(ConfigPath, JsonText, False);
+end;
+
+procedure InitializePythonSupportPage();
+var
+  ManagedDescription: TNewStaticText;
+  SkipDescription: TNewStaticText;
+begin
+  PythonSupportPage := CreateCustomPage(
+    wpSelectTasks,
+    PythonSupportPageTitle,
+    PythonSupportPageDescription);
+
+  ManagedPythonRadioButton := TRadioButton.Create(PythonSupportPage.Surface);
+  ManagedPythonRadioButton.Parent := PythonSupportPage.Surface;
+  ManagedPythonRadioButton.Left := ScaleX(0);
+  ManagedPythonRadioButton.Top := ScaleY(8);
+  ManagedPythonRadioButton.Width := PythonSupportPage.SurfaceWidth;
+  ManagedPythonRadioButton.Caption := 'Bridge-managed CPython environment (Recommended)';
+  ManagedPythonRadioButton.Checked := True;
+
+  ManagedDescription := TNewStaticText.Create(PythonSupportPage.Surface);
+  ManagedDescription.Parent := PythonSupportPage.Surface;
+  ManagedDescription.Left := ScaleX(20);
+  ManagedDescription.Top := ManagedPythonRadioButton.Top + ScaleY(20);
+  ManagedDescription.Width := PythonSupportPage.SurfaceWidth - ScaleX(20);
+  ManagedDescription.Height := ScaleY(32);
+  ManagedDescription.AutoSize := False;
+  ManagedDescription.WordWrap := True;
+  ManagedDescription.Caption := 'Install a bridge-owned CPython runtime under the bridge install directory. This keeps bridge modules separate from your working Python environments.';
+
+  SkipManagedPythonRadioButton := TRadioButton.Create(PythonSupportPage.Surface);
+  SkipManagedPythonRadioButton.Parent := PythonSupportPage.Surface;
+  SkipManagedPythonRadioButton.Left := ScaleX(0);
+  SkipManagedPythonRadioButton.Top := ManagedDescription.Top + ManagedDescription.Height + ScaleY(16);
+  SkipManagedPythonRadioButton.Width := PythonSupportPage.SurfaceWidth;
+  SkipManagedPythonRadioButton.Caption := 'Skip bridge-managed Python';
+
+  SkipDescription := TNewStaticText.Create(PythonSupportPage.Surface);
+  SkipDescription.Parent := PythonSupportPage.Surface;
+  SkipDescription.Left := ScaleX(20);
+  SkipDescription.Top := SkipManagedPythonRadioButton.Top + ScaleY(20);
+  SkipDescription.Width := PythonSupportPage.SurfaceWidth - ScaleX(20);
+  SkipDescription.Height := ScaleY(32);
+  SkipDescription.AutoSize := False;
+  SkipDescription.WordWrap := True;
+  SkipDescription.Caption := 'Install the bridge without a managed Python runtime. You can still attach an existing interpreter or environment later.';
 end;
 
 procedure InitializeWizard();
@@ -73,6 +205,7 @@ begin
   PostInstallProgressPage := CreateOutputProgressPage(
     PostInstallPageTitle,
     PostInstallPageDescription);
+  InitializePythonSupportPage();
 end;
 
 function ResolveVsixInstallerPath(): string;
@@ -282,7 +415,7 @@ end;
 
 function GetPostInstallStepCount(const HasVsixInstallerPath: Boolean): Integer;
 begin
-  Result := 0;
+  Result := 1;
 
   if WizardIsTaskSelected('service') then
     Result := Result + 4;
@@ -347,6 +480,22 @@ begin
   UpdatePostInstallProgress(StepIndex, TotalSteps, Status, SubStatus);
 end;
 
+procedure RunPythonRuntimeSetupStep(var StepIndex: Integer; const TotalSteps: Integer);
+begin
+  UpdatePostInstallProgress(
+    StepIndex,
+    TotalSteps,
+    'Configuring bridge Python runtime...',
+    GetSelectedPythonProvisioningMode());
+  WritePythonRuntimeConfig();
+  StepIndex := StepIndex + 1;
+  UpdatePostInstallProgress(
+    StepIndex,
+    TotalSteps,
+    'Configuring bridge Python runtime...',
+    GetSelectedPythonProvisioningMode());
+end;
+
 procedure RunPostInstallActions();
 var
   ScPath: string;
@@ -366,6 +515,8 @@ begin
   end;
 
   try
+    RunPythonRuntimeSetupStep(StepIndex, TotalSteps);
+
     if WizardIsTaskSelected('service') then
     begin
       RunPostInstallStep(

@@ -19,6 +19,9 @@ internal static class CommandRegistrar
         runtime.RegisterCommand(new IdeCoreCommands.IdeHelpMenuCommand(package, runtime, commandService));
         runtime.RegisterCommand(new IdeCoreCommands.IdeToggleAllowBridgeEditsMenuCommand(package, runtime, commandService));
         runtime.RegisterCommand(new IdeCoreCommands.IdeToggleAllowBridgeShellExecMenuCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new IdeCoreCommands.IdeToggleAllowBridgePythonExecutionMenuCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new IdeCoreCommands.IdeToggleAllowBridgePythonUnrestrictedExecutionMenuCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new IdeCoreCommands.IdeToggleAllowBridgePythonEnvironmentMutationMenuCommand(package, runtime, commandService));
         runtime.RegisterCommand(new IdeCoreCommands.IdeToggleGoToEditedPartsMenuCommand(package, runtime, commandService));
         runtime.RegisterCommand(new IdeCoreCommands.IdeToggleBestPracticeDiagnosticsMenuCommand(package, runtime, commandService));
         runtime.RegisterCommand(new IdeCoreCommands.IdeRequestApprovalCommand(package, runtime, commandService));

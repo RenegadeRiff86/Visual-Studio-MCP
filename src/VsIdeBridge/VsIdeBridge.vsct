@@ -52,6 +52,33 @@
           <LocCanonicalName>.Tools.VsIdeBridgeToggleAllowBridgeShellExec</LocCanonicalName>
         </Strings>
       </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeToggleAllowBridgePythonExecutionMenu" priority="0x0117" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <Strings>
+          <ButtonText>Allow Bridge Python Execution</ButtonText>
+          <CommandName>IdeToggleAllowBridgePythonExecutionMenu</CommandName>
+          <CanonicalName>Tools.VsIdeBridgeToggleAllowBridgePythonExecution</CanonicalName>
+          <LocCanonicalName>.Tools.VsIdeBridgeToggleAllowBridgePythonExecution</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeToggleAllowBridgePythonEnvironmentMutationMenu" priority="0x0118" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <Strings>
+          <ButtonText>Allow Bridge Python Environment Mutation</ButtonText>
+          <CommandName>IdeToggleAllowBridgePythonEnvironmentMutationMenu</CommandName>
+          <CanonicalName>Tools.VsIdeBridgeToggleAllowBridgePythonEnvironmentMutation</CanonicalName>
+          <LocCanonicalName>.Tools.VsIdeBridgeToggleAllowBridgePythonEnvironmentMutation</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeToggleAllowBridgePythonUnrestrictedExecutionMenu" priority="0x0119" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <Strings>
+          <ButtonText>Allow Bridge Python Unrestricted Execution</ButtonText>
+          <CommandName>IdeToggleAllowBridgePythonUnrestrictedExecutionMenu</CommandName>
+          <CanonicalName>Tools.VsIdeBridgeToggleAllowBridgePythonUnrestrictedExecution</CanonicalName>
+          <LocCanonicalName>.Tools.VsIdeBridgeToggleAllowBridgePythonUnrestrictedExecution</LocCanonicalName>
+        </Strings>
+      </Button>
       <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeToggleGoToEditedPartsMenu" priority="0x0120" type="Button">
         <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
         <Strings>
@@ -877,6 +904,9 @@
       <IDSymbol name="cmdidIdeHelpMenu" value="0x0102" />
       <IDSymbol name="cmdidIdeToggleAllowBridgeEditsMenu" value="0x0103" />
       <IDSymbol name="cmdidIdeToggleAllowBridgeShellExecMenu" value="0x0106" />
+      <IDSymbol name="cmdidIdeToggleAllowBridgePythonExecutionMenu" value="0x0107" />
+      <IDSymbol name="cmdidIdeToggleAllowBridgePythonEnvironmentMutationMenu" value="0x0108" />
+      <IDSymbol name="cmdidIdeToggleAllowBridgePythonUnrestrictedExecutionMenu" value="0x0109" />
       <IDSymbol name="cmdidIdeToggleGoToEditedPartsMenu" value="0x0104" />
       <IDSymbol name="cmdidIdeToggleBestPracticeDiagnosticsMenu" value="0x0105" />
       <IDSymbol name="cmdidIdeGetState" value="0x0200" />

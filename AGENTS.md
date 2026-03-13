@@ -18,7 +18,8 @@
 
 | Task | Tool |
 |------|------|
-| Read source code | `read_file` (reveals in VS editor) |
+| Take one code slice | `read_file` (reveals in VS editor) |
+| Take several code slices | `read_file_batch` |
 | Search code | `find_text`, `search_symbols` |
 | Check errors/warnings | `diagnostics_snapshot` |
 | Make code changes | `apply_diff` (applies live into VS editor) |
@@ -31,6 +32,12 @@
 
 `apply_diff` resolves paths relative to the solution directory. Changes land in the live VS editor buffer — they are not auto-saved.
 
+## Code Slice Guidance
+
+- When a human says "take a slice of the code," use `read_file` or `read_file_batch`, not `open_file` alone.
+- Use `read_file` for one anchor or one range.
+- Use `read_file_batch` when you need several slices and want one bridge round-trip.
+
 ## Source Of Truth
 
 - The installed bridge stack under `C:\Program Files\VsIdeBridge\...` is the **runtime** source of truth.
@@ -39,8 +46,11 @@
 
 ## Local Config Files
 
-- Project-local MCP config: `.mcp.json`
+- Codex global MCP config: `%USERPROFILE%\.codex\config.toml`
+- Claude Code / JSON-based MCP config: `.mcp.json`
 - Continue workspace MCP config: `.continue/mcpServers/vs-ide-bridge.yaml`
+- Use the same installed command and args everywhere: `C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe` with `mcp-server --tools-only`
+- Only add `--instance <instanceId>` when you intentionally want to pin one client to one specific Visual Studio window
 
 ## Fallback
 

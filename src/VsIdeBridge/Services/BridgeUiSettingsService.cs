@@ -10,6 +10,9 @@ internal sealed class BridgeUiSettingsService
     private const string CollectionPath = "VsIdeBridge";
     private const string AllowEditsKey = "AllowBridgeEdits";
     private const string AllowShellExecKey = "AllowBridgeShellExec";
+    private const string AllowPythonExecutionKey = "AllowBridgePythonExecution";
+    private const string AllowPythonUnrestrictedExecutionKey = "AllowBridgePythonUnrestrictedExecution";
+    private const string AllowPythonEnvironmentMutationKey = "AllowBridgePythonEnvironmentMutation";
     private const string GoToEditedPartsKey = "GoToEditedParts";
     private const string BestPracticeDiagnosticsEnabledKey = "BestPracticeDiagnosticsEnabled";
 
@@ -45,6 +48,24 @@ internal sealed class BridgeUiSettingsService
     {
         get => ReadBoolean(AllowShellExecKey, defaultValue: false);
         set => WriteBoolean(AllowShellExecKey, value);
+    }
+
+    public bool AllowBridgePythonExecution
+    {
+        get => ReadBoolean(AllowPythonExecutionKey, defaultValue: false);
+        set => WriteBoolean(AllowPythonExecutionKey, value);
+    }
+
+    public bool AllowBridgePythonUnrestrictedExecution
+    {
+        get => ReadBoolean(AllowPythonUnrestrictedExecutionKey, defaultValue: false);
+        set => WriteBoolean(AllowPythonUnrestrictedExecutionKey, value);
+    }
+
+    public bool AllowBridgePythonEnvironmentMutation
+    {
+        get => ReadBoolean(AllowPythonEnvironmentMutationKey, defaultValue: false);
+        set => WriteBoolean(AllowPythonEnvironmentMutationKey, value);
     }
 
     public bool GoToEditedParts

@@ -16,32 +16,54 @@ The CLI also includes a Windows-side stdio MCP facade (`vs-ide-bridge mcp-server
 
 ## Getting Started
 
-1. **Close Visual Studio and Claude Code**, then download and run `vs-ide-bridge-setup-<version>.exe` from [GitHub Releases](https://github.com/RenegadeRiff86/vs-ide-bridge/releases/latest). The installer sets everything up automatically.
+1. **Close Visual Studio and your MCP client**, then download and run `vs-ide-bridge-setup-<version>.exe` from [GitHub Releases](https://github.com/RenegadeRiff86/vs-ide-bridge/releases/latest). The installer sets everything up automatically.
 
-2. **Open Claude Code** in your project folder and paste this prompt to create the connection config:
+2. **Add the installed bridge to your client config.** Use the same installed CLI for every client:
 
-   > Create a file called `.mcp.json` in this folder with this content:
-   >
-   > ```json
-   > {
-   >   "mcpServers": {
-   >     "vs-ide-bridge": {
-   >       "command": "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe",
-   >       "args": ["mcp-server", "--tools-only"]
-   >     }
-   >   }
-   > }
-   > ```
+   `C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe mcp-server --tools-only`
 
-   Claude Code creates the file for you. You only need to do this once per project.
+   If your app asks for separate UI fields, use:
 
-3. **Close Claude Code, open Visual Studio, then reopen Claude Code.** Tell Claude Code which project you want to work on — it connects to Visual Studio automatically. You don't need to type commands, just describe what you want in plain English:
+   - `Server name`: `vs-ide-bridge`
+   - `Command`: `C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe`
+   - `Arguments`: `mcp-server --tools-only`
+
+   Both **Codex** and **Claude Code / Claude Desktop** are first-class supported MCP clients. The only real difference is the config file format.
+
+   **Codex** uses `%USERPROFILE%\.codex\config.toml`:
+
+   ```toml
+   [mcp_servers.vs-ide-bridge]
+   command = "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe"
+   args = ["mcp-server", "--tools-only"]
+   ```
+
+   **Claude Code / Claude Desktop / other JSON-based clients** use `.mcp.json` or the client's JSON MCP config file:
+
+   ```json
+   {
+     "mcpServers": {
+       "vs-ide-bridge": {
+         "command": "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe",
+         "args": ["mcp-server", "--tools-only"]
+       }
+     }
+   }
+   ```
+
+3. **Open Visual Studio, then restart your MCP client.** Start a session by binding to the solution you want and checking bridge health. Good first calls are:
+
+   > `bind_solution`
+   > `bridge_health`
+   > `tool_help`
+
+4. **Tell the model what you want in plain English.** Examples:
 
    > "Show me any build errors."
-   > "Find all references to the Login method."
+   > "Take a slice of AuthService.cs around the login code."
    > "Apply this fix to AuthService.cs."
 
-**CLI fallback:** If Claude Code is unavailable, the `vs-ide-bridge` command exposes the same functionality from any terminal. Run `vs-ide-bridge help` for a full list of commands.
+**CLI fallback:** If your MCP client is unavailable, the installed `vs-ide-bridge` command exposes the same functionality from any terminal. Run `vs-ide-bridge help` for a full list of commands.
 
 ## Requirements
 
@@ -207,9 +229,12 @@ Bridge UI defaults:
 
 - pipe activity writes to the `IDE Bridge` Output pane and updates the Visual Studio status bar
 - `IDE Bridge > Allow Bridge Edits` is off by default
+- `IDE Bridge > Allow Bridge Python Execution` is off by default
+- `IDE Bridge > Allow Bridge Python Unrestricted Execution` is off by default
+- `IDE Bridge > Allow Bridge Python Environment Mutation` is off by default
 - `IDE Bridge > Go To Edited Parts` is on by default
 
-That means reads and diagnostics are visible in VS immediately, but `apply-diff` will refuse to change files until you explicitly allow bridge edits from the menu.
+That means reads and diagnostics are visible in VS immediately, but `apply-diff` will refuse to change files until you explicitly allow bridge edits from the menu. Python execution is approval-gated by default, and `python_repl` / `python_run_file` stay in restricted scratch mode unless you explicitly turn on unrestricted Python in the IDE Bridge menu.
 
 Bridge edits now apply through the live editor buffer with temporary line markers: added/modified regions are color-highlighted, and deletions are shown as deletion markers so review can happen directly in Visual Studio before save.
 
@@ -223,28 +248,42 @@ Optional parameters:
 
 ## Quick Start
 
-1. **Close Visual Studio and Claude Code** before installing.
+1. **Close Visual Studio and your MCP client** before installing.
 2. **Download the installer** (`vs-ide-bridge-setup-<version>.exe`) from [GitHub Releases](https://github.com/RenegadeRiff86/vs-ide-bridge/releases/latest) and run it. The installer sets everything up automatically.
-3. **Set up Claude Code.** Open Claude Code, navigate to your project folder, and paste this prompt:
+3. **Set up your client.**
 
-   > Create a file called `.mcp.json` in this folder with this content:
-   >
-   > ```json
-   > {
-   >   "mcpServers": {
-   >     "vs-ide-bridge": {
-   >       "command": "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe",
-   >       "args": ["mcp-server", "--tools-only"]
-   >     }
-   >   }
-   > }
-   > ```
+   Codex and Claude are both supported first-class here. Pick the config format your client expects.
 
-   Claude Code will create the file for you. You only need to do this once per project.
+   If your app shows separate fields instead of a config file, use:
 
-4. Close Claude Code, open Visual Studio, then reopen Claude Code.
-5. Tell Claude Code which project you want to work on — it will connect to Visual Studio automatically.
-6. If Claude Code ever can't connect, you can use the `vs-ide-bridge` command from any terminal as a fallback.
+   - `Server name`: `vs-ide-bridge`
+   - `Command`: `C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe`
+   - `Arguments`: `mcp-server --tools-only`
+
+   **Codex**: add this block to `%USERPROFILE%\.codex\config.toml`:
+
+   ```toml
+   [mcp_servers.vs-ide-bridge]
+   command = "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe"
+   args = ["mcp-server", "--tools-only"]
+   ```
+
+   **Claude Code / Claude Desktop / other JSON-based clients**: add this MCP config:
+
+   ```json
+   {
+     "mcpServers": {
+       "vs-ide-bridge": {
+         "command": "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe",
+         "args": ["mcp-server", "--tools-only"]
+       }
+     }
+   }
+   ```
+
+4. Open Visual Studio, then restart your MCP client.
+5. Start by binding to the solution and checking health with `bind_solution` and `bridge_health`.
+6. If the MCP client ever can't connect, use the installed `vs-ide-bridge` command from a terminal as a fallback.
 
 ## MCP Command Catalog
 
@@ -288,6 +327,7 @@ file_outline
 find_files
 find_references
 find_text
+find_text_batch
 format_document
 git_add
 git_branch_list
@@ -328,6 +368,15 @@ nuget_restore
 open_file
 open_solution
 peek_definition
+python_create_env
+python_env_info
+python_install_package
+python_list_envs
+python_list_packages
+python_remove_package
+python_repl
+python_run_file
+python_set_active_env
 query_project_configurations
 query_project_items
 query_project_outputs
@@ -335,6 +384,7 @@ query_project_properties
 query_project_references
 quick_info
 read_file
+read_file_batch
 ready
 remove_breakpoint
 remove_file_from_project
@@ -810,16 +860,18 @@ Recommended agent pattern:
 Run a stdio MCP server on Windows next to Visual Studio:
 
 ```bat
-"C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe" mcp-server --instance <instanceId>
+"C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe" mcp-server --tools-only
 ```
 
-Exposed MCP tools use simple names (102 total — see MCP Command Catalog for the full sorted list):
+Add `--instance <instanceId>` only when you intentionally want to pin one client to one specific live Visual Studio instance.
+
+Exposed MCP tools use simple names. See the MCP Command Catalog below or call `tool_help` for the live installed list and schemas:
 
 **IDE state and binding**: `state`, `ready`, `tool_help`, `help`, `bridge_health`, `list_instances`, `bind_instance`, `bind_solution`
 
 **Diagnostics**: `errors`, `warnings`, `diagnostics_snapshot`
 
-**Editing and navigation**: `apply_diff`, `read_file`, `find_text`, `find_files`, `search_symbols`, `find_references`, `count_references`, `peek_definition`, `goto_definition`, `goto_implementation`, `call_hierarchy`, `quick_info`, `file_outline`, `format_document`, `execute_command`
+**Editing and navigation**: `apply_diff`, `read_file`, `read_file_batch`, `find_text`, `find_text_batch`, `find_files`, `search_symbols`, `find_references`, `count_references`, `peek_definition`, `goto_definition`, `goto_implementation`, `call_hierarchy`, `quick_info`, `file_outline`, `format_document`, `execute_command`
 
 **Documents and tabs**: `open_file`, `list_tabs`, `list_documents`, `activate_document`, `close_document`, `close_file`, `close_others`, `save_document`, `list_windows`, `activate_window`
 
@@ -832,6 +884,8 @@ Exposed MCP tools use simple names (102 total — see MCP Command Catalog for th
 **Solution**: `search_solutions`, `open_solution`, `create_solution`, `list_projects`, `add_project`, `remove_project`, `set_startup_project`, `add_file_to_project`, `remove_file_from_project`
 
 **Project query**: `query_project_items`, `query_project_properties`, `query_project_configurations`, `query_project_references`, `query_project_outputs`
+
+**Python**: `python_list_envs`, `python_env_info`, `python_set_active_env`, `python_list_packages`, `python_repl`, `python_run_file`, `python_install_package`, `python_remove_package`, `python_create_env`
 
 **VS lifecycle**: `vs_open`, `vs_close`, `wait_for_instance`
 
@@ -869,7 +923,7 @@ The MCP layer is intentionally thin: it forwards to the bridge command surface a
 
 Implementation note: the server advertises MCP `tools` capability only. `resources/*` and `prompts/*` methods are still implemented, but not advertised, to avoid eager startup probes from MCP clients that can trigger Visual Studio automation calls before the IDE is fully ready.
 
-Example MCP client registration (Claude Code and Codex CLI use the same stdio command):
+Example MCP client registration. Codex, Claude Code, Claude Desktop, Continue, and other MCP clients all point at the same installed Windows command:
 
 ```json
 {
@@ -878,13 +932,14 @@ Example MCP client registration (Claude Code and Codex CLI use the same stdio co
       "command": "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe",
       "args": [
         "mcp-server",
-        "--instance",
-        "<instanceId>"
+        "--tools-only"
       ]
     }
   }
 }
 ```
+
+Only add `--instance <instanceId>` if you intentionally want to pin one client to one specific live Visual Studio instance.
 
 ### Cross-platform clients
 
@@ -948,6 +1003,12 @@ command = "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe"
 args = ["mcp-server", "--tools-only"]
 ```
 
+If Codex asks for UI fields instead of TOML, enter:
+
+- `Server name`: `vs-ide-bridge`
+- `Command`: `C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe`
+- `Arguments`: `mcp-server --tools-only`
+
 If you keep a compatibility alias around for older sessions, point it at the same installed CLI:
 
 ```toml
@@ -955,6 +1016,10 @@ If you keep a compatibility alias around for older sessions, point it at the sam
 command = "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe"
 args = ["mcp-server", "--tools-only"]
 ```
+
+Codex does not read project-local `.mcp.json`. Use `%USERPROFILE%\.codex\config.toml`, restart Codex, then start with `bind_solution`, `bridge_health`, and `tool_help`.
+
+Do not register both `vs-ide-bridge` and `vs-ide-bridge-pr` unless you really need the compatibility alias. Duplicate bridge registrations can confuse MCP clients and models.
 
 #### Continue
 
@@ -972,7 +1037,13 @@ mcpServers:
       - --tools-only
 ```
 
-Continue can also ingest JSON MCP configs copied into `.continue/mcpServers/` if you prefer the same JSON shape used by Claude Desktop, Cursor, or Cline.
+If Continue shows separate UI fields instead of a YAML file, use:
+
+- `Server name`: `vs-ide-bridge`
+- `Command`: `C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe`
+- `Arguments`: `mcp-server --tools-only`
+
+Continue can also ingest JSON MCP configs copied into `.continue/mcpServers/` if you prefer the same JSON shape used by Claude Desktop, Cursor, or Cline. Do not add `--instance` unless you intentionally want Continue pinned to one live Visual Studio window.
 
 #### Claude Code / Claude Desktop
 
@@ -990,6 +1061,14 @@ Project-local `.mcp.json`:
 ```
 
 Claude Desktop uses the same JSON `mcpServers` shape in `claude_desktop_config.json`.
+
+If you use Claude Code, the easiest setup is a project-local `.mcp.json` in the repo root. Claude can create that file for you if you paste the JSON block above.
+
+If Claude asks for UI fields instead of JSON, enter:
+
+- `Server name`: `vs-ide-bridge`
+- `Command`: `C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe`
+- `Arguments`: `mcp-server --tools-only`
 
 #### Generic JSON-based clients
 

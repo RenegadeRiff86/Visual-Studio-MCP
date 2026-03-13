@@ -18,3 +18,12 @@ src/VsIdeBridgeService/obj/
 .vscode/
 outputcatalog-live.json
 C*/
+
+# Local bridge/build scratch files
+.dotnet/
+.dotnet-*/
+installer/output/
+*.log
+*.binlog
+*.tmp
+Temp.txt

@@ -282,6 +282,9 @@ internal static class IdeCoreCommands
         {
             ["allowBridgeEdits"] = context.Runtime.UiSettings.AllowBridgeEdits,
             ["allowBridgeShellExec"] = context.Runtime.UiSettings.AllowBridgeShellExec,
+            ["allowBridgePythonExecution"] = context.Runtime.UiSettings.AllowBridgePythonExecution,
+            ["allowBridgePythonUnrestrictedExecution"] = context.Runtime.UiSettings.AllowBridgePythonUnrestrictedExecution,
+            ["allowBridgePythonEnvironmentMutation"] = context.Runtime.UiSettings.AllowBridgePythonEnvironmentMutation,
             ["bestPracticeDiagnostics"] = context.Runtime.UiSettings.BestPracticeDiagnosticsEnabled,
             ["goToEditedParts"] = context.Runtime.UiSettings.GoToEditedParts,
         };
@@ -309,6 +312,33 @@ internal static class IdeCoreCommands
         context.Runtime.UiSettings.AllowBridgeShellExec = enabled;
         return Task.FromResult(new CommandExecutionResult(
             enabled ? "Bridge shell exec enabled." : "Bridge shell exec disabled.",
+            GetUiSettingsData(context)));
+    }
+
+    private static Task<CommandExecutionResult> ToggleAllowBridgePythonExecutionAsync(IdeCommandContext context)
+    {
+        var enabled = !context.Runtime.UiSettings.AllowBridgePythonExecution;
+        context.Runtime.UiSettings.AllowBridgePythonExecution = enabled;
+        return Task.FromResult(new CommandExecutionResult(
+            enabled ? "Bridge Python execution enabled." : "Bridge Python execution disabled.",
+            GetUiSettingsData(context)));
+    }
+
+    private static Task<CommandExecutionResult> ToggleAllowBridgePythonUnrestrictedExecutionAsync(IdeCommandContext context)
+    {
+        var enabled = !context.Runtime.UiSettings.AllowBridgePythonUnrestrictedExecution;
+        context.Runtime.UiSettings.AllowBridgePythonUnrestrictedExecution = enabled;
+        return Task.FromResult(new CommandExecutionResult(
+            enabled ? "Bridge Python unrestricted execution enabled." : "Bridge Python unrestricted execution disabled.",
+            GetUiSettingsData(context)));
+    }
+
+    private static Task<CommandExecutionResult> ToggleAllowBridgePythonEnvironmentMutationAsync(IdeCommandContext context)
+    {
+        var enabled = !context.Runtime.UiSettings.AllowBridgePythonEnvironmentMutation;
+        context.Runtime.UiSettings.AllowBridgePythonEnvironmentMutation = enabled;
+        return Task.FromResult(new CommandExecutionResult(
+            enabled ? "Bridge Python environment mutation enabled." : "Bridge Python environment mutation disabled.",
             GetUiSettingsData(context)));
     }
 
@@ -438,6 +468,60 @@ internal static class IdeCoreCommands
         }
     }
 
+    internal sealed class IdeToggleAllowBridgePythonExecutionMenuCommand : IdeCommandBase
+    {
+        public IdeToggleAllowBridgePythonExecutionMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x0107, acceptsParameters: false)
+        {
+            MenuCommand.BeforeQueryStatus += (_, _) => MenuCommand.Checked = Runtime.UiSettings.AllowBridgePythonExecution;
+        }
+
+        protected override string CanonicalName => "Tools.VsIdeBridgeToggleAllowBridgePythonExecution";
+
+        internal override bool AllowAutomationInvocation => false;
+
+        protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            return ToggleAllowBridgePythonExecutionAsync(context);
+        }
+    }
+
+    internal sealed class IdeToggleAllowBridgePythonEnvironmentMutationMenuCommand : IdeCommandBase
+    {
+        public IdeToggleAllowBridgePythonEnvironmentMutationMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x0108, acceptsParameters: false)
+        {
+            MenuCommand.BeforeQueryStatus += (_, _) => MenuCommand.Checked = Runtime.UiSettings.AllowBridgePythonEnvironmentMutation;
+        }
+
+        protected override string CanonicalName => "Tools.VsIdeBridgeToggleAllowBridgePythonEnvironmentMutation";
+
+        internal override bool AllowAutomationInvocation => false;
+
+        protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            return ToggleAllowBridgePythonEnvironmentMutationAsync(context);
+        }
+    }
+
+    internal sealed class IdeToggleAllowBridgePythonUnrestrictedExecutionMenuCommand : IdeCommandBase
+    {
+        public IdeToggleAllowBridgePythonUnrestrictedExecutionMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x0109, acceptsParameters: false)
+        {
+            MenuCommand.BeforeQueryStatus += (_, _) => MenuCommand.Checked = Runtime.UiSettings.AllowBridgePythonUnrestrictedExecution;
+        }
+
+        protected override string CanonicalName => "Tools.VsIdeBridgeToggleAllowBridgePythonUnrestrictedExecution";
+
+        internal override bool AllowAutomationInvocation => false;
+
+        protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            return ToggleAllowBridgePythonUnrestrictedExecutionAsync(context);
+        }
+    }
+
     internal sealed class IdeToggleGoToEditedPartsMenuCommand : IdeCommandBase
     {
         public IdeToggleGoToEditedPartsMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
@@ -468,6 +552,8 @@ internal static class IdeCoreCommands
             {
                 "edit" => BridgeApprovalKind.Edit,
                 "shell_exec" => BridgeApprovalKind.ShellExec,
+                "python_exec" => BridgeApprovalKind.PythonExecution,
+                "python_env_mutation" => BridgeApprovalKind.PythonEnvironmentMutation,
                 _ => throw new CommandErrorException("invalid_arguments", $"Unsupported approval operation: {operation}"),
             };
 
