@@ -171,10 +171,14 @@ public sealed class McpToolHelpTests
         AssertContainsSchemaProperty(toolMap["build_errors"], "wait_for_intellisense");
         AssertContainsSchemaProperty(toolMap["build_errors"], "require_clean_diagnostics");
         AssertContainsSchemaProperty(toolMap["open_solution"], "wait_for_ready");
+        Assert.Contains("advanced recovery tool", toolMap["bind_instance"].GetProperty(DescriptionPropertyName).GetString(), StringComparison.OrdinalIgnoreCase);
         AssertContainsSchemaProperty(toolMap[VsOpenToolName], "solution");
         AssertContainsSchemaProperty(toolMap[VsOpenToolName], "devenv_path");
         AssertContainsSchemaProperty(toolMap[WaitForInstanceToolName], "solution");
         AssertContainsSchemaProperty(toolMap[WaitForInstanceToolName], "timeout_ms");
+        Assert.Contains("exact solution path", toolMap["open_solution"].GetProperty(DescriptionPropertyName).GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("already open in Visual Studio", toolMap["bind_solution"].GetProperty(DescriptionPropertyName).GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("only after vs_open", toolMap[WaitForInstanceToolName].GetProperty(DescriptionPropertyName).GetString(), StringComparison.OrdinalIgnoreCase);
         AssertContainsSchemaProperty(toolMap[CreateSolutionToolName], "directory");
         AssertContainsSchemaProperty(toolMap[CreateSolutionToolName], "name");
         AssertContainsSchemaProperty(toolMap[CreateSolutionToolName], "wait_for_ready");

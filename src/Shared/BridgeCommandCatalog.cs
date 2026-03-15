@@ -202,6 +202,7 @@ public static class BridgeCommandCatalog
             Create("Tools.IdeAddFileToProject", "add-file-to-project"),
             Create("Tools.IdeRemoveFileFromProject", "remove-file-from-project"),
             Create("Tools.IdeSearchSolutions", "search-solutions"),
+            Create("Tools.IdeSetPythonProjectEnv", "set-python-project-env"),
         ];
     }
 
@@ -225,7 +226,7 @@ public static class BridgeCommandCatalog
             "state" => ("Capture IDE state including solution, active document, and bridge identity.", @"state --out ""C:\temp\ide-state.json"""),
             "ui-settings" => ("Read current IDE Bridge UI/security settings without modifying them.", "ui-settings"),
             "ready" => ("Wait for Visual Studio and IntelliSense to be ready for semantic commands.", "ready --timeout-ms 120000"),
-            "open-solution" => ("Open a solution in the current Visual Studio instance.", @"open-solution --solution ""C:\repo\VsIdeBridge.sln"""),
+            "open-solution" => ("Open a specific existing .sln or .slnx file in the current Visual Studio instance without opening a new window. Use this when you already know the exact solution path.", @"open-solution --solution ""C:\Users\name\source\repos\PinballBot\PinballBot.sln"""),
             "create-solution" => ("Create and open a new solution in the current Visual Studio instance.", @"create-solution --directory ""C:\repo\Scratch"" --name ""ScratchApp"""),
             "close-ide" => ("Close the current Visual Studio instance through DTE Quit.", commandName),
             "batch" => ("Run multiple commands in one request.", @"batch --steps ""[{\""id\"":\""state\"",\""command\"":\""state\""}]"""),
@@ -297,6 +298,7 @@ public static class BridgeCommandCatalog
             "add-file-to-project" => ("Add an existing file to a project.", @"add-file-to-project --project ""MyLib"" --file ""C:\repo\MyLib\Foo.cs"""),
             "remove-file-from-project" => ("Remove a file from a project.", @"remove-file-from-project --project ""MyLib"" --file ""C:\repo\MyLib\Foo.cs"""),
             "search-solutions" => ("Search for solution files (.sln/.slnx) on disk under a given root directory. Defaults to %USERPROFILE%\\source\\repos.", @"search-solutions --query ""MyApp"" --path ""C:\Users\me\source\repos"" --max-depth 4"),
+            "set-python-project-env" => ("Set the active Python interpreter for the open .pyproj project or open-folder workspace in Visual Studio (affects IntelliSense and debugging).", @"set-python-project-env --path ""C:\Users\me\miniconda3\envs\superslicer\python.exe"""),
             _ => ($"Run bridge command '{commandName}'.", commandName),
         };
     }

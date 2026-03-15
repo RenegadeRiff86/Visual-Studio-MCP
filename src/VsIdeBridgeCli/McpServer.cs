@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -37,6 +39,14 @@ internal static partial class CliApp
         private const int DefaultGitHubIssueSearchLimit = 20;
         private const int DefaultGitLogMaxCount = 20;
         private const int DefaultLargeMaxCount = 200;
+        private const int DefaultMaxQueriesPerChunk = 5;
+        private const string CodeQualityRules =
+            "Code rules: (1) Lines \u2264120 chars \u2014 never require horizontal scrolling. " +
+            "(2) Read the file first \u2014 match existing naming conventions, patterns, and indentation exactly. " +
+            "(3) Reuse existing constants and helpers \u2014 search before adding anything new. " +
+            "(4) Extract repeated literals to named constants. " +
+            "(5) Add comments only where the *why* is non-obvious \u2014 never restate what the code does. " +
+            "(6) Prefer early returns and guard clauses over deep nesting.";
         private const string DotNetExecutableName = "dotnet";
         private const string DirectoryArgumentName = "directory";
         private const string FileArgumentName = "file";
@@ -72,6 +82,7 @@ internal static partial class CliApp
         private const int RawJsonInitialDepth = 1;
         private const string AnnotationsPropertyName = "annotations";
         private const string ApplyDiffToolName = "apply_diff";
+        private const string WriteFileToolName = "write_file";
         private const string BridgeApprovalCommandName = "Tools.VsIdeBridgeRequestApproval";
         private const string PythonExecutionApprovalOperationName = "python_exec";
         private const string PythonEnvironmentMutationApprovalOperationName = "python_env_mutation";
@@ -119,7 +130,8 @@ internal static partial class CliApp
         private const string ToolHelpToolName = "tool_help";
         private const string OneBasedLineNumberDescription = "1-based line number.";
         private const string UnknownMethodName = "(null)";
-        private const string UnknownMcpToolMessageFormat = "Unknown MCP tool: {toolName}";
+        private const string UnknownMcpToolMessageFormat = "Unknown MCP tool: {toolName}. Tool names must not include the server name as a prefix. Call tool_help to list all available tools.";
+        private const string WaitForReadyArgumentName = "wait_for_ready";
         private const string WaitForIntellisenseArgumentName = "wait_for_intellisense";
         private const string WarningsToolName = "warnings";
         private const int VsOpenDiscoveryTimeoutMilliseconds = 30000;
@@ -457,7 +469,7 @@ internal static partial class CliApp
                     InstanceId = GetString(args, "instance_id") ?? GetString(args, "instance"),
                     ProcessId = GetInt32(args, "pid"),
                     PipeName = GetString(args, "pipe_name") ?? GetString(args, "pipe"),
-                    SolutionHint = GetString(args, "solution_hint") ?? GetString(args, "sln"),
+                    SolutionHint = GetString(args, SolutionArgumentName) ?? GetString(args, "solution_hint") ?? GetString(args, "sln"),
                 };
             }
 
@@ -480,6 +492,12 @@ internal static partial class CliApp
 
         public static async Task RunAsync(CliOptions options)
         {
+            if (options.GetFlag("http"))
+            {
+                await RunHttpAsync(options).ConfigureAwait(false);
+                return;
+            }
+
             try
             {
                 File.WriteAllText(McpLog, $"{DateTime.Now:O} mcp-server started\n");
@@ -535,6 +553,160 @@ internal static partial class CliApp
             if (pendingRequests.Count > 0)
             {
                 await Task.WhenAll(pendingRequests).ConfigureAwait(false);
+            }
+        }
+
+        private static async Task RunHttpAsync(CliOptions options)
+        {
+            var port = options.GetInt32("port", 5010);
+            var advertiseExtraCapabilities = !options.GetFlag("tools-only");
+            var sessions = new ConcurrentDictionary<string, BridgeBinding>(StringComparer.Ordinal);
+
+            var listener = new HttpListener();
+            listener.Prefixes.Add($"http://localhost:{port}/mcp/");
+            listener.Start();
+
+            McpTrace($"HTTP MCP server listening on http://localhost:{port}/mcp/");
+            Console.Error.WriteLine($"VS IDE Bridge MCP HTTP server: http://localhost:{port}/mcp/");
+
+            var cts = new CancellationTokenSource();
+            Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); listener.Stop(); };
+
+            while (!cts.Token.IsCancellationRequested)
+            {
+                HttpListenerContext ctx;
+                try
+                {
+                    ctx = await listener.GetContextAsync().ConfigureAwait(false);
+                }
+                catch (HttpListenerException) when (cts.Token.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                _ = Task.Run(() => HandleHttpRequestAsync(ctx, options, sessions, advertiseExtraCapabilities));
+            }
+        }
+
+        private static async Task HandleHttpRequestAsync(
+            HttpListenerContext ctx,
+            CliOptions options,
+            ConcurrentDictionary<string, BridgeBinding> sessions,
+            bool advertiseExtraCapabilities)
+        {
+            try
+            {
+                var req = ctx.Request;
+                var res = ctx.Response;
+
+                res.Headers["Access-Control-Allow-Origin"] = "*";
+                res.Headers["Access-Control-Allow-Methods"] = "POST, DELETE, OPTIONS";
+                res.Headers["Access-Control-Allow-Headers"] = "Content-Type, Mcp-Session-Id";
+
+                if (req.HttpMethod == "OPTIONS")
+                {
+                    res.StatusCode = 204;
+                    res.Close();
+                    return;
+                }
+
+                var path = req.Url?.AbsolutePath.TrimEnd('/') ?? string.Empty;
+
+                if (req.HttpMethod == "DELETE" && path == "/mcp")
+                {
+                    var sessionId = req.Headers["Mcp-Session-Id"];
+                    if (!string.IsNullOrEmpty(sessionId))
+                    {
+                        sessions.TryRemove(sessionId, out _);
+                    }
+
+                    res.StatusCode = 204;
+                    res.Close();
+                    return;
+                }
+
+                if (req.HttpMethod != "POST" || path != "/mcp")
+                {
+                    res.StatusCode = 404;
+                    res.Close();
+                    return;
+                }
+
+                string body;
+                using (var reader = new StreamReader(req.InputStream, Encoding.UTF8))
+                {
+                    body = await reader.ReadToEndAsync().ConfigureAwait(false);
+                }
+
+                var sid = req.Headers["Mcp-Session-Id"];
+                if (string.IsNullOrEmpty(sid))
+                {
+                    sid = Guid.NewGuid().ToString("N");
+                }
+
+                var binding = sessions.GetOrAdd(sid, _ => new BridgeBinding(options));
+
+                var request = ParseJsonObject(body);
+                var method = request["method"]?.GetValue<string>() ?? UnknownMethodName;
+                NotifyService("MCP_REQUEST");
+                McpTrace($"HTTP got request method={method}");
+
+                var trackInFlight = string.Equals(method, "tools/call", StringComparison.Ordinal);
+                if (trackInFlight)
+                {
+                    NotifyService("COMMAND_START");
+                }
+
+                JsonObject? response;
+                try
+                {
+                    response = await HandleRequestAsync(request, binding, advertiseExtraCapabilities).ConfigureAwait(false);
+                }
+                catch (McpRequestException ex)
+                {
+                    response = CreateErrorResponse(ex.Id, ex.Code, ex.Message);
+                }
+                catch (JsonException ex)
+                {
+                    response = CreateErrorResponse(null, -32700, $"Parse error: {ex.Message}");
+                }
+                catch (Exception ex)
+                {
+                    response = CreateErrorResponse(null, -32603, $"Internal error: {ex.Message}");
+                }
+                finally
+                {
+                    if (trackInFlight)
+                    {
+                        NotifyService("COMMAND_END");
+                    }
+                }
+
+                res.StatusCode = 200;
+                res.ContentType = "application/json";
+                res.Headers["Mcp-Session-Id"] = sid;
+
+                if (response is not null)
+                {
+                    var responseBytes = Encoding.UTF8.GetBytes(response.ToJsonString());
+                    res.ContentLength64 = responseBytes.Length;
+                    await res.OutputStream.WriteAsync(responseBytes).ConfigureAwait(false);
+                }
+
+                res.Close();
+            }
+            catch (Exception ex)
+            {
+                McpTrace($"HTTP request handler error: {ex.Message}");
+                try
+                {
+                    ctx.Response.StatusCode = 500;
+                    ctx.Response.Close();
+                }
+                catch
+                {
+                    // Ignore errors when closing an already-failed response.
+                }
             }
         }
 
@@ -687,7 +859,7 @@ internal static partial class CliApp
                 ["capabilities"] = capabilities,
                 ["serverInfo"] = new JsonObject
                 {
-                    ["name"] = "vs-ide-bridge-mcp",
+                    ["name"] = "vs_ide_bridge",
                     ["version"] = "0.1.0",
                 },
             };
@@ -712,9 +884,9 @@ internal static partial class CliApp
 
         private static JsonArray ListTools() =>
         [
-            Tool("state", "Capture current Visual Studio bridge state.", EmptySchema()),
+            Tool("bridge_state", "Capture current Visual Studio bridge state: VS version, solution path, build mode, active document, and debug mode.", EmptySchema()),
             Tool(UiSettingsToolName, "Read current IDE Bridge UI/security settings. This is read-only and does not change them.", EmptySchema()),
-            Tool("ready", "Wait for Visual Studio/IntelliSense readiness before semantic diagnostics.", EmptySchema()),
+            Tool(WaitForReadyArgumentName, "Block until Visual Studio and IntelliSense are fully loaded. Call this after open_solution or vs_open before running any semantic tools (errors, symbol_info, find_references).", EmptySchema()),
             Tool(
                 ToolHelpToolName,
                 "Return MCP tool help with descriptions, schemas, and examples. Pass name for one tool or omit for all.",
@@ -727,7 +899,7 @@ internal static partial class CliApp
             Tool("list_instances", "List live VS IDE Bridge instances visible to this MCP server.", EmptySchema()),
             Tool(
                 "bind_instance",
-                "Bind this MCP session to one Visual Studio bridge instance.",
+                "Bind this MCP session to one specific Visual Studio bridge instance by exact instance id, process id, or pipe name. Advanced recovery tool: use this only when normal solution-based selection is ambiguous or incorrect; do not use it after open_solution for routine solution switching.",
                 ObjectSchema(
                     OptionalStringProperty("instance_id", "Optional exact bridge instance id."),
                     OptionalIntegerProperty("pid", "Optional Visual Studio process id."),
@@ -735,11 +907,11 @@ internal static partial class CliApp
                     OptionalStringProperty("solution_hint", "Optional solution path or name substring."))),
             Tool(
                 "bind_solution",
-                "Bind this MCP session to the Visual Studio bridge instance whose solution matches a name or path hint.",
+                "Bind this MCP session to an already-open Visual Studio bridge instance whose solution matches a name or path hint. Use this when the solution is already open in Visual Studio; do not use it to open a solution file from disk.",
                 ObjectSchema(RequiredStringProperty(SolutionArgumentName, "Solution name or path substring to match."))),
             Tool(
                 "errors",
-                "Capture Error List rows with optional severity and text filters.",
+                "Read current Error List diagnostics without triggering a build. Use build_errors to trigger a fresh build and capture results in one call.",
                 ObjectSchema(
                     OptionalStringProperty(SeverityArgumentName, "Optional severity filter."),
                     OptionalBooleanProperty(WaitForIntellisenseArgumentName, "Wait for IntelliSense readiness first (default true)."),
@@ -755,7 +927,7 @@ internal static partial class CliApp
                 annotations: ReadOnlyToolAnnotations()),
             Tool(
                 WarningsToolName,
-                "Capture warning rows with optional code, path, and project filters.",
+                "Read current Warning List rows. Same as errors but pre-filtered to warnings. Use errors with severity filter for mixed results.",
                 ObjectSchema(
                     OptionalStringProperty(SeverityArgumentName, "Optional severity filter."),
                     OptionalBooleanProperty(WaitForIntellisenseArgumentName, "Wait for IntelliSense readiness first (default true)."),
@@ -769,10 +941,10 @@ internal static partial class CliApp
                     OptionalIntegerProperty(TimeoutMillisecondsArgumentName, "Optional wait timeout in milliseconds.")),
                 title: "Warning List Diagnostics",
                 annotations: ReadOnlyToolAnnotations()),
-            Tool("list_tabs", "List open editor tabs.", EmptySchema()),
+            Tool("list_tabs", "List visible editor tabs. The tab bar scrolls when more than ~7 tabs are open, which is disruptive for the user. If tab count exceeds 7, close tabs you are done with using close_document or close_others. Use list_documents for all loaded documents including background ones.", EmptySchema()),
             Tool(
                 "open_file",
-                "Open an absolute path, solution-relative path, or solution item name and optional line/column.",
+                "Open an absolute path, solution-relative path, or solution item name and optional line/column. Each call opens a new editor tab — close it with close_document when you are done reading or editing to keep the tab bar tidy.",
                 ObjectSchema(
                     RequiredStringProperty("file", "Absolute path, solution-relative path, or solution item name."),
                     OptionalIntegerProperty("line", "Optional 1-based line number."),
@@ -789,14 +961,14 @@ internal static partial class CliApp
                     OptionalBooleanProperty("include_non_project", "Include disk files under solution root that are not in projects (default true)."))),
             Tool(
                 FindTextBatchToolName,
-                "Find text for multiple queries in one bridge round-trip, internally chunked when needed.",
+                "Find text for multiple queries in one bridge round-trip. Prefer this over repeated find_text calls whenever you have more than one query to run.",
                 ObjectSchema(
                     RequiredStringArrayProperty("queries", "Queries to search for in order."),
                     OptionalStringProperty("scope", "Optional scope: solution, project, document, or open."),
                     OptionalStringProperty("project", OptionalProjectFilterDescription),
                     OptionalStringProperty("path", "Optional path or directory filter."),
                     OptionalIntegerProperty("results_window", "Optional Find Results window number."),
-                    OptionalIntegerProperty("max_queries_per_chunk", "Optional max query count per internal chunk (default 5)."),
+                    OptionalIntegerProperty("max_queries_per_chunk", $"Optional max query count per internal chunk (default {DefaultMaxQueriesPerChunk})."),
                     OptionalBooleanProperty(MatchCaseArgumentName, "Case-sensitive match (default false)."),
                     OptionalBooleanProperty("whole_word", "Match whole word only (default false)."),
                     OptionalBooleanProperty("regex", "Treat queries as regular expressions (default false).")),
@@ -815,7 +987,7 @@ internal static partial class CliApp
                     OptionalBooleanProperty(MatchCaseArgumentName, "Case-sensitive match (default false)."))),
             Tool(
                 CountReferencesToolName,
-                "Count symbol references at file/line/column with exact-or-explicit semantics.",
+                "Count how many references exist for the symbol at file/line/column. Faster than find_references when you only need the count, not the locations.",
                 ObjectSchema(
                     RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription),
                     RequiredIntegerProperty("line", OneBasedLineNumberDescription),
@@ -823,28 +995,37 @@ internal static partial class CliApp
                     OptionalBooleanProperty(ActivateWindowArgumentName, "Activate references window while counting (default true)."),
                     OptionalIntegerProperty(TimeoutMillisecondsArgumentName, "Optional window wait timeout in milliseconds."))),
             Tool(
-                "quick_info",
-                "Get quick info at file/line/column.",
+                "symbol_info",
+                "Get the type signature, documentation, and inferred type for the symbol at file/line/column. Use peek_definition to retrieve the full source of the definition.",
                 ObjectSchema(
                     RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription),
                     RequiredIntegerProperty("line", OneBasedLineNumberDescription),
                     RequiredIntegerProperty("column", "1-based column number."))),
             Tool(
                 ApplyDiffToolName,
-                "Apply unified diff text or editor patch text through the live editor so changes are visible in Visual Studio. Changed files open by default.",
+                "Apply a unified diff or editor patch to a file through the live editor. Each editor patch block (*** Begin Patch format) must include at least one context line (' ' prefix) to anchor the insertion point — pure-addition blocks without context are appended at end of file. For adding large new code (>30 lines with no deletions), use write_file instead. " + CodeQualityRules,
                 ObjectSchema(
                     RequiredStringProperty("patch", "Unified diff text or editor patch text."),
-                    OptionalBooleanProperty("post_check", "If true, run ready and errors after applying diff.")),
+                    OptionalBooleanProperty("post_check", "Run wait_for_ready and errors after applying diff (default true). Set to false only if you plan to apply several diffs in a row and will check errors manually afterward.")),
                 title: "Apply Editor Patch",
                 annotations: DestructiveToolAnnotations()),
-            Tool("list_documents", "List open documents from the IDE document table.", EmptySchema()),
+            Tool(
+                WriteFileToolName,
+                "Write or overwrite a file with the given content through the live editor. Use this when apply_diff is impractical — for example when creating a new file or replacing a large section. The file opens in Visual Studio and is saved automatically. " + CodeQualityRules,
+                ObjectSchema(
+                    RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription),
+                    RequiredStringProperty("content", "Full UTF-8 text content to write to the file."),
+                    OptionalBooleanProperty("post_check", "Run wait_for_ready and errors after writing (default true). Set to false only if you plan to write several files in a row and will check errors manually afterward.")),
+                title: "Write File",
+                annotations: DestructiveToolAnnotations()),
+            Tool("list_documents", "List all documents currently loaded in the IDE document table (may include background-loaded files). Use list_tabs to list only visible editor tabs.", EmptySchema()),
             Tool(
                 "activate_document",
                 "Activate one open document by path or name.",
                 ObjectSchema(RequiredStringProperty("query", "Document path or name fragment."))),
             Tool(
                 "close_document",
-                "Close one matching document, or all open documents.",
+                "Close one matching document, or all open documents. Use { all: true, save: true } to save and close all tabs before a build or install. Close files you are done with to keep the tab bar under ~7 tabs — the tab bar scrolls past that and is disruptive for the user. Prefer this over close_file when you need to close multiple documents.",
                 ObjectSchema(
                     OptionalStringProperty("query", "Document path or name fragment."),
                     OptionalBooleanProperty("all", "Close all open documents (default false)."),
@@ -856,23 +1037,29 @@ internal static partial class CliApp
                     OptionalStringProperty("file", "File path to save, or omit for active document."),
                     OptionalBooleanProperty("all", "Save all open documents (default false)."))),
             Tool(
+                "reload_document",
+                "Reload a document from disk inside Visual Studio, forcing IntelliSense to re-analyse it. " +
+                "Use this after an external tool or shell command modifies a file outside the editor, or to clear stale diagnostics.",
+                ObjectSchema(
+                    RequiredStringProperty("file", "Absolute or solution-relative file path to reload."))),
+            Tool(
                 "close_file",
-                "Close one open file tab.",
+                "Close one open file tab by path or name. Prefer close_document which supports closing all documents at once.",
                 ObjectSchema(
                     OptionalStringProperty("file", "File path."),
                     OptionalStringProperty("query", "Name fragment."),
                     OptionalBooleanProperty("save", "Save before closing (default false)."))),
             Tool(
                 "close_others",
-                "Close all tabs except the active one.",
+                "Close all editor tabs except the currently active one — use this to quickly tidy the tab bar when too many tabs are open. Use close_document { all: true } to close all tabs including the active one.",
                 ObjectSchema(OptionalBooleanProperty("save", "Save before closing (default false)."))),
             Tool(
                 "list_windows",
-                "List open tool/document windows.",
+                "List open Visual Studio tool windows and document windows (e.g. Solution Explorer, Error List, Output). Not OS windows.",
                 ObjectSchema(OptionalStringProperty("query", "Optional caption filter."))),
             Tool(
                 ActivateWindowArgumentName,
-                "Activate one window by caption fragment.",
+                "Bring a Visual Studio tool window or document window to the foreground by caption fragment (e.g. 'Solution Explorer', 'Output').",
                 ObjectSchema(RequiredStringProperty("window", "Window caption fragment."))),
             Tool(
                 "execute_command",
@@ -894,24 +1081,23 @@ internal static partial class CliApp
                     OptionalIntegerProperty(ColumnArgumentName, "Optional 1-based column number."))),
             Tool(
                 "goto_definition",
-                "Jump to definition at file/line/column.",
+                "Navigate the editor cursor to the definition of the symbol at file/line/column. Use peek_definition or symbol_info to read the definition source without navigating.",
                 FileLineColumnSchema()),
             Tool(
                 "goto_implementation",
-                "Jump to one implementation at file/line/column.",
+                "Navigate the editor cursor to one implementation of the interface/abstract member at file/line/column. Use find_references for all implementations.",
                 FileLineColumnSchema()),
             Tool(
                 "call_hierarchy",
-                "Open Call Hierarchy at file/line/column.",
+                "Open the Call Hierarchy view for the symbol at file/line/column, showing callers and callees.",
                 FileLineColumnSchema()),
             Tool(
                 "build_errors",
-                "Build the solution and capture errors after completion. By default this refuses to build when diagnostics already exist and fails if any errors, warnings, or messages remain after the build.",
+                "Trigger a build and return only the errors list after completion. Use build when you need the full build result with configuration control; use build_errors when you only care about the resulting error list. Refuses to build if any diagnostics already exist in the Error List.",
                 ObjectSchema(
                     OptionalIntegerProperty(TimeoutMillisecondsArgumentName, "Optional build timeout in milliseconds."),
                     OptionalIntegerProperty(MaxArgumentName, "Optional max error rows."),
-                    OptionalBooleanProperty(WaitForIntellisenseArgumentName, "Wait for IntelliSense readiness before checking for blocking diagnostics (default true)."),
-                    OptionalBooleanProperty("require_clean_diagnostics", "Refuse to build when the Error List contains any errors, warnings, or messages (default true)."))),
+                    OptionalBooleanProperty(WaitForIntellisenseArgumentName, "Wait for IntelliSense readiness before checking for blocking diagnostics (default true)."))),
             Tool("debug_threads", "Get debugger thread snapshot.", EmptySchema()),
             Tool(
                 "debug_stack",
@@ -933,7 +1119,7 @@ internal static partial class CliApp
             Tool("debug_exceptions", "Get debugger exception settings snapshot (best effort).", EmptySchema()),
             Tool(
                 "diagnostics_snapshot",
-                "Capture IDE/debug/build state and errors/warnings in one response.",
+                "Capture a comprehensive IDE snapshot: build state, active document, errors, warnings, and debug status — all in one call. Use this for a quick health check instead of calling errors + bridge_state separately.",
                 ObjectSchema(
                     OptionalBooleanProperty(WaitForIntellisenseArgumentName, "Wait for IntelliSense before diagnostics (default true)."),
                     OptionalBooleanProperty(QuickArgumentName, "Use quick diagnostics snapshot mode (default false)."),
@@ -1099,8 +1285,16 @@ internal static partial class CliApp
                 ObjectSchema(OptionalStringProperty(PathArgumentName, "Optional interpreter path to inspect."))),
             Tool(
                 "python_set_active_env",
-                "Select the Python interpreter or environment the bridge should use for future Python tools. This is read-only and does not mutate the environment.",
-                ObjectSchema(RequiredStringProperty(PathArgumentName, "Interpreter path to select."))),
+                "Select the Python interpreter that bridge Python tools (python_repl, python_run_file, python_list_packages, etc.) will target. Provide either 'path' (full interpreter path) or 'name' (environment name, e.g. a conda env name or venv directory name). Does not install or modify the environment — use python_install_package for that.",
+                ObjectSchema(
+                    OptionalStringProperty(PathArgumentName, "Full interpreter path to select (e.g. C:\\Python313\\python.exe or C:\\envs\\myenv\\Scripts\\python.exe)."),
+                    OptionalStringProperty("name", "Environment name to select (e.g. 'superslicer' for a conda env, '.venv' for a virtual env). Matched case-insensitively against the last directory component of each environment's prefix."))),
+            Tool(
+                "python_set_project_env",
+                "Set the active Python interpreter for the open Visual Studio Python project or open-folder workspace. Affects IntelliSense and debugging inside VS. If 'path' is omitted, auto-detects a conda environment whose name matches the project or solution name. Use python_set_active_env to set the interpreter for bridge Python tools instead.",
+                ObjectSchema(
+                    OptionalStringProperty(PathArgumentName, "Full interpreter path to set as the project interpreter. Omit to auto-detect a conda env matching the project name."),
+                    OptionalStringProperty(ProjectArgumentName, "Python project name or path to target. Defaults to the active project when omitted."))),
             Tool(
                 "python_list_packages",
                 "List installed packages from the selected interpreter, or an explicitly provided interpreter path.",
@@ -1146,12 +1340,13 @@ internal static partial class CliApp
                     OptionalIntegerProperty(TimeoutMillisecondsArgumentName, DefaultPythonToolTimeoutDescription))),
             Tool(
                 "shell_exec",
-                "Execute a process and capture its stdout, stderr, and exit code. Working directory defaults to the solution directory. Requires a Visual Studio approval popup unless IDE Bridge > Allow Bridge Shell Exec is enabled.",
+                "Execute a process and capture its stdout, stderr, and exit code. Requires Visual Studio to be running — do not use after vs_close. Working directory defaults to the solution directory. Requires a Visual Studio approval popup unless IDE Bridge > Allow Bridge Shell Exec is enabled.",
                 ObjectSchema(
                     RequiredStringProperty("exe", "Executable path or name (e.g. 'powershell', 'cmd', 'ISCC.exe')."),
                     OptionalStringProperty("args", "Arguments string to pass to the executable."),
                     OptionalStringProperty("cwd", "Working directory. Defaults to the solution directory."),
-                    OptionalIntegerProperty(TimeoutMillisecondsArgumentName, "Timeout in milliseconds (default 60000)."))),
+                    OptionalIntegerProperty(TimeoutMillisecondsArgumentName, "Timeout in milliseconds (default 60000)."),
+                    OptionalIntegerProperty("tail_lines", "If set, truncate stdout and stderr to the last N lines each. Use this for large build outputs where only the summary matters."))),
             Tool(
                 "set_version",
                 "Update the version string across all version files (Directory.Build.props, source.extension.vsixmanifest, and installer/inno/vs-ide-bridge.iss). Keeps every version location in sync. Requires a Visual Studio approval popup unless IDE Bridge > Allow Bridge Edits is enabled.",
@@ -1159,25 +1354,25 @@ internal static partial class CliApp
                     RequiredStringProperty("version", "New version string, e.g. '2.1.0'."))),
             Tool(
                 "vs_close",
-                "Close a Visual Studio instance. Targets the currently bound instance unless 'process_id' is supplied. Uses CloseMainWindow (graceful, VS may prompt to save) unless 'force' is true.",
+                "Close a Visual Studio instance. WARNING: all bridge tools (including shell_exec) route through VS and stop working immediately after this call. Plan any post-close work (running installers, file moves) using native OS tools outside the bridge. Use vs_open + wait_for_instance to reconnect. Targets the currently bound instance unless 'process_id' is supplied.",
                 ObjectSchema(
                     OptionalIntegerProperty("process_id", "VS process ID to close. Defaults to the bound instance."),
                     OptionalBooleanProperty("force", "If true, forcibly kill the process instead of requesting a graceful close (default false)."))),
             Tool(
                 "vs_open",
-                "Launch a new Visual Studio instance, optionally opening a solution file. Returns immediately after the launch request is issued.",
+                "Launch a new Visual Studio instance, optionally opening a solution file. Returns immediately — you MUST call wait_for_instance next to block until the bridge is ready before using any other tools.",
                 ObjectSchema(
                     OptionalStringProperty(SolutionArgumentName, "Absolute path to a .sln or .slnx file to open."),
                     OptionalStringProperty("devenv_path", $"Explicit path to {DevenvExeFileName}. Auto-detected via vswhere if omitted."))),
             Tool(
                 "wait_for_instance",
-                "Wait for a Visual Studio bridge instance to appear. Use after vs_open for MCP hosts that cannot hold a long launch call open.",
+                "Wait for a newly launched Visual Studio bridge instance to appear and become ready. Always call this immediately after vs_open — no other bridge tool will work until this completes successfully.",
                 ObjectSchema(
-                    OptionalStringProperty(SolutionArgumentName, "Absolute path to a .sln or .slnx file to open."),
+                    OptionalStringProperty(SolutionArgumentName, "Optional absolute path to the .sln or .slnx file you expect the new instance to open."),
                     OptionalIntegerProperty(TimeoutMillisecondsArgumentName, $"How long to wait in milliseconds (default {VsOpenDiscoveryTimeoutMilliseconds})."))),
             Tool(
                 FindTextToolName,
-                "Full-text search across the solution or a path subtree. Returns file paths, line numbers and preview text.",
+                "Full-text search for a single query. Returns file paths, line numbers and preview text. When you have multiple queries to run, use find_text_batch instead — it runs all queries in one round-trip.",
                 ObjectSchema(
                     RequiredStringProperty(QueryArgumentName, "Search text or regex pattern."),
                     OptionalStringProperty(PathArgumentName, "Optional path or directory filter (solution-relative or absolute)."),
@@ -1191,7 +1386,7 @@ internal static partial class CliApp
                 annotations: ReadOnlyToolAnnotations()),
             Tool(
                 ReadFileToolName,
-                "Take one code slice from a file. Use start_line/end_line for a range, or line with context_before/context_after when a human asks for a slice around a location.",
+                "Take one code slice from a file. Use start_line/end_line for a range, or line with context_before/context_after for an anchor. When you need multiple slices (even from different files), use read_file_batch instead — it fetches all slices in one round-trip.",
                 ObjectSchema(
                     RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription),
                     OptionalIntegerProperty(StartLineArgumentName, "First 1-based line to read. Use with end_line for a range."),
@@ -1225,7 +1420,7 @@ internal static partial class CliApp
                 FileLineColumnSchema()),
             Tool(
                 "peek_definition",
-                "Return the definition source and surrounding context of the symbol at file/line/column.",
+                "Return the full definition source and surrounding context of the symbol at file/line/column without navigating the editor. Use this instead of goto_definition when you want to read the source, not jump to it.",
                 FileLineColumnSchema()),
             Tool(
                 "file_outline",
@@ -1233,25 +1428,24 @@ internal static partial class CliApp
                 ObjectSchema(RequiredStringProperty(FileArgumentName, AbsoluteOrSolutionRelativeFilePathDescription))),
             Tool(
                 "build",
-                "Trigger a solution build and return errors/warnings. By default this refuses to build when diagnostics already exist and fails if any errors, warnings, or messages remain after the build.",
+                "Trigger a solution build with optional configuration/platform and return full errors/warnings. Refuses to build if any diagnostics already exist in the Error List — fix them first. Use build_errors for a lightweight errors-only variant.",
                 ObjectSchema(
                     OptionalStringProperty(ConfigurationArgumentName, "Optional build configuration (e.g. Debug, Release)."),
                     OptionalStringProperty(PlatformArgumentName, "Optional build platform (e.g. x64)."),
-                    OptionalBooleanProperty(WaitForIntellisenseArgumentName, "Wait for IntelliSense readiness before checking for blocking diagnostics (default true)."),
-                    OptionalBooleanProperty("require_clean_diagnostics", "Refuse to build when the Error List contains any errors, warnings, or messages (default true)."))),
+                    OptionalBooleanProperty(WaitForIntellisenseArgumentName, "Wait for IntelliSense readiness before checking for blocking diagnostics (default true)."))),
             Tool(
                 "open_solution",
-                "Open a solution file in the current Visual Studio instance without opening a new window.",
+                "Open a specific existing .sln or .slnx file in the current Visual Studio instance without opening a new window. Use this when the user already gave you the exact solution path; do not call bind_solution afterward unless you need to switch this MCP session to a different already-open instance.",
                 ObjectSchema(
-                    RequiredStringProperty(SolutionArgumentName, "Absolute path to the .sln file to open."),
-                    OptionalBooleanProperty("wait_for_ready", "Wait for readiness after opening the solution (default true)."))),
+                    RequiredStringProperty(SolutionArgumentName, "Absolute path to the .sln or .slnx file to open."),
+                    OptionalBooleanProperty(WaitForReadyArgumentName, "Wait for readiness after opening the solution (default true)."))),
             Tool(
                 "create_solution",
                 "Create and open a new solution in the current Visual Studio instance.",
                 ObjectSchema(
                     RequiredStringProperty(DirectoryArgumentName, "Absolute directory where the new solution should be created."),
                     RequiredStringProperty(NameArgumentName, "Solution name. '.sln' is optional."),
-                    OptionalBooleanProperty("wait_for_ready", "Wait for readiness after opening the solution (default true)."))),
+                    OptionalBooleanProperty(WaitForReadyArgumentName, "Wait for readiness after opening the solution (default true)."))),
             Tool(
                 "search_solutions",
                 "Search for solution files (.sln/.slnx) on disk under a given root directory. Defaults to %USERPROFILE%\\source\\repos.",
@@ -1478,7 +1672,8 @@ internal static partial class CliApp
                 return await CallCondaToolAsync(id, toolName, args, bridgeBinding).ConfigureAwait(false);
             }
 
-            if (toolName.StartsWith("python_", StringComparison.Ordinal))
+            if (toolName.StartsWith("python_", StringComparison.Ordinal) &&
+                !string.Equals(toolName, "python_set_project_env", StringComparison.Ordinal))
             {
                 return await CallPythonToolAsync(id, toolName, args, bridgeBinding).ConfigureAwait(false);
             }
@@ -1542,9 +1737,9 @@ internal static partial class CliApp
 
             var (command, commandArgs) = toolName switch
             {
-                "state" => ("state", string.Empty),
+                "bridge_state" => ("state", string.Empty),
                 UiSettingsToolName => ("ui-settings", string.Empty),
-                "ready" => ("ready", string.Empty),
+                WaitForReadyArgumentName => ("ready", string.Empty),
                 "errors" => ("errors", BuildDiagnosticsArgs(args)),
                 WarningsToolName => (WarningsToolName, BuildDiagnosticsArgs(args)),
                 "list_tabs" => ("list-tabs", string.Empty),
@@ -1553,12 +1748,14 @@ internal static partial class CliApp
                 FindTextBatchToolName => ("find-text-batch", BuildFindTextBatchArgs(args)),
                 "search_symbols" => ("search-symbols", BuildSearchSymbolsArgs(args)),
                 CountReferencesToolName => ("count-references", BuildCountReferencesArgs(args)),
-                "quick_info" => ("quick-info", BuildFileLineColumnArgs(args)),
+                "symbol_info" => ("quick-info", BuildFileLineColumnArgs(args)),
                 ApplyDiffToolName => ("apply-diff", BuildApplyDiffArgs(args)),
+                WriteFileToolName => ("write-file", BuildWriteFileArgs(args)),
                 "list_documents" => ("list-documents", string.Empty),
                 "activate_document" => ("activate-document", BuildSingleStringSwitchArg(args, QueryArgumentName, QueryArgumentName)),
                 "close_document" => ("close-document", BuildCloseDocumentArgs(args)),
                 "save_document" => ("save-document", BuildSaveDocumentArgs(args)),
+                "reload_document" => ("reload-document", BuildArgs((FileArgumentName, GetOptionalStringArgument(args, FileArgumentName)))),
                 "close_file" => ("close-file", BuildCloseFileArgs(args)),
                 "close_others" => ("close-others", BuildSaveOnlyArgs(args)),
                 "list_windows" => ("list-windows", BuildSingleStringSwitchArg(args, QueryArgumentName, QueryArgumentName)),
@@ -1597,6 +1794,7 @@ internal static partial class CliApp
                     ("solution-folder", GetOptionalStringArgument(args, "solution_folder")))),
                 RemoveProjectToolName => ("remove-project", BuildArgs((ProjectArgumentName, GetOptionalStringArgument(args, ProjectArgumentName)))),
                 "set_startup_project" => ("set-startup-project", BuildArgs((ProjectArgumentName, GetOptionalStringArgument(args, ProjectArgumentName)))),
+                "python_set_project_env" => ("set-python-project-env", BuildArgs((PathArgumentName, GetOptionalStringArgument(args, PathArgumentName)), (ProjectArgumentName, GetOptionalStringArgument(args, ProjectArgumentName)))),
                 AddFileToProjectToolName => ("add-file-to-project", BuildArgs(
                     (ProjectArgumentName, GetOptionalStringArgument(args, ProjectArgumentName)),
                     (FileArgumentName, GetOptionalStringArgument(args, FileArgumentName)))),
@@ -1664,8 +1862,36 @@ internal static partial class CliApp
                 response["preBuildDiagnostics"] = preBuildDiagnostics;
             }
 
-            if (string.Equals(toolName, "apply_diff", StringComparison.Ordinal) && GetBoolean(args, "post_check", false))
+            var isEditTool = string.Equals(toolName, ApplyDiffToolName, StringComparison.Ordinal) ||
+                             string.Equals(toolName, WriteFileToolName, StringComparison.Ordinal);
+            if (isEditTool && GetBoolean(args, "post_check", true))
             {
+                if (string.Equals(toolName, ApplyDiffToolName, StringComparison.Ordinal))
+                {
+                    var changedItems = response["Data"]?["items"]?.AsArray();
+                    if (changedItems != null)
+                    {
+                        foreach (var item in changedItems)
+                        {
+                            var itemPath = item?["path"]?.GetValue<string>();
+                            if (!string.IsNullOrEmpty(itemPath))
+                            {
+                                await SendBridgeAsync(id, bridgeBinding, "reload-document",
+                                    BuildArgs((FileArgumentName, itemPath))).ConfigureAwait(false);
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    var filePath = args?[FileArgumentName]?.GetValue<string>();
+                    if (!string.IsNullOrEmpty(filePath))
+                    {
+                        await SendBridgeAsync(id, bridgeBinding, "reload-document",
+                            BuildArgs((FileArgumentName, filePath))).ConfigureAwait(false);
+                    }
+                }
+
                 var ready = await SendBridgeAsync(id, bridgeBinding, "ready", string.Empty).ConfigureAwait(false);
                 var errors = await SendBridgeAsync(id, bridgeBinding, "errors", "--wait-for-intellisense true").ConfigureAwait(false);
                 response["postCheck"] = new JsonObject
@@ -1984,16 +2210,29 @@ internal static partial class CliApp
         {
             var overrideExample = name switch
             {
-                "bind_solution" => "{ \"solution\": \"VsIdeBridge.sln\" }",
+                "bind_solution" => new JsonObject
+                {
+                    [SolutionArgumentName] = "VsIdeBridge.sln",
+                }.ToJsonString(JsonOptions),
                 "help" => "{ \"name\": \"open_file\" }",
                 "tool_help" => "{ \"name\": \"open_file\" }",
-                "open_solution" => "{ \"solution\": \"C:\\\\repo\\\\VsIdeBridge.sln\", \"wait_for_ready\": true }",
+                "open_solution" => new JsonObject
+                {
+                    [SolutionArgumentName] = "C:\\Users\\name\\source\\repos\\PinballBot\\PinballBot.sln",
+                    [WaitForReadyArgumentName] = true,
+                }.ToJsonString(JsonOptions),
+                "wait_for_instance" => new JsonObject
+                {
+                    [SolutionArgumentName] = "C:\\Users\\name\\source\\repos\\PinballBot\\PinballBot.sln",
+                    [TimeoutMillisecondsArgumentName] = 30000,
+                }.ToJsonString(JsonOptions),
                 "create_solution" => "{ \"directory\": \"C:\\\\repo\\\\Scratch\", \"name\": \"ScratchApp\", \"wait_for_ready\": true }",
                 FindTextToolName => "{ \"query\": \"Tool(\", \"path\": \"src\\\\VsIdeBridgeCli\", \"scope\": \"solution\" }",
-                FindTextBatchToolName => $"{{ \"queries\": [\"{ReadFileToolName}\", \"{ReadFileBatchToolName}\", \"{FindTextBatchToolName}\"], \"path\": \"src\\\\VsIdeBridgeCli\", \"scope\": \"solution\", \"max_queries_per_chunk\": 5 }}",
+                FindTextBatchToolName => $"{{ \"queries\": [\"{ReadFileToolName}\", \"{ReadFileBatchToolName}\", \"{FindTextBatchToolName}\"], \"path\": \"src\\\\VsIdeBridgeCli\", \"scope\": \"solution\", \"max_queries_per_chunk\": {DefaultMaxQueriesPerChunk} }}",
                 "python_list_envs" => "{}",
                 "python_env_info" => "{ \"path\": \"C:\\\\Python313\\\\python.exe\" }",
                 "python_set_active_env" => "{ \"path\": \"C:\\\\Python313\\\\python.exe\" }",
+                "python_set_project_env" => "{ \"path\": \"C:\\\\Python313\\\\python.exe\" }",
                 "python_list_packages" => "{ \"path\": \"C:\\\\Python313\\\\python.exe\" }",
                 "python_repl" => new JsonObject
                 {
@@ -2125,9 +2364,9 @@ internal static partial class CliApp
             return toolName switch
             {
                 "help" => "help",
-                "state" => "state",
+                "bridge_state" => "state",
                 UiSettingsToolName => "ui-settings",
-                "ready" => "ready",
+                WaitForReadyArgumentName => "ready",
                 "errors" => "errors",
                 "warnings" => "warnings",
                 "list_tabs" => "list-tabs",
@@ -2135,8 +2374,9 @@ internal static partial class CliApp
                 FindFilesToolName => "find-files",
                 "search_symbols" => "search-symbols",
                 CountReferencesToolName => "count-references",
-                "quick_info" => "quick-info",
+                "symbol_info" => "quick-info",
                 "apply_diff" => "apply-diff",
+                WriteFileToolName => "write-file",
                 "debug_threads" => "debug-threads",
                 "debug_stack" => "debug-stack",
                 "debug_locals" => "debug-locals",
@@ -2161,6 +2401,7 @@ internal static partial class CliApp
                 "activate_document" => "activate-document",
                 "close_document" => "close-document",
                 "save_document" => "save-document",
+                "reload_document" => "reload-document",
                 "close_file" => "close-file",
                 "close_others" => "close-others",
                 "list_windows" => "list-windows",
@@ -2179,6 +2420,7 @@ internal static partial class CliApp
                 AddProjectToolName => "add-project",
                 RemoveProjectToolName => "remove-project",
                 "set_startup_project" => "set-startup-project",
+                "python_set_project_env" => "set-python-project-env",
                 AddFileToProjectToolName => "add-file-to-project",
                 RemoveFileFromProjectToolName => "remove-file-from-project",
                 "set_breakpoint" => "set-breakpoint",
@@ -2229,7 +2471,7 @@ internal static partial class CliApp
                 throw new McpRequestException(id, JsonRpcInvalidParamsCode, "open_solution requires a non-empty solution path.");
             }
 
-            var waitForReady = GetBoolean(args, "wait_for_ready", true);
+            var waitForReady = GetBoolean(args, WaitForReadyArgumentName, true);
             // Clear solution hint before sending so instance lookup succeeds even when VS has a different solution open.
             var open = await SendBridgeIgnoringSolutionHintAsync(id, bridgeBinding, "open-solution", BuildArgs(("solution", solution))).ConfigureAwait(false);
 
@@ -2270,7 +2512,7 @@ internal static partial class CliApp
                 throw new McpRequestException(id, JsonRpcInvalidParamsCode, "create_solution requires a non-empty solution name.");
             }
 
-            var waitForReady = GetBoolean(args, "wait_for_ready", true);
+            var waitForReady = GetBoolean(args, WaitForReadyArgumentName, true);
             var create = await SendBridgeIgnoringSolutionHintAsync(
                 id,
                 bridgeBinding,
@@ -2404,8 +2646,8 @@ internal static partial class CliApp
             var name = p?["name"]?.GetValue<string>() ?? throw new McpRequestException(id, JsonRpcInvalidParamsCode, "prompts/get missing name.");
             var text = name switch
             {
-                "help" => "Key tools: bind_solution or bind_instance to connect, open_solution to load a .sln, state/ready/bridge_health for status. Navigation: find_files, find_text, find_text_batch, open_file, search_symbols, count_references, quick_info, read_file, find_references, peek_definition, file_outline, goto_definition, goto_implementation, call_hierarchy. Editing: apply_diff (optionally post_check). Documents: list_documents, activate_document, close_document, save_document, close_file, close_others. Windows: list_windows, activate_window. Diagnostics: errors, warnings, diagnostics_snapshot, build (pre-build diagnostics auto-included), build_errors, build_configurations, set_build_configuration. Dependencies: nuget_restore, nuget_add_package, nuget_remove_package, conda_install, conda_remove. Debug: debug_threads, debug_stack, debug_locals, debug_modules, debug_watch, debug_exceptions. Use tool_help for per-tool schemas and examples.",
-                "fix_current_errors" => "Bind to the right solution first, call errors to list problems. Use read_file or find_text to inspect code, quick_info and find_references for context, then apply_diff to fix.",
+                "help" => "Key tools: bind_solution or bind_instance to connect, open_solution to load a .sln, state/ready/bridge_health for status. Navigation: find_files, find_text, find_text_batch, open_file, search_symbols, count_references, quick_info, read_file, find_references, peek_definition, file_outline, goto_definition, goto_implementation, call_hierarchy. Editing: apply_diff (runs error check after each edit by default). Documents: list_documents, activate_document, close_document, save_document, close_file, close_others. Windows: list_windows, activate_window. Diagnostics: errors, warnings, diagnostics_snapshot, build (pre-build diagnostics auto-included), build_errors, build_configurations, set_build_configuration. Dependencies: nuget_restore, nuget_add_package, nuget_remove_package, conda_install, conda_remove. Debug: debug_threads, debug_stack, debug_locals, debug_modules, debug_watch, debug_exceptions. Use tool_help for per-tool schemas and examples.",
+                "fix_current_errors" => "Bind to the right solution first, call errors to list problems. Use read_file or find_text to inspect code, symbol_info and find_references for context, then apply_diff to fix.",
                 "open_solution_and_wait_ready" => "Call open_solution with the absolute .sln path and wait_for_ready=true (default). Then call state or bridge_health.",
                 "git_review_before_commit" => "Call git_status, git_diff_unstaged, git_diff_staged, git_log, then git_add and git_commit when ready.",
                 "git_sync_with_remote" => "Call git_fetch, git_status, and git_log first. Then use git_pull when behind or git_push when ahead.",
@@ -2505,8 +2747,7 @@ internal static partial class CliApp
                 (ConfigurationArgumentName, GetOptionalStringArgument(args, ConfigurationArgumentName)),
                 (PlatformArgumentName, GetOptionalStringArgument(args, PlatformArgumentName)),
                 .. BuildBooleanArgs(args,
-                    ("wait-for-intellisense", WaitForIntellisenseArgumentName, true, true),
-                    ("require-clean-diagnostics", "require_clean_diagnostics", true, true)),
+                    ("wait-for-intellisense", WaitForIntellisenseArgumentName, true, true)),
             ]);
         }
 
@@ -2529,8 +2770,7 @@ internal static partial class CliApp
                 (TimeoutMillisecondsSwitchName, GetBuildErrorsTimeoutArgument(id, args)),
                 ("max", max),
                 .. BuildBooleanArgs(args,
-                    ("wait-for-intellisense", WaitForIntellisenseArgumentName, true, true),
-                    ("require-clean-diagnostics", "require_clean_diagnostics", true, true)),
+                    ("wait-for-intellisense", WaitForIntellisenseArgumentName, true, true)),
             ]);
         }
 
@@ -2673,6 +2913,13 @@ internal static partial class CliApp
                 ("patch-text-base64", Convert.ToBase64String(Encoding.UTF8.GetBytes(GetOptionalStringArgument(args, "patch") ?? string.Empty))),
                 ("open-changed-files", "true"),
                 ("save-changed-files", "true"));
+        }
+
+        private static string BuildWriteFileArgs(JsonObject? args)
+        {
+            return BuildArgs(
+                (FileArgumentName, GetOptionalStringArgument(args, FileArgumentName)),
+                ("content-base64", Convert.ToBase64String(Encoding.UTF8.GetBytes(GetOptionalStringArgument(args, "content") ?? string.Empty))));
         }
 
         private static string BuildSingleStringSwitchArg(JsonObject? args, string switchName, string argumentName)
@@ -2944,10 +3191,12 @@ internal static partial class CliApp
                 RemoveProjectToolName or
                 AddFileToProjectToolName or
                 RemoveFileFromProjectToolName or
-                "github_issue_close" => DestructiveToolAnnotations(),
-                "state" or
+                "github_issue_close" or
+                "vs_close" or
+                "clear_breakpoints" => DestructiveToolAnnotations(),
+                "bridge_state" or
                 UiSettingsToolName or
-                "ready" or
+                WaitForReadyArgumentName or
                 "bridge_health" or
                 "list_instances" or
                 "help" or
@@ -2968,6 +3217,7 @@ internal static partial class CliApp
                 "git_stash_list" or
                 "git_branch_list" or
                 "git_log" or
+                "git_show" or
                 "git_diff_staged" or
                 "git_diff_unstaged" or
                 "search_solutions" or
@@ -2979,7 +3229,7 @@ internal static partial class CliApp
                 ReadFileBatchToolName or
                 CountReferencesToolName or
                 "find_references" or
-                "quick_info" or
+                "symbol_info" or
                 "peek_definition" or
                 "goto_definition" or
                 "goto_implementation" or
@@ -3243,7 +3493,7 @@ internal static partial class CliApp
                     result = await PythonRuntimeService.GetEnvironmentInfoAsync(GetOptionalStringArgument(args, PathArgumentName)).ConfigureAwait(false);
                     break;
                 case "python_set_active_env":
-                    result = await PythonRuntimeService.SetActiveEnvironmentAsync(GetRequiredString(args, id, PathArgumentName)).ConfigureAwait(false);
+                    result = await PythonRuntimeService.SetActiveEnvironmentAsync(GetOptionalStringArgument(args, PathArgumentName), GetOptionalStringArgument(args, "name")).ConfigureAwait(false);
                     break;
                 case "python_list_packages":
                     result = await PythonRuntimeService.ListPackagesAsync(GetOptionalStringArgument(args, PathArgumentName)).ConfigureAwait(false);
@@ -3430,6 +3680,20 @@ internal static partial class CliApp
             }
 
             var result = await RunProcessAsync(exe, arguments, workingDirectory, timeoutMs).ConfigureAwait(false);
+            var tailLines = GetIntOrDefault(args, "tail_lines", 0);
+            if (tailLines > 0)
+            {
+                foreach (var key in new[] { "stdout", "stderr" })
+                {
+                    var text = result[key]?.GetValue<string>();
+                    if (!string.IsNullOrEmpty(text))
+                    {
+                        var lines = text.Split('\n');
+                        if (lines.Length > tailLines)
+                            result[key] = JsonValue.Create(string.Join('\n', lines[^tailLines..]));
+                    }
+                }
+            }
             AttachApprovalMetadata(result, approvalResponse);
             return WrapToolResult(result, !(result["success"]?.GetValue<bool>() ?? false));
         }

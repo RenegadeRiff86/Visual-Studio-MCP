@@ -56,14 +56,14 @@ internal static partial class PythonRuntimeService
         };
     }
 
-    internal static async Task<JsonObject> SetActiveEnvironmentAsync(string interpreterPath)
+    internal static async Task<JsonObject> SetActiveEnvironmentAsync(string? interpreterPath, string? name = null)
     {
-        if (string.IsNullOrWhiteSpace(interpreterPath))
+        if (string.IsNullOrWhiteSpace(interpreterPath) && string.IsNullOrWhiteSpace(name))
         {
-            throw new InvalidOperationException("Interpreter path is required.");
+            throw new InvalidOperationException("Either 'path' or 'name' is required.");
         }
 
-        var environment = await ResolveEnvironmentAsync(interpreterPath).ConfigureAwait(false);
+        var environment = await ResolveEnvironmentAsync(interpreterPath, name).ConfigureAwait(false);
         SaveActiveInterpreterPath(environment.Path);
         var selectedEnvironment = environment with { Selected = true };
         return new JsonObject
@@ -363,13 +363,15 @@ internal static partial class PythonRuntimeService
         return result;
     }
 
-    private static async Task<PythonEnvironment> ResolveEnvironmentAsync(string? interpreterPath)
+    private static async Task<PythonEnvironment> ResolveEnvironmentAsync(string? interpreterPath, string? name = null)
     {
         var requestedPath = NormalizePath(interpreterPath);
         var environments = await DiscoverEnvironmentsAsync(LoadActiveInterpreterPath()).ConfigureAwait(false);
         var environment = !string.IsNullOrWhiteSpace(requestedPath)
             ? environments.FirstOrDefault(item => PathEquals(item.Path, requestedPath))
-            : environments.FirstOrDefault(item => item.Selected);
+            : !string.IsNullOrWhiteSpace(name)
+                ? environments.FirstOrDefault(item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase))
+                : environments.FirstOrDefault(item => item.Selected);
 
         if (environment is not null)
         {
@@ -381,7 +383,10 @@ internal static partial class PythonRuntimeService
             return await InspectInterpreterAsync(requestedPath, selected: false, source: "explicit").ConfigureAwait(false);
         }
 
-        throw new InvalidOperationException("No Python interpreter is available. Configure a bridge-managed runtime or select an existing interpreter first.");
+        var notFoundReason = !string.IsNullOrWhiteSpace(name)
+            ? $"No Python environment named '{name}' was found. Call python_list_envs to see available environments."
+            : "No Python interpreter is available. Configure a bridge-managed runtime or select an existing interpreter first.";
+        throw new InvalidOperationException(notFoundReason);
     }
 
     private static async Task<List<PythonEnvironment>> DiscoverEnvironmentsAsync(string? activeInterpreterPath)
@@ -443,8 +448,10 @@ internal static partial class PythonRuntimeService
         var managedRuntimeVersion = kind == "managed"
             ? (string.IsNullOrWhiteSpace(metadata.Version) ? runtimeConfig?.ManagedRuntimeVersion : metadata.Version)
             : null;
+        var name = ComputeEnvironmentName(kind, metadata.Prefix);
         return new PythonEnvironment(
             Path: interpreterPath,
+            Name: name,
             Version: metadata.Version,
             Kind: kind,
             Selected: selected,
@@ -933,6 +940,25 @@ else:
         return "system";
     }
 
+    private static string? ComputeEnvironmentName(string kind, string? prefix)
+    {
+        if (kind == "managed")
+        {
+            return "managed";
+        }
+
+        if (!string.IsNullOrWhiteSpace(prefix))
+        {
+            var leafName = System.IO.Path.GetFileName(prefix.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar));
+            if (!string.IsNullOrWhiteSpace(leafName))
+            {
+                return leafName;
+            }
+        }
+
+        return null;
+    }
+
     private static bool IsManagedInterpreter(string interpreterPath)
     {
         foreach (var candidate in GetManagedInterpreterCandidates())
@@ -1261,6 +1287,7 @@ else:
 
     private sealed record PythonEnvironment(
         string Path,
+        string? Name,
         string? Version,
         string Kind,
         bool Selected,
@@ -1277,6 +1304,7 @@ else:
             return new JsonObject
             {
                 ["path"] = Path,
+                ["name"] = Name,
                 ["version"] = Version,
                 ["kind"] = Kind,
                 ["selected"] = Selected,

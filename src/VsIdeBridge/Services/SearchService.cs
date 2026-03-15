@@ -1308,6 +1308,11 @@ internal sealed class SearchService
         {
             foreach (ProjectItem item in project.ProjectItems)
             {
+                if (item is null)
+                {
+                    continue;
+                }
+
                 if (item.SubProject is not null)
                 {
                     foreach (var file in EnumerateProjectFiles(item.SubProject))
@@ -1322,6 +1327,11 @@ internal sealed class SearchService
 
         foreach (ProjectItem item in project.ProjectItems)
         {
+            if (item is null)
+            {
+                continue;
+            }
+
             foreach (var file in EnumerateProjectItemFiles(item, project.UniqueName))
             {
                 yield return file;
@@ -1332,6 +1342,11 @@ internal sealed class SearchService
     private static IEnumerable<(string Path, string ProjectUniqueName)> EnumerateProjectItemFiles(ProjectItem item, string projectUniqueName)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (item is null)
+        {
+            yield break;
+        }
 
         if (item.FileCount > 0)
         {
@@ -1352,6 +1367,11 @@ internal sealed class SearchService
 
         foreach (ProjectItem child in item.ProjectItems)
         {
+            if (child is null)
+            {
+                continue;
+            }
+
             foreach (var file in EnumerateProjectItemFiles(child, projectUniqueName))
             {
                 yield return file;

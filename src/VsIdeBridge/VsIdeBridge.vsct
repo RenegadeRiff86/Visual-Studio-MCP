@@ -129,6 +129,28 @@
           <LocCanonicalName>.Tools.IdeGetUiSettings</LocCanonicalName>
         </Strings>
       </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeWriteFile" priority="0x024D" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Write File</ButtonText>
+          <CommandName>IdeWriteFile</CommandName>
+          <CanonicalName>Tools.IdeWriteFile</CanonicalName>
+          <LocCanonicalName>.Tools.IdeWriteFile</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeSetPythonProjectEnv" priority="0x024F" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Set Python Project Env</ButtonText>
+          <CommandName>IdeSetPythonProjectEnv</CommandName>
+          <CanonicalName>Tools.IdeSetPythonProjectEnv</CanonicalName>
+          <LocCanonicalName>.Tools.IdeSetPythonProjectEnv</LocCanonicalName>
+        </Strings>
+      </Button>
       <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeSmokeTest" priority="0x01F1" type="Button">
         <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
         <CommandFlag>CommandWellOnly</CommandFlag>
@@ -888,6 +910,17 @@
           <LocCanonicalName>.Tools.IdeSaveDocument</LocCanonicalName>
         </Strings>
       </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeReloadDocument" priority="0x024E" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Reload Document</ButtonText>
+          <CommandName>IdeReloadDocument</CommandName>
+          <CanonicalName>Tools.IdeReloadDocument</CanonicalName>
+          <LocCanonicalName>.Tools.IdeReloadDocument</LocCanonicalName>
+        </Strings>
+      </Button>
     </Buttons>
   </Commands>
 
@@ -979,6 +1012,9 @@
       <IDSymbol name="cmdidIdeFindTextBatch" value="0x024A" />
       <IDSymbol name="cmdidIdeRequestApproval" value="0x024B" />
       <IDSymbol name="cmdidIdeGetUiSettings" value="0x024C" />
+      <IDSymbol name="cmdidIdeWriteFile" value="0x024D" />
+      <IDSymbol name="cmdidIdeReloadDocument" value="0x024E" />
+      <IDSymbol name="cmdidIdeSetPythonProjectEnv" value="0x024F" />
     </GuidSymbol>
   </Symbols>
 </CommandTable>

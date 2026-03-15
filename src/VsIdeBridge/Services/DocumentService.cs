@@ -1,8 +1,10 @@
 using EnvDTE;
 using EnvDTE80;
+using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.ComponentModelHost;
 using Microsoft.VisualStudio.Editor;
 using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
 using Microsoft.VisualStudio.Text.Editor;
 using Microsoft.VisualStudio.TextManager.Interop;
 using Newtonsoft.Json.Linq;
@@ -450,6 +452,39 @@ internal sealed class DocumentService(IServiceProvider serviceProvider)
             ["path"] = TryGetDocumentFullName(active),
             ["saved"] = TryGetDocumentSaved(active),
         };
+    }
+
+    public async Task<JObject> ReloadDocumentAsync(string filePath)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        var normalized = PathNormalization.NormalizeFilePath(filePath);
+        var rdt = _serviceProvider.GetService(typeof(SVsRunningDocumentTable)) as IVsRunningDocumentTable
+            ?? throw new CommandErrorException("service_unavailable", "Running Document Table not available.");
+
+        var hr = rdt.FindAndLockDocument(
+            (uint)_VSRDTFLAGS.RDT_NoLock,
+            normalized,
+            out _,
+            out _,
+            out IntPtr docDataPtr,
+            out uint cookie);
+
+        if (hr != VSConstants.S_OK || cookie == 0 || docDataPtr == IntPtr.Zero)
+            return new JObject { ["reloaded"] = false, ["path"] = normalized, ["reason"] = "not_open" };
+
+        try
+        {
+            if (Marshal.GetObjectForIUnknown(docDataPtr) is not IVsPersistDocData docData)
+                return new JObject { ["reloaded"] = false, ["path"] = normalized, ["reason"] = "not_editable" };
+
+            ErrorHandler.ThrowOnFailure(docData.ReloadDocData(0));
+            return new JObject { ["reloaded"] = true, ["path"] = normalized };
+        }
+        finally
+        {
+            Marshal.Release(docDataPtr);
+        }
     }
 
     public async Task<JObject> CloseFileAsync(DTE2 dte, string? filePath, string? query, bool saveChanges)

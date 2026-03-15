@@ -74,7 +74,7 @@ The extension targets VS 18. The build script probes the `Community` install pat
 
 ## Build And Install
 
-Close all Visual Studio instances before updating the extension. If `devenv.exe` is still running, `VsIdeBridge.dll` can stay locked and the install step will fail even when the build succeeds.
+**Before building and installing:** close both Visual Studio *and* your MCP client (Claude Desktop, Codex, etc.). The MCP server subprocess (`vs-ide-bridge.exe mcp-server`) loads `VsIdeBridge.dll` and will lock it even after VS exits, causing the installer to fail.
 
 ### Preferred Full Build
 
@@ -108,53 +108,28 @@ This is enough to produce:
 - `src\VsIdeBridge\bin\Debug\net472\VsIdeBridge.dll`
 - `src\VsIdeBridgeCli\bin\Debug\net8.0\vs-ide-bridge.exe`
 
-### Installer (Preferred)
+### Install (Preferred)
 
-Create a standard Windows installer wizard (`Setup.exe`):
+**One-time task registration** (elevated terminal, once per machine):
 
-1. Install Inno Setup 6 once: https://jrsoftware.org/isdl.php
-2. Build release artifacts:
-
-```bat
-scripts\build.bat Release
-dotnet build src\VsIdeBridgeService\VsIdeBridgeService.csproj -c Release
+```
+msbuild src\VsIdeBridgeInstaller\VsIdeBridgeInstaller.csproj -t:RegisterInstallTask
 ```
 
-3. Build Setup.exe:
+This registers a Windows scheduled task (`VsIdeBridgeInstall`) that runs the installer as SYSTEM. After registration, every Release build in Visual Studio automatically installs without a UAC prompt.
+
+To install manually without the scheduled task:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-setup.ps1
+# Elevated terminal
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1
 ```
 
-Installer output:
-
-- `installer\output\vs-ide-bridge-setup-<version>.exe`
-
-What users see:
-
-- Standard installer wizard pages (welcome/license/install folder/progress/finish) plus a post-install stage that names the active service/VSIX step
-- Installed app appears in Apps & Features with uninstall entry
-- Installs bridge files, registers the service (`Automatic`), starts it after install, removes the legacy VSIX identity if present, and installs the current VSIX
-
-Default behavior:
-
-- Copies bridge CLI + service binaries to `C:\Program Files\VsIdeBridge`
-- Registers `VsIdeBridgeService` as an automatic-start Windows service
-- Installs/updates VSIX `RenegadeRiff86.VsIdeBridge` and removes the legacy `StanElston.VsIdeBridge` identity if present
-
-Idle policy enforced by service host:
-
-- Activity tracked from MCP request traffic, in-flight commands, and connected client stream state
-- Never stops while commands are in-flight
-- Restarts automatically on Windows service startup or manual recovery
-
-Logs and recovery:
+If vswhere doesn't find MSBuild (can happen with Preview VS installs), use the direct MSBuild path as a fallback:
 
 ```powershell
-Get-Content C:\ProgramData\VsIdeBridge\service.log -Tail 200
-sc.exe query VsIdeBridgeService
-sc.exe start VsIdeBridgeService
-sc.exe stop VsIdeBridgeService
+& "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" `
+    VsIdeBridge.sln /restore /m /p:Configuration=Release
 ```
 
 ### Legacy Manual VSIX Update (Troubleshooting)
@@ -298,6 +273,7 @@ apply_diff
 bind_instance
 bind_solution
 bridge_health
+bridge_state
 build
 build_configurations
 build_errors
@@ -378,15 +354,15 @@ python_remove_package
 python_repl
 python_run_file
 python_set_active_env
+python_set_project_env
 query_project_configurations
 query_project_items
 query_project_outputs
 query_project_properties
 query_project_references
-quick_info
 read_file
 read_file_batch
-ready
+reload_document
 remove_breakpoint
 remove_file_from_project
 remove_project
@@ -398,12 +374,14 @@ set_build_configuration
 set_startup_project
 set_version
 shell_exec
-state
+symbol_info
 tool_help
 vs_close
 vs_open
 wait_for_instance
+wait_for_ready
 warnings
+write_file
 ```
 
 ## Command Surface
@@ -421,8 +399,8 @@ Compatibility fields (`commands[]`, `legacyCommands[]`, `commandDetails[]`) are 
 | Command | Description |
 |---------|-------------|
 | `help` | List all registered commands (`catalog` is an alias) |
-| `state` | Snapshot of IDE state (solution path, active document, etc.) |
-| `ready` | Block until IntelliSense is available |
+| `state` | Snapshot of IDE state (solution path, active document, etc.) — MCP name: `bridge_state` |
+| `ready` | Block until IntelliSense is available — MCP name: `wait_for_ready` |
 | `open-solution` | Open a solution file |
 | `create-solution` | Create and open a new `.sln` solution |
 | `close` | Close the targeted Visual Studio instance gracefully |
@@ -440,7 +418,7 @@ Compatibility fields (`commands[]`, `legacyCommands[]`, `commandDetails[]`) are 
 | `file-symbols` | Symbol list for a file, with optional kind filtering |
 | `file-outline` | Alias for `file-symbols` |
 | `search-symbols` | Search symbols by name across the current scope |
-| `quick-info` | Resolve symbol/definition info at a location |
+| `quick-info` | Resolve symbol/definition info at a location — MCP name: `symbol_info` |
 | `smart-context` | Multi-context gather for agent queries |
 | `find-references` | Semantic find-all-references |
 | `call-hierarchy` | Callers and callees |
@@ -460,6 +438,8 @@ Compatibility fields (`commands[]`, `legacyCommands[]`, `commandDetails[]`) are 
 | `execute-command` | Execute any native VS command by name |
 | `format-document` | Format the current document or a specific file |
 | `apply-diff` | Apply a unified diff through the live VS editor |
+| `write-file` | Write or overwrite a file through the live VS editor |
+| `reload-document` | Reload a document from disk inside Visual Studio |
 
 ### Breakpoints
 
@@ -519,6 +499,12 @@ Compatibility fields (`commands[]`, `legacyCommands[]`, `commandDetails[]`) are 
 | `query-project-configurations` | List project configurations and platforms |
 | `query-project-references` | List project references |
 | `query-project-outputs` | Resolve primary output artifact and output directory |
+
+### Python
+
+| Command | Description |
+|---------|-------------|
+| `set-python-project-env` | Set the active Python interpreter for the open `.pyproj` project or open-folder workspace in Visual Studio (affects IntelliSense and debugging) |
 
 ## Argument Contract
 
@@ -654,6 +640,18 @@ Accepts `--patch-file` (path) or `--patch-text-base64` (inline). Existing-file e
 ### `IdeExecuteVsCommand`
 
 Supports optional `--file`, `--document`, `--line`, `--column` args to position the editor before dispatching the native command. Useful for VS commands that act on the caret position.
+
+### `IdeWriteFile`
+
+Writes or overwrites a file through the live Visual Studio editor so the change is immediately visible. Accepts `--file` (path) and `--content` (text) or `--content-base64` (inline). The file is opened in VS and saved automatically. MCP name: `write_file`.
+
+### `IdeReloadDocument`
+
+Reloads a document from disk inside Visual Studio, forcing IntelliSense to re-analyze it. Use this after an external tool or shell command modifies a file outside the editor, or to clear stale diagnostics. Accepts `--file` (path). MCP name: `reload_document`.
+
+### `IdeSetPythonProjectEnv`
+
+Sets the active Python interpreter for the open `.pyproj` project or open-folder workspace in Visual Studio. Accepts `--path` (interpreter path) and optional `--project` (project name or path). When `--path` is omitted, auto-detects a conda environment whose name matches the project name, falling back to the solution name. MCP name: `python_set_project_env`.
 
 ## JSON Output
 
@@ -868,11 +866,11 @@ Add `--instance <instanceId>` only when you intentionally want to pin one client
 
 Exposed MCP tools use simple names. See the MCP Command Catalog below or call `tool_help` for the live installed list and schemas:
 
-**IDE state and binding**: `state`, `ready`, `tool_help`, `help`, `bridge_health`, `list_instances`, `bind_instance`, `bind_solution`
+**IDE state and binding**: `bridge_state`, `wait_for_ready`, `tool_help`, `help`, `bridge_health`, `list_instances`, `bind_instance`, `bind_solution`
 
 **Diagnostics**: `errors`, `warnings`, `diagnostics_snapshot`
 
-**Editing and navigation**: `apply_diff`, `read_file`, `read_file_batch`, `find_text`, `find_text_batch`, `find_files`, `search_symbols`, `find_references`, `count_references`, `peek_definition`, `goto_definition`, `goto_implementation`, `call_hierarchy`, `quick_info`, `file_outline`, `format_document`, `execute_command`
+**Editing and navigation**: `apply_diff`, `write_file`, `read_file`, `read_file_batch`, `reload_document`, `find_text`, `find_text_batch`, `find_files`, `search_symbols`, `find_references`, `count_references`, `peek_definition`, `goto_definition`, `goto_implementation`, `call_hierarchy`, `symbol_info`, `file_outline`, `format_document`, `execute_command`
 
 **Documents and tabs**: `open_file`, `list_tabs`, `list_documents`, `activate_document`, `close_document`, `close_file`, `close_others`, `save_document`, `list_windows`, `activate_window`
 
@@ -886,7 +884,7 @@ Exposed MCP tools use simple names. See the MCP Command Catalog below or call `t
 
 **Project query**: `query_project_items`, `query_project_properties`, `query_project_configurations`, `query_project_references`, `query_project_outputs`
 
-**Python**: `python_list_envs`, `python_env_info`, `python_set_active_env`, `python_list_packages`, `python_repl`, `python_run_file`, `python_install_package`, `python_remove_package`, `python_create_env`
+**Python**: `python_list_envs`, `python_env_info`, `python_set_active_env`, `python_set_project_env`, `python_list_packages`, `python_repl`, `python_run_file`, `python_install_package`, `python_remove_package`, `python_create_env`
 
 **VS lifecycle**: `vs_open`, `vs_close`, `wait_for_instance`
 
@@ -1138,7 +1136,8 @@ Use the discovery file to find the current pipe name, then send newline-delimite
 | Script | Purpose |
 |--------|---------|
 | `scripts\build.bat` | Build the solution |
-| `scripts\build-setup.ps1` | Build the Inno Setup installer `vs-ide-bridge-setup-<version>.exe` |
+| `VsIdeBridgeInstaller.csproj -t:RegisterInstallTask` | One-time: register elevated scheduled task so Release builds auto-install |
+| `scripts\install.ps1` | Install built Release artifacts to `C:\Program Files\VsIdeBridge` (run elevated; close VS and MCP client first) |
 | `scripts\start_bridge.ps1` | Thin PowerShell wrapper over `vs-ide-bridge ensure` |
 
 ## Repo Layout

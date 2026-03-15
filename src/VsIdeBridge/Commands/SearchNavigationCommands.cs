@@ -236,6 +236,21 @@ internal static class SearchNavigationCommands
         }
     }
 
+    internal sealed class IdeReloadDocumentCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x024E)
+    {
+        protected override string CanonicalName => "Tools.IdeReloadDocument";
+
+        protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            var filePath = args.GetRequiredString("file");
+            var data = await context.Runtime.DocumentService
+                .ReloadDocumentAsync(filePath)
+                .ConfigureAwait(true);
+            var reloaded = data["reloaded"]?.Value<bool>() ?? false;
+            return new CommandExecutionResult(reloaded ? $"Reloaded {filePath}." : $"Skipped reload for {filePath} (not open).", data);
+        }
+    }
+
     internal sealed class IdeActivateWindowCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0205)
     {
         protected override string CanonicalName => "Tools.IdeActivateWindow";

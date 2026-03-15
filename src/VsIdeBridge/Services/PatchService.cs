@@ -679,6 +679,13 @@ internal sealed class PatchService
         }
     }
 
+    public string ResolveFilePath(DTE2 dte, string filePathOrRelative)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        var baseDir = ResolveBaseDirectory(dte, null);
+        return ResolvePatchPath(dte, baseDir, filePathOrRelative, allowCreate: true);
+    }
+
     private static string ResolveBaseDirectory(DTE2 dte, string? baseDirectory)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
@@ -828,8 +835,8 @@ internal sealed class PatchService
             }
 
             // Fuzzy position search: if the hunk's nominal start line doesn't match
-            // the first context/deletion line, scan Ãƒâ€šÃ‚Â±FuzzLines to find the real position.
-            const int FuzzLines = 3;
+            // the first context/deletion line, scan ±FuzzLines to find the real position.
+            const int FuzzLines = 10;
             var firstCheckLine = hunk.Lines.FirstOrDefault(l => l.Kind == ' ' || l.Kind == '-');
             if (firstCheckLine is not null && targetIndex < existingLines.Count
                 && !LinesMatchFuzzy(existingLines[targetIndex], firstCheckLine.Text))
@@ -1050,7 +1057,10 @@ internal sealed class PatchService
 
         if (matchLines.Length == 0)
         {
-            return sourceIndex;
+            // No context or deletion lines: can't locate the insertion point.
+            // Default to end-of-file so pure-addition blocks append rather than
+            // silently inserting at an arbitrary mid-file position.
+            return existingLines.Count;
         }
 
         var maxStart = existingLines.Count - matchLines.Length;
@@ -1160,15 +1170,22 @@ internal sealed class PatchService
     {
         if (index >= existingLines.Count)
         {
-            throw new CommandErrorException(InvalidArgumentsCode, $"Patch {operation} exceeded file length for {path}.");
+            throw new CommandErrorException(InvalidArgumentsCode,
+                $"Patch {operation} exceeded file length for {path}. File has {existingLines.Count} lines but patch references line {index + 1}. Use read_file to check the actual file content before retrying.");
         }
 
         if (!LinesMatchFuzzy(existingLines[index], expected))
         {
+            const int ContextRadius = 3;
+            var start = Math.Max(0, index - ContextRadius);
+            var end = Math.Min(existingLines.Count - 1, index + ContextRadius);
+            var context = string.Join("\n", Enumerable.Range(start, end - start + 1)
+                .Select(i => $"  {i + 1,4}: {(i == index ? ">>>" : "   ")} {existingLines[i]}"));
+
             throw new CommandErrorException(
                 InvalidArgumentsCode,
-                $"Patch {operation} mismatch in {path} at line {index + 1}.",
-                new { expected, actual = existingLines[index], line = index + 1 });
+                $"Patch {operation} mismatch in {path} at line {index + 1}. Use read_file to verify the file content, then regenerate the patch with correct context lines.",
+                new { expected, actual = existingLines[index], line = index + 1, fileContext = context });
         }
     }
 

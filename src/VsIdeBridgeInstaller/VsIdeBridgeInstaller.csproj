@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
@@ -23,5 +23,30 @@
       DestinationFiles="@(ManagedPythonRuntime->'$(OutDir)python-runtime\%(RecursiveDir)%(Filename)%(Extension)')"
       SkipUnchangedFiles="true" />
   </Target>
+
+  <!--
+    One-time setup: run this target once from an elevated terminal to register the scheduled task.
+      msbuild src\VsIdeBridgeInstaller\VsIdeBridgeInstaller.csproj -t:RegisterInstallTask
+    After registration, every Release build auto-installs without a UAC prompt.
+  -->
+  <Target Name="RegisterInstallTask">
+    <PropertyGroup>
+      <_InstallerExe>$(MSBuildThisFileDirectory)bin\Release\net8.0-windows\vs-ide-bridge-installer.exe</_InstallerExe>
+    </PropertyGroup>
+    <Exec Command="schtasks /create /tn VsIdeBridgeInstall /tr &quot;$(_InstallerExe)&quot; /sc ondemand /rl highest /f /ru SYSTEM" />
+    <Message Text="Scheduled task 'VsIdeBridgeInstall' registered. Release builds will now auto-install." Importance="high" />
+  </Target>
+
+  <!--
+    Auto-install after every Release build if the scheduled task is registered.
+    Silently skips if the task does not exist (non-elevated dev machines).
+  -->
+  <Target Name="AutoInstall" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+    <Exec Command="powershell -NonInteractive -Command &quot;Start-ScheduledTask -TaskName 'VsIdeBridgeInstall' -ErrorAction SilentlyContinue&quot;"
+          IgnoreExitCode="true"
+          CustomErrorRegularExpression="^$"
+          CustomWarningRegularExpression="^$" />
+  </Target>
+
 </Project>
 

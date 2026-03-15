@@ -44,6 +44,7 @@ internal static class CommandRegistrar
         runtime.RegisterCommand(new SearchNavigationCommands.IdeCloseFileCommand(package, runtime, commandService));
         runtime.RegisterCommand(new SearchNavigationCommands.IdeCloseAllExceptCurrentCommand(package, runtime, commandService));
         runtime.RegisterCommand(new SearchNavigationCommands.IdeSaveDocumentCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new SearchNavigationCommands.IdeReloadDocumentCommand(package, runtime, commandService));
         runtime.RegisterCommand(new SearchNavigationCommands.IdeActivateWindowCommand(package, runtime, commandService));
         runtime.RegisterCommand(new SearchNavigationCommands.IdeListWindowsCommand(package, runtime, commandService));
         runtime.RegisterCommand(new SearchNavigationCommands.IdeExecuteVsCommandCommand(package, runtime, commandService));
@@ -60,6 +61,7 @@ internal static class CommandRegistrar
         runtime.RegisterCommand(new SearchNavigationCommands.IdeGetDocumentSlicesCommand(package, runtime, commandService));
         runtime.RegisterCommand(new SearchNavigationCommands.IdeGetFileSymbolsCommand(package, runtime, commandService));
         runtime.RegisterCommand(new PatchCommands.IdeApplyUnifiedDiffCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new PatchCommands.IdeWriteFileCommand(package, runtime, commandService));
 
         runtime.RegisterCommand(new BreakpointCommands.IdeSetBreakpointCommand(package, runtime, commandService));
         runtime.RegisterCommand(new BreakpointCommands.IdeListBreakpointsCommand(package, runtime, commandService));
@@ -106,5 +108,6 @@ internal static class CommandRegistrar
         runtime.RegisterCommand(new SolutionProjectCommands.IdeQueryProjectConfigurationsCommand(package, runtime, commandService));
         runtime.RegisterCommand(new SolutionProjectCommands.IdeQueryProjectReferencesCommand(package, runtime, commandService));
         runtime.RegisterCommand(new SolutionProjectCommands.IdeQueryProjectOutputsCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new PythonCommands.IdeSetPythonProjectEnvCommand(package, runtime, commandService));
     }
 }

@@ -172,4 +172,61 @@ internal static class PatchCommands
                 : unique[0] + ", " + unique[1] + ", " + unique[2] + $" (+{unique.Count - 3} more)";
         }
     }
+
+    internal sealed class IdeWriteFileCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x024D)
+    {
+        protected override string CanonicalName => "Tools.IdeWriteFile";
+
+        protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            var file = args.GetString("file")
+                ?? throw new CommandErrorException("invalid_arguments", "Missing required --file argument.");
+
+            var contentBase64 = args.GetString("content-base64")
+                ?? throw new CommandErrorException("invalid_arguments", "Missing required --content-base64 argument.");
+
+            string content;
+            try
+            {
+                content = Encoding.UTF8.GetString(System.Convert.FromBase64String(contentBase64));
+            }
+            catch (System.FormatException ex)
+            {
+                throw new CommandErrorException("invalid_arguments", "Value passed to --content-base64 was not valid base64.", new { exception = ex.Message });
+            }
+
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            var resolvedPath = context.Runtime.PatchService.ResolveFilePath(context.Dte, file);
+
+            var approvalData = await context.Runtime.BridgeApprovalService
+                .RequestApprovalAsync(
+                    context,
+                    BridgeApprovalKind.Edit,
+                    $"Write file: {System.IO.Path.GetFileName(resolvedPath)}",
+                    $"path={resolvedPath}, bytes={Encoding.UTF8.GetByteCount(content)}")
+                .ConfigureAwait(true);
+
+            var writeResult = await context.Runtime.DocumentService.WriteDocumentTextAsync(
+                context.Dte,
+                resolvedPath,
+                content,
+                line: 1,
+                column: 1,
+                saveChanges: true).ConfigureAwait(true);
+
+            var data = new Newtonsoft.Json.Linq.JObject
+            {
+                ["path"] = resolvedPath,
+                ["byteCount"] = Encoding.UTF8.GetByteCount(content),
+                ["lineCount"] = content.Split('\n').Length,
+                ["editorBacked"] = writeResult["editorBacked"] ?? false,
+                ["saved"] = writeResult["saved"] ?? true,
+                ["approval"] = approvalData["approval"]?.DeepClone(),
+                ["approvalOperation"] = approvalData["operation"]?.DeepClone(),
+                ["approvalPromptShown"] = approvalData["promptShown"]?.DeepClone(),
+            };
+
+            return new CommandExecutionResult($"Wrote {data["lineCount"]} lines to {System.IO.Path.GetFileName(resolvedPath)}.", data);
+        }
+    }
 }

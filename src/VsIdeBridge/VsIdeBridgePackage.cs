@@ -92,6 +92,7 @@ public sealed class VsIdeBridgePackage : AsyncPackage, IAsyncDisposable
                 }
 
                 _dte = dte;
+                _pipeServer?.UpdateDiscovery(dte.Solution?.FullName ?? string.Empty);
                 HookBestPracticeRefreshEvents(dte);
 
                 if (dte.Solution?.IsOpen != true)
@@ -170,6 +171,7 @@ public sealed class VsIdeBridgePackage : AsyncPackage, IAsyncDisposable
 
     private void OnSolutionOpened()
     {
+        _pipeServer?.UpdateDiscovery(_dte?.Solution?.FullName ?? string.Empty);
         QueueBestPracticeRefresh(waitForIntellisense: true);
     }
 

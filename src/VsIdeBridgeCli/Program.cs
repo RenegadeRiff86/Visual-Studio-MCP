@@ -2344,7 +2344,7 @@ internal static class HelpText
         mcp-server
 
         Purpose
-          Run a stdio MCP server over one live VS IDE Bridge instance.
+          Run an MCP server (stdio by default, or HTTP with --http) over one live VS IDE Bridge instance.
 
         Optional
           --instance <instanceId>
@@ -2354,6 +2354,8 @@ internal static class HelpText
           --discovery-mode json-only|hybrid|memory-first
           --emit-discovery-json true|false
           --tools-only
+          --http              Use HTTP transport (Streamable HTTP, MCP 2025-03-26) instead of stdio.
+          --port <n>          HTTP port to listen on (default 5010). Only used with --http.
 
         Notes
           Resolves the selected bridge once and reuses that pipe for the MCP session.
@@ -2361,10 +2363,12 @@ internal static class HelpText
           --tools-only advertises MCP tools capability only; resources/prompts methods remain callable.
           Use MCP tool `tool_help` to retrieve all MCP tools with schemas and examples.
           Emits optional service control events over named pipe `VsIdeBridgeServiceControl` when the service host is running.
+          HTTP mode supports multiple concurrent sessions via Mcp-Session-Id header.
 
         Example
           vs-ide-bridge mcp-server --instance <instanceId>
           vs-ide-bridge mcp-server --instance <instanceId> --tools-only
+          vs-ide-bridge mcp-server --http --port 5010
         """;
 }
 
@@ -2615,7 +2619,7 @@ internal sealed class PipeDiscovery
         {
             throw new CliException(
                 "No live VS IDE Bridge instance found. " +
-                "Open Visual Studio with the VS IDE Bridge extension installed, then run 'vs-ide-bridge instances'.");
+                "Open Visual Studio with the VS IDE Bridge extension installed. If using MCP, call list_instances to check available instances.");
         }
 
         var matches = Filter(instances, selector).ToArray();
@@ -2634,13 +2638,13 @@ internal sealed class PipeDiscovery
         if (matches.Length == 0)
         {
             throw new CliException(selector.HasAny
-                ? $"No live VS IDE Bridge instance matched {selector.Describe()}. Run 'vs-ide-bridge instances --format summary' to inspect the live instances."
-                : "Multiple live VS IDE Bridge instances are available. Run 'vs-ide-bridge instances --format summary' and then rerun with --instance <instanceId>.");
+                ? $"No live VS IDE Bridge instance matched {selector.Describe()}. Call list_instances to inspect available instances, then call bind_solution with a solution name or bind_instance with a specific instance_id."
+                : "Multiple live VS IDE Bridge instances are available. Call list_instances to see them, then call bind_solution with a solution name or bind_instance with a specific instance_id to select one.");
         }
 
         throw new CliException(
             $"Multiple live VS IDE Bridge instances matched {selector.Describe()}. " +
-            $"Use 'vs-ide-bridge instances --format summary' to choose one.{Environment.NewLine}" +
+            $"Call list_instances to see all instances, then call bind_instance with a specific instance_id to select one.{Environment.NewLine}" +
             InstanceFormatter.Format(matches, "summary"));
     }
 

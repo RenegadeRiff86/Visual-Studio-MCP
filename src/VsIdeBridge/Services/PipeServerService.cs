@@ -61,12 +61,17 @@ internal sealed class PipeServerService : IDisposable
 
     public void Start()
     {
-        QueueDiscoveryUpdate(string.Empty, includePurge: true);
+        QueueDiscoveryUpdate(null, includePurge: true);
         _listenTask = Task.Factory.StartNew(
             () => ListenLoopAsync(_cts.Token),
             _cts.Token,
             TaskCreationOptions.LongRunning,
             TaskScheduler.Default).Unwrap();
+    }
+
+    public void UpdateDiscovery(string? solutionPath)
+    {
+        QueueDiscoveryUpdate(solutionPath);
     }
 
     private void QueueDiscoveryUpdate(string? solutionPath, bool includePurge = false)

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
+using System.Text.Json.Nodes;
 using Xunit;
 
 namespace VsIdeBridgeCli.Tests;
@@ -10,6 +12,7 @@ public sealed class VsOpenInstanceSelectorTests
     private const string OtherInstanceId = "other";
     private const string NewSolutionInstanceId = "new-solution";
     private const string LaunchedInstanceId = "launched";
+    private const string RequestedSolutionPath = @"C:\repo\Requested.sln";
     private const int ExistingProcessId = 101;
     private const int OtherProcessId = 202;
     private const int RequestedProcessId = 303;
@@ -27,14 +30,14 @@ public sealed class VsOpenInstanceSelectorTests
         var currentInstances = CreateInstances(
             existingInstances[0],
             existingInstances[1],
-            CreateDiscovery(NewSolutionInstanceId, RequestedProcessId, @"C:\repo\Requested.sln", now));
+            CreateDiscovery(NewSolutionInstanceId, RequestedProcessId, RequestedSolutionPath, now));
 
         var selected = VsOpenInstanceSelector.SelectInstance(
             new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ExistingInstanceId, OtherInstanceId },
             new HashSet<int> { ExistingProcessId, OtherProcessId },
             currentInstances,
             launchedProcessId: LauncherStubProcessId,
-            requestedSolutionPath: @"C:\repo\Requested.sln");
+            requestedSolutionPath: RequestedSolutionPath);
 
         Assert.NotNull(selected);
         Assert.Equal(NewSolutionInstanceId, selected!.InstanceId);
@@ -65,17 +68,41 @@ public sealed class VsOpenInstanceSelectorTests
     public void SelectInstance_FallsBackToExistingMatchingSolutionWhenNewInstanceIsNotYetDiscovered()
     {
         var now = DateTime.UtcNow;
-        var existing = CreateDiscovery(ExistingInstanceId, ExistingProcessId, @"C:\repo\Requested.sln", now);
+        var existing = CreateDiscovery(ExistingInstanceId, ExistingProcessId, RequestedSolutionPath, now);
 
         var selected = VsOpenInstanceSelector.SelectInstance(
             new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ExistingInstanceId },
             new HashSet<int> { ExistingProcessId },
             CreateInstances(existing),
             launchedProcessId: LauncherStubProcessId,
-            requestedSolutionPath: @"C:\repo\Requested.sln");
+            requestedSolutionPath: RequestedSolutionPath);
 
         Assert.NotNull(selected);
         Assert.Equal(ExistingInstanceId, selected!.InstanceId);
+    }
+
+    [Fact]
+    public void CreateSelector_UsesSolutionArgumentAsSolutionHint()
+    {
+        var bridgeBindingType = typeof(CliApp)
+            .GetNestedType("McpServer", BindingFlags.NonPublic)
+            ?.GetNestedType("BridgeBinding", BindingFlags.NonPublic);
+
+        Assert.NotNull(bridgeBindingType);
+
+        var createSelector = bridgeBindingType!.GetMethod("CreateSelector", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(createSelector);
+
+        var args = new JsonObject
+        {
+            ["solution"] = RequestedSolutionPath,
+        };
+
+        var selector = createSelector!.Invoke(null, [args]);
+        Assert.NotNull(selector);
+
+        var solutionHint = selector!.GetType().GetProperty("SolutionHint")?.GetValue(selector) as string;
+        Assert.Equal(RequestedSolutionPath, solutionHint);
     }
 
     private static List<PipeDiscovery> CreateInstances(params PipeDiscovery[] items)
