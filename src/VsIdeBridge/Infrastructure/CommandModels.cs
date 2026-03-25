@@ -11,7 +11,7 @@ internal sealed class CommandExecutionResult(string summary, JToken? data = null
     public JArray Warnings { get; } = warnings ?? [];
 }
 
-internal sealed class CommandEnvelope
+internal sealed record CommandEnvelope
 {
     public int SchemaVersion { get; set; }
 

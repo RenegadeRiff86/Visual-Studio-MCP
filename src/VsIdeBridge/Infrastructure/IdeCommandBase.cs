@@ -8,6 +8,8 @@ using System.IO;
 using System.Threading.Tasks;
 using VsIdeBridge.Services;
 
+using VsIdeBridge.Commands;
+
 namespace VsIdeBridge.Infrastructure;
 
 internal abstract class IdeCommandBase

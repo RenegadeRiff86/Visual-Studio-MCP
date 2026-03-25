@@ -1,0 +1,257 @@
+namespace VsIdeBridge.Diagnostics;
+
+internal static class BestPracticeRuleCatalog
+{
+    public static class BP1001
+    {
+        public const string Code = "BP1001";
+        public const string HelpUri = ErrorListConstants.BP1001HelpUri;
+        public static readonly int Threshold = ErrorListConstants.RepeatedStringThreshold;
+    }
+
+    public static class BP1002
+    {
+        public const string Code = "BP1002";
+        public const string HelpUri = ErrorListConstants.BP1002HelpUri;
+        public static readonly int Threshold = ErrorListConstants.RepeatedStringThreshold;
+    }
+
+    public static class BP1003
+    {
+        public const string Code = "BP1003";
+        public const string HelpUri = ErrorListConstants.BP1003HelpUri;
+        public static readonly int Threshold = ErrorListConstants.RepeatedNumberThreshold;
+    }
+
+    public static class BP1004
+    {
+        public const string Code = "BP1004";
+        public const string HelpUri = ErrorListConstants.BP1004HelpUri;
+        public static readonly int Threshold = ErrorListConstants.RepeatedNumberThreshold;
+    }
+
+    public static class BP1005
+    {
+        public const string Code = "BP1005";
+        public const string HelpUri = ErrorListConstants.BP1005HelpUri;
+    }
+
+    public static class BP1006
+    {
+        public const string Code = "BP1006";
+        public const string HelpUri = ErrorListConstants.BP1006HelpUri;
+    }
+
+    public static class BP1007
+    {
+        public const string Code = "BP1007";
+        public const string HelpUri = ErrorListConstants.BP1007HelpUri;
+    }
+
+    public static class BP1008
+    {
+        public const string Code = "BP1008";
+        public const string HelpUri = ErrorListConstants.BP1008HelpUri;
+    }
+
+    public static class BP1009
+    {
+        public const string Code = "BP1009";
+        public const string HelpUri = ErrorListConstants.BP1009HelpUri;
+    }
+
+    public static class BP1010
+    {
+        public const string Code = "BP1010";
+        public const string HelpUri = ErrorListConstants.BP1010HelpUri;
+    }
+
+    public static class BP1011
+    {
+        public const string Code = "BP1011";
+        public const string HelpUri = ErrorListConstants.BP1011HelpUri;
+    }
+
+    public static class BP1012
+    {
+        public const string Code = "BP1012";
+        public static readonly int ThresholdWarning = ErrorListConstants.FileTooLongWarningThreshold;
+        public static readonly int ThresholdError = ErrorListConstants.FileTooLongErrorThreshold;
+    }
+
+    public static class BP1013
+    {
+        public const string Code = "BP1013";
+        public static readonly int Threshold = ErrorListConstants.MethodTooLongThreshold;
+    }
+
+    public static class BP1014
+    {
+        public const string Code = "BP1014";
+    }
+
+    public static class BP1015
+    {
+        public const string Code = "BP1015";
+        public static readonly int Threshold = ErrorListConstants.DeepNestingThreshold;
+    }
+
+    public static class BP1016
+    {
+        public const string Code = "BP1016";
+        public static readonly int Threshold = ErrorListConstants.CommentedOutCodeThreshold;
+    }
+
+    public static class BP1017
+    {
+        public const string Code = "BP1017";
+    }
+
+    public static class BP1018
+    {
+        public const string Code = "BP1018";
+        public static readonly int ThresholdMethods = ErrorListConstants.GodClassMethodThreshold;
+        public static readonly int ThresholdFields = ErrorListConstants.GodClassFieldThreshold;
+    }
+
+    public static class BP1019
+    {
+        public const string Code = "BP1019";
+        public const string HelpUri = ErrorListConstants.BP1019HelpUri;
+    }
+
+    public static class BP1020
+    {
+        public const string Code = "BP1020";
+        public const string HelpUri = ErrorListConstants.BP1020HelpUri;
+    }
+
+    public static class BP1021
+    {
+        public const string Code = "BP1021";
+        public const string HelpUri = ErrorListConstants.BP1021HelpUri;
+    }
+
+    public static class BP1022
+    {
+        public const string Code = "BP1022";
+        public const string HelpUri = ErrorListConstants.BP1022HelpUri;
+    }
+
+    public static class BP1023
+    {
+        public const string Code = "BP1023";
+        public const string HelpUri = ErrorListConstants.BP1023HelpUri;
+        public static readonly int Threshold = ErrorListConstants.MacroOveruseThreshold;
+    }
+
+    public static class BP1024
+    {
+        public const string Code = "BP1024";
+        public const string HelpUri = ErrorListConstants.BP1024HelpUri;
+        public static readonly int Threshold = ErrorListConstants.DeepNestingThreshold;
+    }
+
+    public static class BP1025
+    {
+        public const string Code = "BP1025";
+        public const string HelpUri = ErrorListConstants.BP1025HelpUri;
+    }
+
+    public static class BP1026
+    {
+        public const string Code = "BP1026";
+        public const string HelpUri = ErrorListConstants.BP1026HelpUri;
+    }
+
+    public static class BP1027
+    {
+        public const string Code = "BP1027";
+        public const string HelpUri = ErrorListConstants.BP1027HelpUri;
+        public static readonly int PropertyThreshold = ErrorListConstants.PropertyBagPropertyThreshold;
+        public static readonly int BehaviorThreshold = ErrorListConstants.PropertyBagBehaviorThreshold;
+    }
+
+    public static class BP1028
+    {
+        public const string Code = "BP1028";
+        public const string HelpUri = ErrorListConstants.BP1028HelpUri;
+    }
+
+    public static class BP1029
+    {
+        public const string Code = "BP1029";
+        public const string HelpUri = ErrorListConstants.BP1029HelpUri;
+    }
+
+    public static class BP1030
+    {
+        public const string Code = "BP1030";
+        public const string HelpUri = ErrorListConstants.BP1030HelpUri;
+    }
+
+    public static string GetHelpUri(string code)
+    {
+        return code switch
+        {
+            "BP1001" => ErrorListConstants.BP1001HelpUri,
+            "BP1002" => ErrorListConstants.BP1002HelpUri,
+            "BP1003" => ErrorListConstants.BP1003HelpUri,
+            "BP1004" => ErrorListConstants.BP1004HelpUri,
+            "BP1005" => ErrorListConstants.BP1005HelpUri,
+            "BP1006" => ErrorListConstants.BP1006HelpUri,
+            "BP1007" => ErrorListConstants.BP1007HelpUri,
+            "BP1008" => ErrorListConstants.BP1008HelpUri,
+            "BP1009" => ErrorListConstants.BP1009HelpUri,
+            "BP1010" => ErrorListConstants.BP1010HelpUri,
+            "BP1011" => ErrorListConstants.BP1011HelpUri,
+            "BP1012" => ErrorListConstants.BP1012HelpUri,
+            "BP1013" => ErrorListConstants.BP1013HelpUri,
+            "BP1014" => ErrorListConstants.BP1014HelpUri,
+            "BP1015" => ErrorListConstants.BP1015HelpUri,
+            "BP1016" => ErrorListConstants.BP1016HelpUri,
+            "BP1017" => ErrorListConstants.BP1017HelpUri,
+            "BP1018" => ErrorListConstants.BP1018HelpUri,
+            "BP1019" => ErrorListConstants.BP1019HelpUri,
+            "BP1020" => ErrorListConstants.BP1020HelpUri,
+            "BP1021" => ErrorListConstants.BP1021HelpUri,
+            "BP1022" => ErrorListConstants.BP1022HelpUri,
+            "BP1023" => ErrorListConstants.BP1023HelpUri,
+            "BP1024" => ErrorListConstants.BP1024HelpUri,
+            "BP1025" => ErrorListConstants.BP1025HelpUri,
+            "BP1026" => ErrorListConstants.BP1026HelpUri,
+            "BP1027" => ErrorListConstants.BP1027HelpUri,
+            "BP1028" => ErrorListConstants.BP1028HelpUri,
+            "BP1029" => ErrorListConstants.BP1029HelpUri,
+            "BP1030" => ErrorListConstants.BP1030HelpUri,
+            _ => string.Empty,
+        };
+    }
+
+    public static string GetAuthority(string code)
+    {
+        string helpUri = GetHelpUri(code);
+        if (helpUri.IndexOf("learn.microsoft.com", System.StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return ErrorListConstants.MicrosoftAuthority;
+        }
+
+        if (helpUri.IndexOf("documentation.help/StyleCop", System.StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return ErrorListConstants.StyleCopAuthority;
+        }
+
+        if (helpUri.IndexOf("peps.python.org", System.StringComparison.OrdinalIgnoreCase) >= 0
+            || helpUri.IndexOf("docs.python.org", System.StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return ErrorListConstants.PythonDocsAuthority;
+        }
+
+        if (helpUri.IndexOf("isocpp.github.io", System.StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return ErrorListConstants.CppCoreGuidelinesAuthority;
+        }
+
+        return ErrorListConstants.ProjectLocalAuthority;
+    }
+}

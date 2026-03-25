@@ -77,7 +77,7 @@ internal sealed class FailureContextService
     }
 
     private static async Task<JArray> BuildSymbolContextAsync(
-        IdeCommandContext? context,
+        IdeCommandContext context,
         Dictionary<string, JObject> outlineCache,
         IReadOnlyList<string> symbolFiles)
     {

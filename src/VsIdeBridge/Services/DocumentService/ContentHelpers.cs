@@ -1,0 +1,506 @@
+using EnvDTE;
+using EnvDTE80;
+using Microsoft.VisualStudio;
+using Microsoft.VisualStudio.ComponentModelHost;
+using Microsoft.VisualStudio.Editor;
+using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
+using Microsoft.VisualStudio.Text.Editor;
+using Microsoft.VisualStudio.TextManager.Interop;
+using Newtonsoft.Json.Linq;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+using VsIdeBridge.Diagnostics;
+using VsIdeBridge.Infrastructure;
+
+namespace VsIdeBridge.Services;
+
+internal sealed partial class DocumentService
+{
+    public async Task<JObject> WriteDocumentTextAsync(
+        DTE2 dte,
+        string filePath,
+        string content,
+        int line,
+        int column,
+        bool saveChanges,
+        IReadOnlyCollection<(int StartLine, int EndLine)>? changedRanges = null,
+        IReadOnlyCollection<int>? deletedLines = null,
+        bool includeBestPracticeWarnings = false)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
+        string? directory = Path.GetDirectoryName(normalizedPath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        if (!File.Exists(normalizedPath))
+        {
+            File.WriteAllText(normalizedPath, string.Empty);
+        }
+
+        Window window = dte.ItemOperations.OpenFile(normalizedPath);
+        window.Activate();
+
+        Document document = window.Document ?? dte.ActiveDocument
+            ?? throw new CommandErrorException(DocumentNotFoundCode, $"Unable to activate: {normalizedPath}");
+
+        (bool usedEditorBuffer, string originalContent, window) = ApplyDocumentContent(dte, window, document, normalizedPath, content, line, column);
+
+        Document finalDocument = window.Document ?? document;
+        string finalContent = TryReadDocumentText(finalDocument) ?? ReadFileText(normalizedPath);
+        if (!string.Equals(finalContent, content, StringComparison.Ordinal))
+        {
+            throw new CommandErrorException("write_failed", $"Document content did not match the requested text after write: {normalizedPath}");
+        }
+
+        bool contentChanged = !string.Equals(originalContent, finalContent, StringComparison.Ordinal);
+        if (saveChanges && window.Document is not null)
+        {
+            window.Document.Save();
+        }
+
+        return BuildWriteResult(window, normalizedPath, content, usedEditorBuffer, contentChanged,
+            saveChanges, line, column, changedRanges, deletedLines, includeBestPracticeWarnings, dte);
+    }
+
+    private static (bool UsedEditorBuffer, string OriginalContent, Window ResultWindow) ApplyDocumentContent(
+        DTE2 dte,
+        Window window,
+        Document document,
+        string normalizedPath,
+        string content,
+        int line,
+        int column)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        string originalContent = TryReadDocumentText(document) ?? ReadFileText(normalizedPath);
+        bool usedEditorBuffer = false;
+        try
+        {
+            if (document.Object(TextDocumentKind) is TextDocument textDocument)
+            {
+                EditPoint start = textDocument.StartPoint.CreateEditPoint();
+                start.ReplaceText(textDocument.EndPoint, content, 0);
+                TextSelection selection = textDocument.Selection;
+                selection.MoveToLineAndOffset(Math.Max(1, line), Math.Max(1, column), false);
+                TryShowActivePoint(selection);
+                usedEditorBuffer = string.Equals(TryReadDocumentText(document), content, StringComparison.Ordinal);
+            }
+        }
+        catch (COMException)
+        {
+            usedEditorBuffer = false;
+        }
+
+        if (!usedEditorBuffer)
+        {
+            File.WriteAllText(normalizedPath, content);
+            if (window.Document is not null)
+            {
+                window.Document.Close(vsSaveChanges.vsSaveChangesNo);
+                window = dte.ItemOperations.OpenFile(normalizedPath);
+                window.Activate();
+            }
+        }
+
+        return (usedEditorBuffer, originalContent, window);
+    }
+
+    private JObject BuildWriteResult(
+        Window window,
+        string normalizedPath,
+        string content,
+        bool usedEditorBuffer,
+        bool contentChanged,
+        bool saveChanges,
+        int line,
+        int column,
+        IReadOnlyCollection<(int StartLine, int EndLine)>? changedRanges,
+        IReadOnlyCollection<int>? deletedLines,
+        bool includeBestPracticeWarnings,
+        DTE2 dte)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if ((changedRanges?.Count > 0) || (deletedLines?.Count > 0))
+        {
+            IWpfTextView? view = TryGetActiveWpfTextView();
+            if (view is not null)
+            {
+                BridgeEditHighlightService.Instance.ApplyHighlights(view, changedRanges ?? [], deletedLines ?? []);
+            }
+        }
+
+        // Best-practice analysis is opt-in to keep the response lean.
+        // Pass includeBestPracticeWarnings: true only when the caller explicitly wants them.
+        IReadOnlyList<JObject> preWriteWarnings = includeBestPracticeWarnings
+            ? ErrorListService.AnalyzeContentBeforeWrite(normalizedPath, content)
+            : [];
+        string? projectUniqueName = includeBestPracticeWarnings
+            ? (TryGetDocumentProjectUniqueName(window.Document) ?? SolutionFileLocator.TryFindProjectUniqueName(dte, normalizedPath))
+            : null;
+
+        return new JObject
+        {
+            [ResolvedPathProperty] = normalizedPath,
+            ["editorBacked"] = usedEditorBuffer,
+            ["verified"] = true,
+            ["contentChanged"] = contentChanged,
+            ["saved"] = window.Document?.Saved ?? saveChanges,
+            ["line"] = Math.Max(1, line),
+            ["column"] = Math.Max(1, column),
+            ["windowCaption"] = window.Caption,
+            ["bestPracticeWarnings"] = preWriteWarnings.Count > 0
+                ? BestPracticeWarningProjector.CreateResponseWarnings(preWriteWarnings, projectUniqueName)
+                : null,
+        };
+    }
+
+    private static string ReadFileText(string path)
+    {
+        return File.Exists(path) ? File.ReadAllText(path) : string.Empty;
+    }
+
+    private static string? TryReadDocumentText(Document? document)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (document is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            if (document.Object(TextDocumentKind) is not TextDocument textDocument)
+            {
+                return null;
+            }
+
+            EditPoint start = textDocument.StartPoint.CreateEditPoint();
+            return start.GetText(textDocument.EndPoint);
+        }
+        catch (COMException)
+        {
+            return null;
+        }
+    }
+
+    private IWpfTextView? TryGetActiveWpfTextView()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (_serviceProvider.GetService(typeof(SVsTextManager)) is not IVsTextManager textManager)
+        {
+            return null;
+        }
+
+        if (textManager.GetActiveView(1, null, out IVsTextView? activeView) != 0 || activeView is null)
+        {
+            return null;
+        }
+
+        IComponentModel? componentModel = _serviceProvider.GetService(typeof(SComponentModel)) as IComponentModel;
+        IVsEditorAdaptersFactoryService? adapters = componentModel?.GetService<IVsEditorAdaptersFactoryService>();
+        return adapters?.GetWpfTextView(activeView);
+    }
+
+    public async Task<JObject> SaveDocumentAsync(DTE2 dte, string? filePath, bool saveAll)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        if (saveAll)
+        {
+            dte.Documents.SaveAll();
+            return new JObject
+            {
+                ["saveAll"] = true,
+                ["count"] = dte.Documents.Count,
+            };
+        }
+
+        if (!string.IsNullOrWhiteSpace(filePath))
+        {
+            string normalized = PathNormalization.NormalizeFilePath(filePath);
+            Document document = TryFindOpenDocumentByPath(dte, normalized) ?? throw new CommandErrorException(DocumentNotFoundCode, $"No open document matching path: {filePath}");
+            document.Save();
+            return new JObject
+            {
+                ["saveAll"] = false,
+                ["count"] = 1,
+                ["path"] = TryGetDocumentFullName(document),
+                ["saved"] = TryGetDocumentSaved(document),
+            };
+        }
+
+        Document active = dte.ActiveDocument ?? throw new CommandErrorException("no_active_document", "No active document to save.");
+        active.Save();
+        return new JObject
+        {
+            ["saveAll"] = false,
+            ["count"] = 1,
+            ["path"] = TryGetDocumentFullName(active),
+            ["saved"] = TryGetDocumentSaved(active),
+        };
+    }
+
+    public async Task<JObject> ReloadDocumentAsync(string filePath)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        string normalized = PathNormalization.NormalizeFilePath(filePath);
+        IVsRunningDocumentTable rdt = _serviceProvider.GetService(typeof(SVsRunningDocumentTable)) as IVsRunningDocumentTable
+            ?? throw new CommandErrorException("service_unavailable", "Running Document Table not available.");
+
+        int hr = rdt.FindAndLockDocument(
+            (uint)_VSRDTFLAGS.RDT_NoLock,
+            normalized,
+            out _,
+            out _,
+            out IntPtr docDataPtr,
+            out uint cookie);
+
+        if (hr != VSConstants.S_OK || cookie == 0 || docDataPtr == IntPtr.Zero)
+            return new JObject { ["reloaded"] = false, ["path"] = normalized, ["reason"] = "not_open" };
+
+        try
+        {
+            if (Marshal.GetObjectForIUnknown(docDataPtr) is not IVsPersistDocData docData)
+                return new JObject { ["reloaded"] = false, ["path"] = normalized, ["reason"] = "not_editable" };
+
+            ErrorHandler.ThrowOnFailure(docData.ReloadDocData(0));
+            return new JObject { ["reloaded"] = true, ["path"] = normalized };
+        }
+        finally
+        {
+            Marshal.Release(docDataPtr);
+        }
+    }
+
+    private static string ReadDocumentText(DTE2 dte, string resolvedPath)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        Document? openDocument = TryFindOpenDocumentByPath(dte, resolvedPath);
+        string? editorText = TryReadDocumentText(openDocument);
+        return editorText ?? File.ReadAllText(resolvedPath);
+    }
+
+    private static bool HasDocumentPath(Document document)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        return !string.IsNullOrWhiteSpace(TryGetDocumentFullName(document));
+    }
+
+    private static bool MatchesDocumentExactPath(Document document, string normalizedQueryPath)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        string? fullName = TryGetDocumentFullName(document);
+        return !string.IsNullOrWhiteSpace(fullName) &&
+            string.Equals(fullName, normalizedQueryPath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool MatchesDocumentExactName(Document document, string rawQuery)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        string? name = TryGetDocumentName(document);
+        string? fullName = TryGetDocumentFullName(document);
+        string fileName = string.IsNullOrWhiteSpace(fullName) ? string.Empty : Path.GetFileName(fullName);
+        return string.Equals(name, rawQuery, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(fileName, rawQuery, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool MatchesDocumentNameContains(Document document, string rawQuery)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        string? name = TryGetDocumentName(document);
+        string? fullName = TryGetDocumentFullName(document);
+        string? fileName = string.IsNullOrWhiteSpace(fullName) ? null : Path.GetFileName(fullName);
+        return ContainsOrdinalIgnoreCase(name, rawQuery) ||
+            ContainsOrdinalIgnoreCase(fileName, rawQuery);
+    }
+
+    private static bool MatchesDocumentPathContains(Document document, string rawQuery)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        return ContainsOrdinalIgnoreCase(TryGetDocumentFullName(document), rawQuery);
+    }
+
+    private static IReadOnlyList<string> GetDistinctDocumentNames(IEnumerable<Document> matches)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        return
+        [
+            .. matches
+                .Select(GetDocumentLabel)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase),
+        ];
+    }
+
+    private static string GetDocumentLabel(Document document)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        string fullName = TryGetDocumentFullName(document) ?? string.Empty;
+        string? project = TryGetDocumentProjectUniqueName(document);
+        if (!string.IsNullOrWhiteSpace(fullName) && !string.IsNullOrWhiteSpace(project))
+        {
+            return $"{Path.GetFileName(fullName)} [{project}]";
+        }
+
+        return TryGetDocumentName(document) ?? Path.GetFileName(fullName);
+    }
+
+    private static bool IsProjectBackedDocument(Document document)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        return !string.IsNullOrWhiteSpace(TryGetDocumentProjectUniqueName(document));
+    }
+
+    private static bool IsReviewArtifactDocument(Document document)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        string fullName = TryGetDocumentFullName(document) ?? string.Empty;
+        return fullName.IndexOf("\\output\\pr-review\\", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static bool IsOutputDocument(Document document)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        string fullName = TryGetDocumentFullName(document) ?? string.Empty;
+        return fullName.IndexOf("\\output\\", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static bool ContainsOrdinalIgnoreCase(string? value, string query)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return value!.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static List<string> SplitLines(string text)
+    {
+        string normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        return [.. normalized.Split('\n')];
+    }
+
+    private static JObject CreateDocumentInfo(Document document, string? activePath, int? tabIndex = null)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        string fullName = TryGetDocumentFullName(document) ?? string.Empty;
+        string normalizedPath = string.IsNullOrWhiteSpace(fullName) ? string.Empty : PathNormalization.NormalizeFilePath(fullName);
+        string normalizedActivePath = string.IsNullOrWhiteSpace(activePath) ? string.Empty : PathNormalization.NormalizeFilePath(activePath);
+        bool? saved = TryGetDocumentSaved(document);
+
+        return new JObject
+        {
+            ["name"] = TryGetDocumentName(document) ?? Path.GetFileName(fullName),
+            ["path"] = normalizedPath,
+            ["tabIndex"] = tabIndex,
+            ["isActive"] = !string.IsNullOrWhiteSpace(normalizedPath) &&
+                string.Equals(normalizedPath, normalizedActivePath, StringComparison.OrdinalIgnoreCase),
+            ["project"] = TryGetDocumentProjectUniqueName(document) ?? string.Empty,
+            ["isProjectBacked"] = IsProjectBackedDocument(document),
+            ["isReviewArtifact"] = IsReviewArtifactDocument(document),
+            ["saved"] = (JToken?)saved ?? JValue.CreateNull(),
+        };
+    }
+
+    private static string? TryGetDocumentFullName(Document? document)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (document is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            string fullName = document.FullName;
+            return string.IsNullOrWhiteSpace(fullName) ? null : PathNormalization.NormalizeFilePath(fullName);
+        }
+        catch (COMException)
+        {
+            return null;
+        }
+    }
+
+    private static string? TryGetDocumentName(Document? document)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (document is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return string.IsNullOrWhiteSpace(document.Name) ? null : document.Name;
+        }
+        catch (COMException)
+        {
+            return null;
+        }
+    }
+
+    private static string? TryGetDocumentProjectUniqueName(Document? document)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (document is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            string? project = document.ProjectItem?.ContainingProject?.UniqueName;
+            return string.IsNullOrWhiteSpace(project) ? null : project;
+        }
+        catch (COMException)
+        {
+            return null;
+        }
+    }
+
+    private static bool? TryGetDocumentSaved(Document? document)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (document is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return document.Saved;
+        }
+        catch (COMException)
+        {
+            return null;
+        }
+    }
+}

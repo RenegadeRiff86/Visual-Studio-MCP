@@ -1,0 +1,9 @@
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Tooling\obj\Debug\net472\VsIdeBridge.Tooling.csproj.AssemblyReference.cache
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Tooling\obj\Debug\net472\VsIdeBridge.Tooling.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Tooling\obj\Debug\net472\VsIdeBridge.Tooling.AssemblyInfoInputs.cache
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Tooling\obj\Debug\net472\VsIdeBridge.Tooling.AssemblyInfo.cs
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Tooling\obj\Debug\net472\VsIdeBridge.Tooling.csproj.CoreCompileInputs.cache
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Tooling\bin\Debug\net472\VsIdeBridge.Tooling.dll
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Tooling\bin\Debug\net472\VsIdeBridge.Tooling.pdb
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Tooling\obj\Debug\net472\VsIdeBridge.Tooling.dll
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Tooling\obj\Debug\net472\VsIdeBridge.Tooling.pdb

@@ -1,11 +1,11 @@
 <Project>
   <PropertyGroup>
-    <Version>2.2.1</Version>
+    <Version>2.2.6</Version>
     <ManagedPythonPackageId>python</ManagedPythonPackageId>
     <ManagedPythonPackageVersion>3.13.12</ManagedPythonPackageVersion>
     <Authors>RenegadeRiff86</Authors>
     <Company>RenegadeRiff86</Company>
-    <Copyright>Copyright Ã‚Â© RenegadeRiff86</Copyright>
+    <Copyright>Copyright © RenegadeRiff86</Copyright>
     <RepositoryUrl>https://github.com/RenegadeRiff86/vs-ide-bridge</RepositoryUrl>
   </PropertyGroup>
 </Project>

@@ -36,6 +36,23 @@ internal static class Program
             return;
         }
 
+        if (args.Length > 0 && args[0].Equals("mcp-http", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                McpServerLog.Write("mcp-http starting");
+                McpServerMode.RunHttpAsync(args[1..]).GetAwaiter().GetResult();
+                McpServerLog.Write("mcp-http stopped normally");
+            }
+            catch (Exception ex)
+            {
+                McpServerLog.Write($"mcp-http fatal error: {ex}");
+                Environment.ExitCode = 1;
+            }
+
+            return;
+        }
+
         try
         {
             ServiceBase.Run(new BridgeService(args));
@@ -84,10 +101,10 @@ internal sealed class BridgeService : ServiceBase
     private const int ControlPipeBufferSize = 4096;
     private const int ShutdownWaitTimeoutSeconds = 5;
 
+    private readonly string _logPath;
     private readonly TimeSpan _idleSoftTimeout;
     private readonly TimeSpan _idleHardTimeout;
     private readonly object _stateGate = new();
-    private readonly string _logPath;
 
     private CancellationTokenSource? _stopCts;
     private Task? _acceptLoop;
@@ -105,53 +122,44 @@ internal sealed class BridgeService : ServiceBase
         CanPauseAndContinue = false;
         AutoLog = false;
 
+        _lastActivityUtc = DateTime.UtcNow;
         _idleSoftTimeout = TimeSpan.FromSeconds(GetIntArg(args, "idle-soft-seconds", 900));
         _idleHardTimeout = TimeSpan.FromSeconds(GetIntArg(args, "idle-hard-seconds", 1200));
+        // --enable-http writes the flag file; RestoreState() in OnStart() starts the server.
+        if (GetFlagArg(args, "enable-http"))
+            HttpServerController.MarkEnabled();
         _logPath = ResolveLogPath();
     }
 
     protected override void OnStart(string[] args)
     {
-        _stopCts = new CancellationTokenSource();
-        lock (_stateGate)
-        {
-            _lastActivityUtc = DateTime.UtcNow;
-            _connectedClients = 0;
-            _inFlightCommands = 0;
-            _draining = false;
-        }
+        Log("service starting");
 
-        Log($"service started; idle_soft={_idleSoftTimeout.TotalSeconds}s idle_hard={_idleHardTimeout.TotalSeconds}s");
-        _acceptLoop = Task.Run(() => AcceptLoopAsync(_stopCts.Token));
-        _idleLoop = Task.Run(() => IdleLoopAsync(_stopCts.Token));
+        _stopCts = new CancellationTokenSource();
+        _lastActivityUtc = DateTime.UtcNow;
+
+        _acceptLoop = AcceptLoopAsync(_stopCts.Token);
+        _idleLoop = IdleLoopAsync(_stopCts.Token);
+        HttpServerController.RestoreState();
+
+        Log(HttpServerController.IsRunning
+            ? $"service started (HTTP MCP on {HttpServerController.Url})"
+            : "service started (HTTP MCP disabled)");
     }
 
     protected override void OnStop()
     {
         Log("service stopping");
+
         _stopCts?.Cancel();
+        HttpServerController.StopAndWait(TimeSpan.FromSeconds(ShutdownWaitTimeoutSeconds));
 
-        try
-        {
-            _acceptLoop?.Wait(TimeSpan.FromSeconds(ShutdownWaitTimeoutSeconds));
-        }
-        catch (Exception ex)
-        {
-            Log($"accept loop shutdown wait failed: {ex.Message}");
-        }
+        Task.WaitAll([.. new[] { _acceptLoop, _idleLoop }.OfType<Task>()], TimeSpan.FromSeconds(ShutdownWaitTimeoutSeconds));
 
-        try
-        {
-            _idleLoop?.Wait(TimeSpan.FromSeconds(ShutdownWaitTimeoutSeconds));
-        }
-        catch (Exception ex)
-        {
-            Log($"idle loop shutdown wait failed: {ex.Message}");
-        }
-
-        Log("service stopped");
         _stopCts?.Dispose();
         _stopCts = null;
+
+        Log("service stopped");
     }
 
     private static PipeSecurity CreateControlPipeSecurity()
@@ -367,6 +375,17 @@ internal sealed class BridgeService : ServiceBase
         }
 
         return defaultValue;
+    }
+
+    private static bool GetFlagArg(string[] args, string name)
+    {
+        string flagName = $"--{name}";
+        foreach (string arg in args)
+        {
+            if (arg.Equals(flagName, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     private static string ResolveLogPath()

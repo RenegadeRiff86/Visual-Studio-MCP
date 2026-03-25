@@ -1,0 +1,465 @@
+using EnvDTE;
+using EnvDTE80;
+using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
+using Newtonsoft.Json.Linq;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading.Tasks;
+using VsIdeBridge.Infrastructure;
+
+namespace VsIdeBridge.Services;
+
+internal sealed partial class DocumentService
+{
+    public async Task<JObject> OpenDocumentAsync(DTE2 dte, string filePath, int line, int column, bool allowDiskFallback = true)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        string normalizedPath = ResolveDocumentPath(dte, filePath, allowDiskFallback);
+        if (!File.Exists(normalizedPath))
+        {
+            normalizedPath = TryFindExistingOpenDocumentPathByFileName(dte, normalizedPath) ?? normalizedPath;
+            if (!File.Exists(normalizedPath))
+            {
+                throw new CommandErrorException(
+                    DocumentNotFoundCode,
+                    $"File does not exist on disk: {normalizedPath}");
+            }
+        }
+
+        Window window = dte.ItemOperations.OpenFile(normalizedPath);
+        window.Activate();
+
+        bool navigated = false;
+        if (window.Document?.Object(TextDocumentKind) is TextDocument textDocument)
+        {
+            navigated = TryNavigateToLine(textDocument, line, column);
+        }
+
+        return new JObject
+        {
+            [ResolvedPathProperty] = normalizedPath,
+            ["name"] = Path.GetFileName(normalizedPath),
+            ["line"] = Math.Max(1, line),
+            ["column"] = Math.Max(1, column),
+            ["navigated"] = navigated,
+            ["windowCaption"] = window.Caption,
+        };
+    }
+
+    public async Task<JObject> RevealDocumentRangeAsync(
+        DTE2 dte,
+        string filePath,
+        int startLine,
+        int startColumn,
+        int endLine,
+        int endColumn)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
+        if (!File.Exists(normalizedPath))
+        {
+            throw new CommandErrorException(DocumentNotFoundCode, $"File not found: {normalizedPath}");
+        }
+
+        Window window = dte.ItemOperations.OpenFile(normalizedPath);
+        window.Activate();
+
+        bool navigated = false;
+        if (window.Document?.Object(TextDocumentKind) is TextDocument textDocument)
+        {
+            navigated = TryNavigateToRange(textDocument, startLine, startColumn, endLine, endColumn);
+            if (!navigated)
+            {
+                navigated = TryNavigateToLine(textDocument, startLine, startColumn);
+            }
+        }
+
+        return new JObject
+        {
+            [ResolvedPathProperty] = normalizedPath,
+            ["name"] = Path.GetFileName(normalizedPath),
+            ["startLine"] = Math.Max(1, startLine),
+            ["startColumn"] = Math.Max(1, startColumn),
+            ["endLine"] = Math.Max(1, endLine),
+            ["endColumn"] = Math.Max(1, endColumn),
+            ["navigated"] = navigated,
+            ["windowCaption"] = window.Caption,
+        };
+    }
+
+    public async Task<JObject> PositionTextSelectionAsync(
+        DTE2 dte,
+        string? filePath,
+        string? documentQuery,
+        int? line,
+        int? column,
+        bool selectWord)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        if (!string.IsNullOrWhiteSpace(filePath) && !string.IsNullOrWhiteSpace(documentQuery))
+        {
+            throw new CommandErrorException("invalid_arguments", "Use either --file or --document, not both.");
+        }
+
+        Document document = ResolveDocumentForTextSelection(dte, filePath, documentQuery);
+
+        if (document.Object(TextDocumentKind) is not TextDocument textDocument)
+        {
+            throw new CommandErrorException(UnsupportedOperationCode, $"Document is not a text document: {document.FullName}");
+        }
+
+        TextSelection selection = textDocument.Selection;
+        int targetLine = Math.Max(1, line ?? selection.ActivePoint.Line);
+        int targetColumn = Math.Max(1, column ?? selection.ActivePoint.DisplayColumn);
+        selection.MoveToLineAndOffset(targetLine, targetColumn, false);
+        TryShowActivePoint(selection);
+        if (selectWord)
+        {
+            TrySelectCurrentWord(selection);
+            TryShowActivePoint(selection);
+        }
+
+        int activeLine = selection.ActivePoint.Line;
+        int activeColumn = selection.ActivePoint.DisplayColumn;
+        return new JObject
+        {
+            [ResolvedPathProperty] = PathNormalization.NormalizeFilePath(document.FullName),
+            ["name"] = document.Name,
+            ["line"] = activeLine,
+            ["column"] = activeColumn,
+            [SelectedTextProperty] = selection.Text,
+            ["lineText"] = GetLineText(textDocument, activeLine),
+        };
+    }
+
+    public async Task<JObject> ActivateOpenDocumentAsync(DTE2 dte, string query)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        (List<Document> documents, string matchedBy) = ResolveDocumentMatches(dte, query, fallbackToActive: false, allowMultiple: false);
+        documents[0].Activate();
+
+        return new JObject
+        {
+            ["query"] = query,
+            ["matchedBy"] = matchedBy,
+            ["document"] = CreateDocumentInfo(documents[0], documents[0].FullName),
+        };
+    }
+
+    public async Task<JObject> CloseOpenDocumentsAsync(DTE2 dte, string? query, bool closeAllMatches, bool saveChanges)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        string? activePath = TryGetDocumentFullName(dte.ActiveDocument);
+        (List<Document> documents, string matchedBy) = ResolveDocumentMatches(dte, query, fallbackToActive: true, allowMultiple: closeAllMatches);
+        JArray closed = new();
+        foreach (Document document in documents)
+        {
+            JObject info = CreateDocumentInfo(document, activePath);
+            document.Close(saveChanges ? vsSaveChanges.vsSaveChangesYes : vsSaveChanges.vsSaveChangesNo);
+            closed.Add(info);
+        }
+
+        return new JObject
+        {
+            ["query"] = query ?? string.Empty,
+            ["matchedBy"] = matchedBy,
+            ["saveChanges"] = saveChanges,
+            ["count"] = closed.Count,
+            ["items"] = closed,
+        };
+    }
+
+    public async Task<JObject> CloseFileAsync(DTE2 dte, string? filePath, string? query, bool saveChanges)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        string resolvedQuery;
+        if (!string.IsNullOrWhiteSpace(filePath))
+        {
+            resolvedQuery = PathNormalization.NormalizeFilePath(filePath);
+        }
+        else if (!string.IsNullOrWhiteSpace(query))
+        {
+            resolvedQuery = query!;
+        }
+        else
+        {
+            throw new CommandErrorException("invalid_arguments", "Specify --file or --query.");
+        }
+
+        return await CloseOpenDocumentsAsync(dte, resolvedQuery, closeAllMatches: false, saveChanges).ConfigureAwait(true);
+    }
+
+    public async Task<JObject> CloseAllExceptCurrentAsync(DTE2 dte, bool saveChanges)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        Document activeDocument = dte.ActiveDocument ?? throw new CommandErrorException(DocumentNotFoundCode, "There is no active document.");
+        string? activePath = TryGetDocumentFullName(activeDocument);
+        if (string.IsNullOrWhiteSpace(activePath))
+        {
+            throw new CommandErrorException(DocumentNotFoundCode, "The active document does not have a file path.");
+        }
+
+        List<Document> documentsToClose = EnumerateOpenDocuments(dte)
+            .Where(document => !string.Equals(
+                TryGetDocumentFullName(document),
+                activePath,
+                StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        JArray closed = new();
+        foreach (Document document in documentsToClose)
+        {
+            closed.Add(CreateDocumentInfo(document, activePath));
+            document.Close(saveChanges ? vsSaveChanges.vsSaveChangesYes : vsSaveChanges.vsSaveChangesNo);
+        }
+
+        return new JObject
+        {
+            ["activePath"] = PathNormalization.NormalizeFilePath(activePath),
+            ["saveChanges"] = saveChanges,
+            ["count"] = closed.Count,
+            ["items"] = closed,
+        };
+    }
+
+    public async Task<(string Path, string Text)> GetActiveDocumentTextAsync(DTE2 dte)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        Document document = dte.ActiveDocument ?? throw new CommandErrorException(DocumentNotFoundCode, "There is no active document.");
+        if (document.Object(TextDocumentKind) is not TextDocument textDocument)
+        {
+            throw new CommandErrorException(UnsupportedOperationCode, $"Active document is not a text document: {document.FullName}");
+        }
+
+        EditPoint editPoint = textDocument.StartPoint.CreateEditPoint();
+        return (document.FullName, editPoint.GetText(textDocument.EndPoint));
+    }
+
+    // ── Extracted helpers ─────────────────────────────────────────────────────
+
+    private static Document ResolveDocumentForTextSelection(DTE2 dte, string? filePath, string? documentQuery)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (!string.IsNullOrWhiteSpace(filePath))
+        {
+            string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
+            if (!File.Exists(normalizedPath))
+            {
+                throw new CommandErrorException(DocumentNotFoundCode, $"File not found: {normalizedPath}");
+            }
+
+            Window window = dte.ItemOperations.OpenFile(normalizedPath);
+            window.Activate();
+            return window.Document ?? dte.ActiveDocument
+                ?? throw new CommandErrorException(DocumentNotFoundCode, $"Unable to activate: {normalizedPath}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(documentQuery))
+        {
+            (List<Document> documents, _) = ResolveDocumentMatches(dte, documentQuery, fallbackToActive: false, allowMultiple: false);
+            Document resolved = documents[0];
+            resolved.Activate();
+            return resolved;
+        }
+
+        Document active = dte.ActiveDocument ?? throw new CommandErrorException(DocumentNotFoundCode, "There is no active document.");
+        active.Activate();
+        return active;
+    }
+
+    private static bool TryNavigateToRange(
+        TextDocument textDocument,
+        int startLine,
+        int startColumn,
+        int endLine,
+        int endColumn)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        try
+        {
+            TextSelection selection = textDocument.Selection;
+            SelectRange(
+                textDocument,
+                selection,
+                Math.Max(1, startLine),
+                Math.Max(1, startColumn),
+                Math.Max(1, endLine),
+                Math.Max(1, endColumn));
+            TryShowActivePoint(selection);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (COMException)
+        {
+            return false;
+        }
+    }
+
+
+    // ── Low-level navigation helpers ──────────────────────────────────────────
+
+    private static void TrySelectCurrentWord(TextSelection selection)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        int originalLine = selection.ActivePoint.Line;
+        int originalColumn = selection.ActivePoint.DisplayColumn;
+        selection.WordLeft(false, 1);
+        if (selection.ActivePoint.Line != originalLine)
+        {
+            selection.MoveToLineAndOffset(originalLine, originalColumn, false);
+        }
+
+        selection.WordRight(true, 1);
+        if (string.IsNullOrWhiteSpace(selection.Text))
+        {
+            selection.MoveToLineAndOffset(originalLine, originalColumn, false);
+        }
+    }
+
+    private static bool HasNavigableSymbolText(string? text)
+    {
+        return !string.IsNullOrWhiteSpace(text)
+            && text.Any(static character => char.IsLetterOrDigit(character) || character == '_');
+    }
+
+    /// <summary>
+    /// Navigates to a line/column, clamping to the document range and handling
+    /// transient COM errors (e.g. "Class not registered" when the editor buffer
+    /// hasn't fully initialized after first open).
+    /// </summary>
+    private static bool TryNavigateToLine(TextDocument textDocument, int line, int column)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (TryNavigateToLineOnce(textDocument, line, column)) return true;
+
+        // Editor buffers can be transiently unavailable immediately after open.
+        System.Threading.Thread.Sleep(100);
+        if (TryNavigateToLineOnce(textDocument, line, column)) return true;
+
+        // Final fallback: navigate to line 1 col 1 so the file is still visible.
+        TryNavigateToLineFallback(textDocument);
+        return false;
+    }
+
+    private static bool TryNavigateToLineOnce(TextDocument textDocument, int line, int column)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        try
+        {
+            int maxLine = textDocument.EndPoint.Line;
+            int clampedLine = Math.Min(Math.Max(line, 1), Math.Max(1, maxLine));
+            TextSelection selection = textDocument.Selection;
+            selection.MoveToLineAndOffset(clampedLine, Math.Max(1, column), false);
+            TryShowActivePoint(selection);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (COMException)
+        {
+            return false;
+        }
+    }
+
+    private static void TryNavigateToLineFallback(TextDocument textDocument)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        try
+        {
+            TextSelection selection = textDocument.Selection;
+            selection.MoveToLineAndOffset(1, 1, false);
+            TryShowActivePoint(selection);
+        }
+        catch (Exception)
+        {
+            // Give up on navigation; the file is still open.
+        }
+    }
+
+    private static void TryShowActivePoint(TextSelection selection)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        try
+        {
+            selection.ActivePoint.TryToShow(vsPaneShowHow.vsPaneShowCentered);
+        }
+        catch (Exception)
+        {
+            // Some editor surfaces may not support viewport repositioning.
+        }
+    }
+
+    private static void SelectRange(
+        TextDocument textDocument,
+        TextSelection selection,
+        int startLine,
+        int startColumn,
+        int endLine,
+        int endColumn)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        int resolvedStartLine = Math.Max(1, startLine);
+        int resolvedStartColumn = Math.Max(1, startColumn);
+        int resolvedEndLine = Math.Max(resolvedStartLine, endLine);
+        int resolvedEndColumn = Math.Max(1, endColumn);
+
+        selection.MoveToLineAndOffset(resolvedStartLine, resolvedStartColumn, false);
+
+        if (resolvedEndLine <= resolvedStartLine)
+        {
+            selection.EndOfLine(true);
+            return;
+        }
+
+        int documentEndLine = textDocument.EndPoint.Line;
+        if (resolvedEndLine >= documentEndLine)
+        {
+            selection.EndOfDocument(true);
+            return;
+        }
+
+        selection.MoveToLineAndOffset(resolvedEndLine + 1, resolvedEndColumn, true);
+    }
+
+    private static string GetLineText(TextDocument textDocument, int lineNumber)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (lineNumber < 1)
+        {
+            return string.Empty;
+        }
+
+        EditPoint start = textDocument.StartPoint.CreateEditPoint();
+        start.MoveToLineAndOffset(lineNumber, 1);
+        EditPoint end = start.CreateEditPoint();
+        end.EndOfLine();
+        return start.GetText(end);
+    }
+}

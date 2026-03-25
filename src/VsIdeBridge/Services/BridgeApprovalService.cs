@@ -10,10 +10,10 @@ namespace VsIdeBridge.Services;
 
 internal enum BridgeApprovalKind
 {
-    Edit,
     ShellExec,
     PythonExecution,
     PythonEnvironmentMutation,
+    Build,
 }
 
 internal sealed class BridgeApprovalService
@@ -79,10 +79,10 @@ internal sealed class BridgeApprovalService
     {
         return kind switch
         {
-            BridgeApprovalKind.Edit => settings.AllowBridgeEdits,
             BridgeApprovalKind.ShellExec => settings.AllowBridgeShellExec,
             BridgeApprovalKind.PythonExecution => settings.AllowBridgePythonExecution,
             BridgeApprovalKind.PythonEnvironmentMutation => settings.AllowBridgePythonEnvironmentMutation,
+            BridgeApprovalKind.Build => settings.AllowBridgeBuild,
             _ => false,
         };
     }
@@ -104,9 +104,6 @@ internal sealed class BridgeApprovalService
     {
         switch (kind)
         {
-            case BridgeApprovalKind.Edit:
-                settings.AllowBridgeEdits = enabled;
-                break;
             case BridgeApprovalKind.ShellExec:
                 settings.AllowBridgeShellExec = enabled;
                 break;
@@ -115,6 +112,9 @@ internal sealed class BridgeApprovalService
                 break;
             case BridgeApprovalKind.PythonEnvironmentMutation:
                 settings.AllowBridgePythonEnvironmentMutation = enabled;
+                break;
+            case BridgeApprovalKind.Build:
+                settings.AllowBridgeBuild = enabled;
                 break;
         }
     }
@@ -158,10 +158,10 @@ internal sealed class BridgeApprovalService
     {
         return kind switch
         {
-            BridgeApprovalKind.Edit => "Use IDE Bridge > Allow Bridge Edits if you want future edit requests to run without prompts.",
             BridgeApprovalKind.ShellExec => "Use IDE Bridge > Allow Bridge Shell Exec if you want future shell exec requests to run without prompts.",
             BridgeApprovalKind.PythonExecution => "Use IDE Bridge > Allow Bridge Python Execution if you want future restricted Python execution requests to run without prompts. Use IDE Bridge > Allow Bridge Python Unrestricted Execution only when you intentionally want arbitrary Python access.",
             BridgeApprovalKind.PythonEnvironmentMutation => "Use IDE Bridge > Allow Bridge Python Environment Mutation if you want future Python environment mutation requests to run without prompts.",
+            BridgeApprovalKind.Build => "Use IDE Bridge > Allow Bridge Build if you want future build requests to run without prompts.",
             _ => "Use the IDE Bridge menu to change approval settings.",
         };
     }
@@ -170,10 +170,10 @@ internal sealed class BridgeApprovalService
     {
         return kind switch
         {
-            BridgeApprovalKind.Edit => "edit_approval_denied",
             BridgeApprovalKind.ShellExec => "shell_exec_approval_denied",
             BridgeApprovalKind.PythonExecution => "python_exec_approval_denied",
             BridgeApprovalKind.PythonEnvironmentMutation => "python_env_mutation_approval_denied",
+            BridgeApprovalKind.Build => "build_approval_denied",
             _ => "approval_denied",
         };
     }
@@ -182,10 +182,10 @@ internal sealed class BridgeApprovalService
     {
         return kind switch
         {
-            BridgeApprovalKind.Edit => "Bridge edit approval was denied. Wait for a human to approve the Visual Studio prompt, or enable IDE Bridge > Allow Bridge Edits.",
             BridgeApprovalKind.ShellExec => "Bridge shell exec approval was denied. Wait for a human to approve the Visual Studio prompt, or enable IDE Bridge > Allow Bridge Shell Exec.",
             BridgeApprovalKind.PythonExecution => "Bridge Python execution approval was denied. Wait for a human to approve the Visual Studio prompt, or enable IDE Bridge > Allow Bridge Python Execution. Unrestricted Python still requires the separate IDE Bridge > Allow Bridge Python Unrestricted Execution setting.",
             BridgeApprovalKind.PythonEnvironmentMutation => "Bridge Python environment mutation approval was denied. Wait for a human to approve the Visual Studio prompt, or enable IDE Bridge > Allow Bridge Python Environment Mutation.",
+            BridgeApprovalKind.Build => "Bridge build approval was denied. Wait for a human to approve the Visual Studio prompt, or enable IDE Bridge > Allow Bridge Build.",
             _ => "Bridge approval was denied.",
         };
     }
@@ -194,10 +194,10 @@ internal sealed class BridgeApprovalService
     {
         return kind switch
         {
-            BridgeApprovalKind.Edit => "edit files in this solution",
             BridgeApprovalKind.ShellExec => "run an external process from this solution",
             BridgeApprovalKind.PythonExecution => "execute Python using the selected interpreter",
             BridgeApprovalKind.PythonEnvironmentMutation => "modify a Python environment",
+            BridgeApprovalKind.Build => "build the solution",
             _ => "perform a privileged action",
         };
     }
@@ -206,10 +206,10 @@ internal sealed class BridgeApprovalService
     {
         return kind switch
         {
-            BridgeApprovalKind.Edit => "edit",
             BridgeApprovalKind.ShellExec => "shell_exec",
             BridgeApprovalKind.PythonExecution => "python_exec",
             BridgeApprovalKind.PythonEnvironmentMutation => "python_env_mutation",
+            BridgeApprovalKind.Build => "build",
             _ => "unknown",
         };
     }

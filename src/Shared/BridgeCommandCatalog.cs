@@ -271,7 +271,7 @@ public static class BridgeCommandCatalog
             "diagnostics-snapshot" => ("Aggregate IDE state, debugger state, build state, and current errors/warnings.", "diagnostics-snapshot --wait-for-intellisense true"),
             "build-configurations" => ("List available solution build configurations and platforms.", commandName),
             "set-build-configuration" => ("Activate one build configuration/platform pair.", "set-build-configuration --configuration Debug --platform x64"),
-            "build" => ("Build the current solution. By default this refuses to build when diagnostics already exist and fails if any errors, warnings, or messages remain after the build.", "build --configuration Debug --platform x64 --require-clean-diagnostics true"),
+            "build" => ("Build the solution or a specific project. Pass --project <name> to build one project; omit to build the whole solution.", "build --project VsIdeBridgeInstaller --configuration Release"),
             "errors" => ("Capture Error List rows with optional severity and text filters.", "errors --severity error --max 50"),
             "warnings" => ("Capture warning rows with optional code/path/project filters.", "warnings --group-by code"),
             "build-errors" => ("Build then capture Error List rows in one call. By default this refuses to build when diagnostics already exist and fails if any errors, warnings, or messages remain after the build.", "build-errors --max 200 --require-clean-diagnostics true"),

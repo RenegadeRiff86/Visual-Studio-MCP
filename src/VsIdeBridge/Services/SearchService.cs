@@ -14,7 +14,7 @@ using VsIdeBridge.Infrastructure;
 
 namespace VsIdeBridge.Services;
 
-internal sealed class SearchService
+internal sealed partial class SearchService
 {
     private const string FunctionKind = "function";
     private const string InterfaceKind = "interface";
@@ -93,32 +93,32 @@ internal sealed class SearchService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
 
-        var merged = new Dictionary<string, SolutionFileLocator.Match>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, SolutionFileLocator.Match> merged = new(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var fileMatch in SolutionFileLocator.FindMatches(context.Dte, query, pathFilter, extensions))
+        foreach (SolutionFileLocator.Match fileMatch in SolutionFileLocator.FindMatches(context.Dte, query, pathFilter, extensions))
         {
             merged[fileMatch.Path] = fileMatch;
         }
 
         if (includeNonProject)
         {
-            foreach (var fileMatch in SolutionFileLocator.FindDiskMatches(context.Dte, query, pathFilter, extensions, Math.Max(100, maxResults * 2)))
+            foreach (SolutionFileLocator.Match fileMatch in SolutionFileLocator.FindDiskMatches(context.Dte, query, pathFilter, extensions, Math.Max(100, maxResults * 2)))
             {
-                if (!merged.TryGetValue(fileMatch.Path, out var existing) || fileMatch.Score > existing.Score)
+                if (!merged.TryGetValue(fileMatch.Path, out SolutionFileLocator.Match existing) || fileMatch.Score > existing.Score)
                 {
                     merged[fileMatch.Path] = fileMatch;
                 }
             }
         }
 
-        var items = merged.Values
+        SolutionFileLocator.Match[] items = merged.Values
             .OrderByDescending(fileMatch => fileMatch.Score)
             .ThenBy(item => item.Path.Length)
             .ThenBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
             .Take(Math.Max(1, maxResults))
             .ToArray();
 
-        var matches = new JArray(items.Select(item => new JObject
+        JArray matches = new(items.Select(item => new JObject
         {
             ["path"] = item.Path,
             ["name"] = Path.GetFileName(item.Path),
@@ -149,15 +149,8 @@ internal sealed class SearchService
         string? projectUniqueName,
         string? pathFilter = null)
     {
-        var (Matches, GroupedMatches) = await SearchTextMatchesAsync(
-            context,
-            query,
-            scope,
-            matchCase,
-            wholeWord,
-            useRegex,
-            projectUniqueName,
-            pathFilter).ConfigureAwait(true);
+        (List<SearchHit> Matches, Dictionary<string, List<FindResult>> GroupedMatches) = await SearchTextMatchesAsync(
+            context, query, scope, matchCase, wholeWord, useRegex, projectUniqueName, pathFilter).ConfigureAwait(true);
 
         await PopulateFindResultsAsync(context, GroupedMatches, query, resultsWindow).ConfigureAwait(true);
 
@@ -184,63 +177,27 @@ internal sealed class SearchService
         string? pathFilter,
         int maxQueriesPerChunk)
     {
-        var normalizedQueries = NormalizeQueries(queries);
+        List<string> normalizedQueries = NormalizeQueries(queries);
         if (normalizedQueries.Count == 0)
         {
             throw new ArgumentException("At least one non-empty query is required.", nameof(queries));
         }
 
-        var chunkSize = Math.Max(1, maxQueriesPerChunk);
-        var mergedHits = new Dictionary<string, SearchHit>(StringComparer.OrdinalIgnoreCase);
-        var queryResults = new JArray();
-        var chunks = new JArray();
-        var totalMatchCount = 0;
+        int chunkSize = Math.Max(1, maxQueriesPerChunk);
+        Dictionary<string, SearchHit> mergedHits = new(StringComparer.OrdinalIgnoreCase);
+        JArray queryResults = new();
+        JArray chunks = new();
+        int totalMatchCount = await ExecuteBatchChunksAsync(
+            context, normalizedQueries, scope, matchCase, wholeWord, useRegex,
+            projectUniqueName, pathFilter, chunkSize, mergedHits, queryResults, chunks).ConfigureAwait(true);
 
-        for (var start = 0; start < normalizedQueries.Count; start += chunkSize)
-        {
-            var chunkQueries = normalizedQueries.Skip(start).Take(chunkSize).ToArray();
-            var chunkMatchCount = 0;
-
-            foreach (var query in chunkQueries)
-            {
-                var (matches, _) = await SearchTextMatchesAsync(
-                    context,
-                    query,
-                    scope,
-                    matchCase,
-                    wholeWord,
-                    useRegex,
-                    projectUniqueName,
-                    pathFilter).ConfigureAwait(true);
-
-                totalMatchCount += matches.Count;
-                chunkMatchCount += matches.Count;
-                MergeSearchHits(mergedHits, matches);
-
-                queryResults.Add(new JObject
-                {
-                    ["query"] = query,
-                    ["count"] = matches.Count,
-                    ["matches"] = new JArray(matches.Select(SerializeHit)),
-                });
-            }
-
-            chunks.Add(new JObject
-            {
-                ["index"] = (start / chunkSize) + 1,
-                ["queryCount"] = chunkQueries.Length,
-                ["queries"] = new JArray(chunkQueries),
-                ["matchCount"] = chunkMatchCount,
-            });
-        }
-
-        var orderedMergedHits = mergedHits.Values
+        SearchHit[] orderedMergedHits = mergedHits.Values
             .OrderBy(hit => hit.Path, StringComparer.OrdinalIgnoreCase)
             .ThenBy(hit => hit.Line)
             .ThenBy(hit => hit.Column)
             .ToArray();
-        var groupedMatches = BuildGroupedMatchesFromHits(orderedMergedHits);
-        var summaryQuery = normalizedQueries.Count == 1
+        Dictionary<string, List<FindResult>> groupedMatches = BuildGroupedMatchesFromHits(orderedMergedHits);
+        string summaryQuery = normalizedQueries.Count == 1
             ? normalizedQueries[0]
             : $"{normalizedQueries.Count} batched queries";
         await PopulateFindResultsAsync(context, groupedMatches, summaryQuery, resultsWindow).ConfigureAwait(true);
@@ -262,6 +219,53 @@ internal sealed class SearchService
         };
     }
 
+    private async Task<int> ExecuteBatchChunksAsync(
+        IdeCommandContext context,
+        IReadOnlyList<string> normalizedQueries,
+        string scope,
+        bool matchCase,
+        bool wholeWord,
+        bool useRegex,
+        string? projectUniqueName,
+        string? pathFilter,
+        int chunkSize,
+        Dictionary<string, SearchHit> mergedHits,
+        JArray queryResults,
+        JArray chunks)
+    {
+        int totalMatchCount = 0;
+        for (int start = 0; start < normalizedQueries.Count; start += chunkSize)
+        {
+            string[] chunkQueries = normalizedQueries.Skip(start).Take(chunkSize).ToArray();
+            int chunkMatchCount = 0;
+            foreach (string query in chunkQueries)
+            {
+                (List<SearchHit> matches, _) = await SearchTextMatchesAsync(
+                    context, query, scope, matchCase, wholeWord, useRegex,
+                    projectUniqueName, pathFilter).ConfigureAwait(true);
+                totalMatchCount += matches.Count;
+                chunkMatchCount += matches.Count;
+                MergeSearchHits(mergedHits, matches);
+                queryResults.Add(new JObject
+                {
+                    ["query"] = query,
+                    ["count"] = matches.Count,
+                    ["matches"] = new JArray(matches.Select(SerializeHit)),
+                });
+            }
+
+            chunks.Add(new JObject
+            {
+                ["index"] = (start / chunkSize) + 1,
+                ["queryCount"] = chunkQueries.Length,
+                ["queries"] = new JArray(chunkQueries),
+                ["matchCount"] = chunkMatchCount,
+            });
+        }
+
+        return totalMatchCount;
+    }
+
     public async Task<JObject> SearchSymbolsAsync(
         IdeCommandContext context,
         string name,
@@ -274,14 +278,8 @@ internal sealed class SearchService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
 
-        var codeModelHits = SearchCodeModelSymbols(
-            context.Dte,
-            name,
-            kind,
-            scope,
-            matchCase,
-            projectUniqueName,
-            pathFilter)
+        CodeModelHit[] codeModelHits = SearchCodeModelSymbols(
+            context.Dte, name, kind, scope, matchCase, projectUniqueName, pathFilter)
             .Take(Math.Max(1, max))
             .ToArray();
 
@@ -301,70 +299,18 @@ internal sealed class SearchService
             };
         }
 
-        // Build a regex pattern targeting definition signatures for the requested kind.
-        var escaped = Regex.Escape(name);
-        string pattern;
-        string resolvedKind;
-        switch (kind.ToLowerInvariant())
-        {
-            case FunctionKind:
-                pattern = $@"\b{escaped}\s*\(";
-                resolvedKind = FunctionKind;
-                break;
-            case "class":
-                pattern = $@"\bclass\s+{escaped}\b";
-                resolvedKind = "class";
-                break;
-            case "struct":
-                pattern = $@"\bstruct\s+{escaped}\b";
-                resolvedKind = "struct";
-                break;
-            case "enum":
-                pattern = $@"\benum(?:\s+class)?\s+{escaped}\b";
-                resolvedKind = "enum";
-                break;
-            case "namespace":
-                pattern = $@"\bnamespace\s+{escaped}\b";
-                resolvedKind = "namespace";
-                break;
-            case InterfaceKind:
-                pattern = $@"\binterface\s+{escaped}\b";
-                resolvedKind = InterfaceKind;
-                break;
-            case "member":
-                pattern = $@"\b{escaped}\b";
-                resolvedKind = "member";
-                break;
-            case "type":
-                pattern = $@"\b{escaped}\b";
-                resolvedKind = "type";
-                break;
-            default:
-                // "all" Ã¢â‚¬â€ whole-word match; kind is inferred per-hit
-                pattern = $@"\b{escaped}\b";
-                resolvedKind = "all";
-                break;
-        }
+        (string pattern, string resolvedKind) = BuildSymbolTextPattern(name, kind);
 
-        var (Matches, GroupedMatches) = await SearchTextMatchesAsync(
-            context,
-            pattern,
-            scope,
-            matchCase,
-            wholeWord: false,
-            useRegex: true,
-            projectUniqueName,
-            pathFilter).ConfigureAwait(true);
+        (List<SearchHit> Matches, Dictionary<string, List<FindResult>> GroupedMatches) = await SearchTextMatchesAsync(
+            context, pattern, scope, matchCase, wholeWord: false, useRegex: true,
+            projectUniqueName, pathFilter).ConfigureAwait(true);
 
-        // Annotate each hit with an inferred kind and cap at max
-        var hits = Matches
+        JObject[] hits = Matches
             .Take(max)
             .Select(hit =>
             {
-                var inferredKind = resolvedKind == "all"
-                    ? InferSymbolKind(hit.Preview, name)
-                    : resolvedKind;
-                var obj = SerializeHit(hit);
+                string inferredKind = resolvedKind == "all" ? InferSymbolKind(hit.Preview, name) : resolvedKind;
+                JObject obj = SerializeHit(hit);
                 obj["inferredKind"] = inferredKind;
                 return obj;
             })
@@ -384,23 +330,32 @@ internal sealed class SearchService
         };
     }
 
+    private static (string Pattern, string ResolvedKind) BuildSymbolTextPattern(string name, string kind)
+    {
+        string escaped = Regex.Escape(name);
+        switch (kind.ToLowerInvariant())
+        {
+            case FunctionKind: return ($@"\b{escaped}\s*\(", FunctionKind);
+            case "class": return ($@"\bclass\s+{escaped}\b", "class");
+            case "struct": return ($@"\bstruct\s+{escaped}\b", "struct");
+            case "enum": return ($@"\benum(?:\s+class)?\s+{escaped}\b", "enum");
+            case "namespace": return ($@"\bnamespace\s+{escaped}\b", "namespace");
+            case InterfaceKind: return ($@"\binterface\s+{escaped}\b", InterfaceKind);
+            case "member": return ($@"\b{escaped}\b", "member");
+            case "type": return ($@"\b{escaped}\b", "type");
+            default: return ($@"\b{escaped}\b", "all"); // "all" — whole-word match; kind inferred per-hit
+        }
+    }
+
     private static string InferSymbolKind(string lineText, string name)
     {
-        var trimmed = lineText.TrimStart();
-        // Class/struct/enum/namespace Ã¢â‚¬â€ look for keyword immediately before name
-        if (Regex.IsMatch(trimmed, $@"\bclass\s+{Regex.Escape(name)}\b", RegexOptions.IgnoreCase))
-            return "class";
-        if (Regex.IsMatch(trimmed, $@"\bstruct\s+{Regex.Escape(name)}\b", RegexOptions.IgnoreCase))
-            return "struct";
-        if (Regex.IsMatch(trimmed, $@"\benum(?:\s+class)?\s+{Regex.Escape(name)}\b", RegexOptions.IgnoreCase))
-            return "enum";
-        if (Regex.IsMatch(trimmed, $@"\bnamespace\s+{Regex.Escape(name)}\b", RegexOptions.IgnoreCase))
-            return "namespace";
-        if (Regex.IsMatch(trimmed, $@"\binterface\s+{Regex.Escape(name)}\b", RegexOptions.IgnoreCase))
-            return InterfaceKind;
-        // Function: name followed by (
-        if (Regex.IsMatch(trimmed, $@"\b{Regex.Escape(name)}\s*\(", RegexOptions.IgnoreCase))
-            return FunctionKind;
+        string trimmed = lineText.TrimStart();
+        if (Regex.IsMatch(trimmed, $@"\bclass\s+{Regex.Escape(name)}\b", RegexOptions.IgnoreCase)) return "class";
+        if (Regex.IsMatch(trimmed, $@"\bstruct\s+{Regex.Escape(name)}\b", RegexOptions.IgnoreCase)) return "struct";
+        if (Regex.IsMatch(trimmed, $@"\benum(?:\s+class)?\s+{Regex.Escape(name)}\b", RegexOptions.IgnoreCase)) return "enum";
+        if (Regex.IsMatch(trimmed, $@"\bnamespace\s+{Regex.Escape(name)}\b", RegexOptions.IgnoreCase)) return "namespace";
+        if (Regex.IsMatch(trimmed, $@"\binterface\s+{Regex.Escape(name)}\b", RegexOptions.IgnoreCase)) return InterfaceKind;
+        if (Regex.IsMatch(trimmed, $@"\b{Regex.Escape(name)}\s*\(", RegexOptions.IgnoreCase)) return FunctionKind;
         return "unknown";
     }
 
@@ -418,41 +373,20 @@ internal sealed class SearchService
         bool populateResultsWindow,
         int resultsWindow)
     {
-        IReadOnlyList<string> searchTerms;
-        var (Matches, GroupedMatches) = useRegex
-            ? await SearchTextMatchesAsync(
-                context,
-                query,
-                scope,
-                matchCase,
-                wholeWord,
-                true,
-                projectUniqueName).ConfigureAwait(true)
-            : await SearchSmartQueryTermsAsync(
-                context,
-                query,
-                scope,
-                projectUniqueName).ConfigureAwait(true);
+        (List<SearchHit> Matches, Dictionary<string, List<FindResult>> GroupedMatches) = useRegex
+            ? await SearchTextMatchesAsync(context, query, scope, matchCase, wholeWord, true, projectUniqueName).ConfigureAwait(true)
+            : await SearchSmartQueryTermsAsync(context, query, scope, projectUniqueName).ConfigureAwait(true);
 
-        searchTerms = useRegex
+        IReadOnlyList<string> searchTerms = useRegex
             ? [query]
-            :
-            [
-                .. ExtractSmartQueryTerms(query)
-                    .Select(term => term.Text)
-                    .Distinct(StringComparer.OrdinalIgnoreCase),
-            ];
+            : [.. ExtractSmartQueryTerms(query).Select(term => term.Text).Distinct(StringComparer.OrdinalIgnoreCase)];
 
         if (populateResultsWindow)
         {
             await PopulateFindResultsAsync(context, GroupedMatches, query, resultsWindow).ConfigureAwait(true);
         }
 
-        var contexts = BuildSmartContexts(
-            Matches,
-            contextBefore,
-            contextAfter,
-            maxContexts);
+        JArray contexts = BuildSmartContexts(Matches, contextBefore, contextAfter, maxContexts);
 
         return new JObject
         {
@@ -465,1083 +399,5 @@ internal sealed class SearchService
             ["resultsWindow"] = resultsWindow,
             ["contexts"] = contexts,
         };
-    }
-
-    private async Task PopulateFindResultsAsync(
-        IdeCommandContext context,
-        IReadOnlyDictionary<string, List<FindResult>> groupedMatches,
-        string query,
-        int resultsWindow)
-    {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
-
-        if (await context.Package.GetServiceAsync(typeof(SVsFindResults)).ConfigureAwait(true) is not IFindResultsService service)
-        {
-            return;
-        }
-
-        var title = $"IDE Bridge Find Results {resultsWindow}";
-        var description = $"Find all \"{query}\"";
-        var identifier = $"VsIdeBridge.FindResults.{resultsWindow}";
-        var window = service.StartSearch(title, description, identifier);
-        foreach (var resultGroup in groupedMatches)
-        {
-            window.AddResults(resultGroup.Key, resultGroup.Key, null, resultGroup.Value);
-        }
-
-        window.Summary = $"Matching lines: {groupedMatches.Sum(resultGroup => resultGroup.Value.Count)} Matching files: {groupedMatches.Count}";
-        window.Complete();
-    }
-
-    private static Regex BuildRegex(string query, bool matchCase, bool wholeWord, bool useRegex)
-    {
-        var pattern = useRegex ? query : Regex.Escape(query);
-        if (wholeWord)
-        {
-            pattern = $@"\b{pattern}\b";
-        }
-
-        var options = RegexOptions.Compiled;
-        if (!matchCase)
-        {
-            options |= RegexOptions.IgnoreCase;
-        }
-
-        return new Regex(pattern, options);
-    }
-
-    private async Task<(List<SearchHit> Matches, Dictionary<string, List<FindResult>> GroupedMatches)> SearchTextMatchesAsync(
-        IdeCommandContext context,
-        string query,
-        string scope,
-        bool matchCase,
-        bool wholeWord,
-        bool useRegex,
-        string? projectUniqueName,
-        string? pathFilter = null)
-    {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
-
-        var normalizedPathFilter = NormalizeSearchPathFilter(context.Dte, pathFilter);
-
-        var allFiles = scope switch
-        {
-            "document" => new[] { await GetDocumentTargetAsync(context, normalizedPathFilter).ConfigureAwait(true) },
-            "open" => [.. EnumerateOpenFiles(context.Dte)],
-            "project" => [.. EnumerateSolutionFiles(context.Dte).Where(item => string.Equals(item.ProjectUniqueName, projectUniqueName, StringComparison.OrdinalIgnoreCase))],
-            _ => [.. EnumerateSolutionFiles(context.Dte)],
-        };
-
-        var files = string.IsNullOrWhiteSpace(normalizedPathFilter)
-            ? allFiles
-            : [.. allFiles.Where(file => MatchesPathFilter(file.Path, normalizedPathFilter))];
-
-        var regex = BuildRegex(query, matchCase, wholeWord, useRegex);
-        var hits = new List<SearchHit>();
-        var groupedMatches = new Dictionary<string, List<FindResult>>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var file in files)
-        {
-            if (!File.Exists(file.Path))
-            {
-                continue;
-            }
-
-            var lines = ReadSearchLines(context.Dte, file.Path);
-            for (var lineIndex = 0; lineIndex < lines.Length; lineIndex++)
-            {
-                var line = lines[lineIndex];
-                foreach (Match match in regex.Matches(line))
-                {
-                    hits.Add(new SearchHit
-                    {
-                        Path = file.Path,
-                        ProjectUniqueName = file.ProjectUniqueName,
-                        Line = lineIndex + 1,
-                        Column = match.Index + 1,
-                        MatchLength = match.Length,
-                        Preview = line,
-                        ScoreHint = 0,
-                        SourceQueries = [query],
-                    });
-
-                    if (!groupedMatches.TryGetValue(file.Path, out var results))
-                    {
-                        results = [];
-                        groupedMatches[file.Path] = results;
-                    }
-
-                    results.Add(new FindResult(line, lineIndex, match.Index, new Span(match.Index, match.Length)));
-                }
-            }
-        }
-
-        return (hits, groupedMatches);
-    }
-
-    private async Task<(List<SearchHit> Matches, Dictionary<string, List<FindResult>> GroupedMatches)> SearchSmartQueryTermsAsync(
-        IdeCommandContext context,
-        string query,
-        string scope,
-        string? projectUniqueName)
-    {
-        var terms = ExtractSmartQueryTerms(query);
-        var hitMap = new Dictionary<string, SearchHit>(StringComparer.OrdinalIgnoreCase);
-        var groupedMatches = new Dictionary<string, List<FindResult>>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var term in terms)
-        {
-            var (Matches, GroupedMatches) = await SearchTextMatchesAsync(
-                context,
-                term.Text,
-                scope,
-                matchCase: false,
-                wholeWord: term.WholeWord,
-                useRegex: false,
-                projectUniqueName).ConfigureAwait(true);
-
-            foreach (var hit in Matches)
-            {
-                var key = $"{hit.Path}|{hit.Line}|{hit.Column}";
-
-                if (!hitMap.TryGetValue(key, out var existing))
-                {
-                    existing = new SearchHit
-                    {
-                        Path = hit.Path,
-                        ProjectUniqueName = hit.ProjectUniqueName,
-                        Line = hit.Line,
-                        Column = hit.Column,
-                        MatchLength = hit.MatchLength,
-                        Preview = hit.Preview,
-                        ScoreHint = 0,
-                    };
-                    hitMap[key] = existing;
-                }
-
-                existing.ScoreHint += term.Weight;
-                if (!existing.SourceQueries.Contains(term.Text, StringComparer.OrdinalIgnoreCase))
-                {
-                    existing.SourceQueries.Add(term.Text);
-                }
-
-                if (!groupedMatches.TryGetValue(hit.Path, out var results))
-                {
-                    results = [];
-                    groupedMatches[hit.Path] = results;
-                }
-
-                results.Add(new FindResult(hit.Preview, hit.Line - 1, hit.Column - 1, new Span(hit.Column - 1, hit.MatchLength)));
-            }
-        }
-
-        return (hitMap.Values
-            .OrderByDescending(hit => hit.ScoreHint)
-            .ThenBy(hit => hit.Path, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(hit => hit.Line)
-            .ToList(), groupedMatches);
-    }
-
-    private static List<string> NormalizeQueries(IEnumerable<string> queries)
-    {
-        var normalized = new List<string>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var query in queries)
-        {
-            var trimmed = query?.Trim();
-            if (trimmed is not { Length: > 0 })
-            {
-                continue;
-            }
-
-            if (!seen.Add(trimmed))
-            {
-                continue;
-            }
-
-            normalized.Add(trimmed);
-        }
-
-        return normalized;
-    }
-
-    private static void MergeSearchHits(Dictionary<string, SearchHit> mergedHits, IEnumerable<SearchHit> hits)
-    {
-        foreach (var hit in hits)
-        {
-            var key = GetSearchHitKey(hit);
-            if (!mergedHits.TryGetValue(key, out var existing))
-            {
-                mergedHits[key] = new SearchHit
-                {
-                    Path = hit.Path,
-                    ProjectUniqueName = hit.ProjectUniqueName,
-                    Line = hit.Line,
-                    Column = hit.Column,
-                    MatchLength = hit.MatchLength,
-                    Preview = hit.Preview,
-                    ScoreHint = hit.ScoreHint,
-                    SourceQueries = [.. hit.SourceQueries],
-                };
-                continue;
-            }
-
-            existing.ScoreHint = Math.Max(existing.ScoreHint, hit.ScoreHint);
-            foreach (var query in hit.SourceQueries)
-            {
-                if (!existing.SourceQueries.Contains(query, StringComparer.OrdinalIgnoreCase))
-                {
-                    existing.SourceQueries.Add(query);
-                }
-            }
-        }
-    }
-
-    private static Dictionary<string, List<FindResult>> BuildGroupedMatchesFromHits(IEnumerable<SearchHit> hits)
-    {
-        var groupedMatches = new Dictionary<string, List<FindResult>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var hit in hits)
-        {
-            if (!groupedMatches.TryGetValue(hit.Path, out var results))
-            {
-                results = [];
-                groupedMatches[hit.Path] = results;
-            }
-
-            results.Add(new FindResult(hit.Preview, hit.Line - 1, hit.Column - 1, new Span(hit.Column - 1, hit.MatchLength)));
-        }
-
-        return groupedMatches;
-    }
-
-    private static string GetSearchHitKey(SearchHit hit)
-    {
-        return $"{hit.Path}|{hit.Line}|{hit.Column}|{hit.MatchLength}";
-    }
-
-    private static JArray BuildSmartContexts(
-        IReadOnlyList<SearchHit> hits,
-        int contextBefore,
-        int contextAfter,
-        int maxContexts)
-    {
-        var before = Math.Max(0, contextBefore);
-        var after = Math.Max(0, contextAfter);
-        var limit = Math.Max(1, maxContexts);
-        var contexts = new List<(int Score, int FirstLine, JObject Context)>();
-
-        foreach (var fileGroup in hits.GroupBy(hit => hit.Path, StringComparer.OrdinalIgnoreCase))
-        {
-            var allLines = File.ReadAllLines(fileGroup.Key);
-            var windows = new List<(int StartLine, int EndLine, List<SearchHit> Hits)>();
-            foreach (var hit in fileGroup.OrderBy(hit => hit.Line).ThenBy(hit => hit.Column))
-            {
-                var startLine = Math.Max(1, hit.Line - before);
-                var endLine = Math.Min(allLines.Length, hit.Line + after);
-                var merged = false;
-
-                for (var i = 0; i < windows.Count; i++)
-                {
-                    var existing = windows[i];
-                    if (startLine <= existing.EndLine + 1)
-                    {
-                        existing.StartLine = Math.Min(existing.StartLine, startLine);
-                        existing.EndLine = Math.Max(existing.EndLine, endLine);
-                        existing.Hits.Add(hit);
-                        windows[i] = existing;
-                        merged = true;
-                        break;
-                    }
-                }
-
-                if (!merged)
-                {
-                    windows.Add((startLine, endLine, new List<SearchHit> { hit }));
-                }
-            }
-
-            foreach (var (StartLine, EndLine, Hits) in windows)
-            {
-                var textLines = new JArray();
-                var builder = new System.Text.StringBuilder();
-                for (var lineNumber = StartLine; lineNumber <= EndLine; lineNumber++)
-                {
-                    var lineText = allLines[lineNumber - 1];
-                    textLines.Add(new JObject
-                    {
-                        ["line"] = lineNumber,
-                        ["text"] = lineText,
-                    });
-
-                    if (builder.Length > 0)
-                    {
-                        builder.Append('\n');
-                    }
-
-                    builder.Append(lineNumber);
-                    builder.Append(": ");
-                    builder.Append(lineText);
-                }
-
-                var score = ScoreSmartContext(Hits);
-                contexts.Add((score, Hits.Min(hit => hit.Line), new JObject
-                {
-                    ["path"] = fileGroup.Key,
-                    ["project"] = Hits[0].ProjectUniqueName,
-                    ["startLine"] = StartLine,
-                    ["endLine"] = EndLine,
-                    ["score"] = score,
-                    ["hits"] = new JArray(Hits.Select(SerializeHit)),
-                    ["text"] = builder.ToString(),
-                    ["lines"] = textLines,
-                }));
-            }
-        }
-
-        return [.. contexts
-            .OrderByDescending(item => item.Score)
-            .ThenBy(item => item.FirstLine)
-            .Take(limit)
-            .Select(item => item.Context)];
-    }
-
-    private static int ScoreSmartContext(IReadOnlyList<SearchHit> hits)
-    {
-        var score = 0;
-        foreach (var hit in hits)
-        {
-            var preview = hit.Preview ?? string.Empty;
-            score += Math.Max(20, hit.ScoreHint);
-
-            foreach (var query in hit.SourceQueries.DefaultIfEmpty(string.Empty).Take(3))
-            {
-                if (string.IsNullOrWhiteSpace(query))
-                {
-                    continue;
-                }
-
-                var escaped = Regex.Escape(query);
-                var declarationPattern = new Regex($@"^\s*(class|struct|enum|namespace)\s+{escaped}\b", RegexOptions.IgnoreCase);
-                var callablePattern = new Regex($@"(\b{escaped}\s*\()|(::\s*{escaped}\b)", RegexOptions.IgnoreCase);
-                var identifierPattern = new Regex($@"\b{escaped}\b", RegexOptions.IgnoreCase);
-
-                if (declarationPattern.IsMatch(preview))
-                {
-                    score += 120;
-                }
-                else if (callablePattern.IsMatch(preview))
-                {
-                    score += 80;
-                }
-                else if (identifierPattern.IsMatch(preview))
-                {
-                    score += 40;
-                }
-                else
-                {
-                    score += 10;
-                }
-            }
-        }
-
-        return score;
-    }
-
-    private static JObject SerializeHit(SearchHit hit)
-    {
-        return new JObject
-        {
-            ["path"] = hit.Path,
-            ["project"] = hit.ProjectUniqueName,
-            ["line"] = hit.Line,
-            ["column"] = hit.Column,
-            ["matchLength"] = hit.MatchLength,
-            ["preview"] = hit.Preview,
-            ["scoreHint"] = hit.ScoreHint,
-            ["queries"] = new JArray(hit.SourceQueries),
-        };
-    }
-
-    private static JObject SerializeCodeModelHit(CodeModelHit hit)
-    {
-        return new JObject
-        {
-            ["name"] = hit.Name,
-            ["fullName"] = hit.FullName,
-            ["kind"] = hit.Kind,
-            ["signature"] = hit.Signature,
-            ["path"] = hit.Path,
-            ["project"] = hit.ProjectUniqueName,
-            ["line"] = hit.Line,
-            ["column"] = 1,
-            ["endLine"] = hit.EndLine,
-            ["matchKind"] = hit.MatchKind,
-            ["scoreHint"] = hit.Score,
-            ["preview"] = hit.Signature,
-            ["source"] = "code-model",
-        };
-    }
-
-    private static IReadOnlyList<SmartQueryTerm> ExtractSmartQueryTerms(string query)
-    {
-        var terms = new List<SmartQueryTerm>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        void AddTerm(string value, int weight, bool wholeWord)
-        {
-            var trimmed = value.Trim();
-            if (trimmed.Length < 2 || !seen.Add(trimmed))
-            {
-                return;
-            }
-
-            terms.Add(new SmartQueryTerm
-            {
-                Text = trimmed,
-                Weight = weight,
-                WholeWord = wholeWord,
-            });
-        }
-
-        foreach (Match match in Regex.Matches(query, "\"([^\"]+)\""))
-        {
-            AddTerm(match.Groups[1].Value, 220, wholeWord: false);
-        }
-
-        foreach (Match match in Regex.Matches(query, @"[A-Za-z_][A-Za-z0-9_:/\\.\-]*"))
-        {
-            var token = match.Value;
-            var looksLikeIdentifier = token.Contains("::", StringComparison.Ordinal) ||
-                                      token.Contains("_", StringComparison.Ordinal) ||
-                                      token.Contains(".", StringComparison.Ordinal) ||
-                                      char.IsUpper(token[0]);
-
-            if (looksLikeIdentifier)
-            {
-                AddTerm(token, 160, wholeWord: !token.Contains(".", StringComparison.Ordinal));
-            }
-        }
-
-        var stopWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "where", "what", "when", "which", "that", "this", "with", "from", "into", "used", "using",
-            "call", "calls", "show", "find", "open", "close", "line", "file", "files", "query", "context",
-        };
-
-        foreach (Match match in Regex.Matches(query, "[A-Za-z][A-Za-z0-9_]{3,}"))
-        {
-            if (!stopWords.Contains(match.Value))
-            {
-                AddTerm(match.Value, 80, wholeWord: true);
-            }
-        }
-
-        if (terms.Count == 0)
-        {
-            AddTerm(query, 120, wholeWord: false);
-        }
-
-        return terms;
-    }
-
-    private async Task<(string Path, string ProjectUniqueName)> GetDocumentTargetAsync(IdeCommandContext context, string? pathFilter = null)
-    {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
-
-        var explicitTarget = TryResolveExplicitDocumentTarget(context.Dte, pathFilter);
-        if (!string.IsNullOrWhiteSpace(explicitTarget.Path))
-        {
-            return explicitTarget;
-        }
-
-        var activeDocument = context.Dte.ActiveDocument;
-        if (activeDocument is null || string.IsNullOrWhiteSpace(activeDocument.FullName))
-        {
-            throw new CommandErrorException("document_not_found", "There is no active document.");
-        }
-
-        return (
-            PathNormalization.NormalizeFilePath(activeDocument.FullName),
-            activeDocument.ProjectItem?.ContainingProject?.UniqueName ?? string.Empty);
-    }
-
-    private static IEnumerable<CodeModelHit> SearchCodeModelSymbols(
-        DTE2 dte,
-        string query,
-        string kind,
-        string scope,
-        bool matchCase,
-        string? projectUniqueName,
-        string? pathFilter)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-
-        var comparison = matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
-        var normalizedPathFilter = NormalizeSearchPathFilter(dte, pathFilter);
-        var activeDocument = TryResolveExplicitDocumentTarget(dte, normalizedPathFilter);
-        if (string.IsNullOrWhiteSpace(activeDocument.Path))
-        {
-            activeDocument = TryGetActiveDocumentTarget(dte);
-        }
-        var files = scope switch
-        {
-            "document" => string.IsNullOrWhiteSpace(activeDocument.Path)
-                ? []
-                : new[] { activeDocument },
-            "open" => EnumerateOpenFiles(dte),
-            "project" => EnumerateSolutionFiles(dte)
-                .Where(item => string.Equals(item.ProjectUniqueName, projectUniqueName, StringComparison.OrdinalIgnoreCase)),
-            _ => EnumerateSolutionFiles(dte),
-        };
-
-        if (!string.IsNullOrWhiteSpace(normalizedPathFilter))
-        {
-            files = files.Where(item => MatchesPathFilter(item.Path, normalizedPathFilter));
-        }
-
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var hits = new List<CodeModelHit>();
-        foreach (var file in files)
-        {
-            if (string.IsNullOrWhiteSpace(file.Path))
-            {
-                continue;
-            }
-
-            ProjectItem? projectItem = null;
-            CodeElements? elements = null;
-            try
-            {
-                projectItem = dte.Solution.FindProjectItem(file.Path);
-                elements = projectItem?.FileCodeModel?.CodeElements;
-            }
-            catch (Exception ex)
-            {
-                TraceSearchFailure("FindProjectItem", ex);
-            }
-
-            if (projectItem is null || elements is null)
-            {
-                continue;
-            }
-
-            foreach (CodeElement element in elements)
-            {
-                CollectMatchingSymbols(element, file.Path, file.ProjectUniqueName, query, kind, comparison, hits, seen);
-            }
-        }
-
-        return hits
-            .OrderByDescending(hit => hit.Score)
-            .ThenBy(hit => hit.Path, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(hit => hit.Line)
-            .ThenBy(hit => hit.Name, StringComparer.OrdinalIgnoreCase);
-    }
-
-    private static void CollectMatchingSymbols(
-        CodeElement element,
-        string path,
-        string projectUniqueName,
-        string query,
-        string kindFilter,
-        StringComparison comparison,
-        List<CodeModelHit> hits,
-        HashSet<string> seen)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-
-        vsCMElement kind;
-        try
-        {
-            kind = element.Kind;
-        }
-        catch
-        {
-            return;
-        }
-
-        if (s_codeModelKinds.Contains(kind))
-        {
-            var normalizedKind = NormalizeKind(kind);
-            if (MatchesKind(kindFilter, normalizedKind))
-            {
-                var name = TryGetElementName(element);
-                var fullName = TryGetFullName(element);
-                var score = ScoreSymbolMatch(query, name, fullName, comparison, out var matchKind);
-                if (score > 0)
-                {
-                    var line = TryGetLine(element.StartPoint);
-                    var endLine = TryGetLine(element.EndPoint);
-                    var signature = TryGetSignature(element, fullName, name);
-                    var key = $"{path}|{normalizedKind}|{fullName}|{line}";
-                    if (seen.Add(key))
-                    {
-                        hits.Add(new CodeModelHit
-                        {
-                            Path = path,
-                            ProjectUniqueName = projectUniqueName,
-                            Name = name,
-                            FullName = fullName,
-                            Kind = normalizedKind,
-                            Signature = signature,
-                            Line = line,
-                            EndLine = endLine,
-                            Score = score,
-                            MatchKind = matchKind,
-                        });
-                    }
-                }
-            }
-        }
-
-        foreach (var child in EnumerateChildren(element))
-        {
-            CollectMatchingSymbols(child, path, projectUniqueName, query, kindFilter, comparison, hits, seen);
-        }
-    }
-
-    private static IEnumerable<CodeElement> EnumerateChildren(CodeElement element)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-
-        CodeElements? children = null;
-        try
-        {
-            children = element switch
-            {
-                CodeNamespace codeNamespace => codeNamespace.Members,
-                CodeClass codeClass => codeClass.Members,
-                CodeStruct codeStruct => codeStruct.Members,
-                CodeInterface codeInterface => codeInterface.Members,
-                _ => null,
-            };
-        }
-        catch (Exception ex)
-        {
-            TraceSearchFailure("EnumerateChildren", ex);
-        }
-
-        if (children is null)
-        {
-            yield break;
-        }
-
-        foreach (CodeElement child in children)
-        {
-            yield return child;
-        }
-    }
-
-    private static string NormalizeKind(vsCMElement kind)
-    {
-        return kind switch
-        {
-            vsCMElement.vsCMElementFunction => FunctionKind,
-            vsCMElement.vsCMElementClass => "class",
-            vsCMElement.vsCMElementStruct => "struct",
-            vsCMElement.vsCMElementEnum => "enum",
-            vsCMElement.vsCMElementNamespace => "namespace",
-            vsCMElement.vsCMElementInterface => InterfaceKind,
-            vsCMElement.vsCMElementProperty => "member",
-            vsCMElement.vsCMElementVariable => "member",
-            _ => "unknown",
-        };
-    }
-
-    private static bool MatchesKind(string kindFilter, string normalizedKind)
-    {
-        return kindFilter.ToLowerInvariant() switch
-        {
-            "all" => true,
-            "type" => normalizedKind is "class" or "struct" or "enum" or "interface",
-            "member" => normalizedKind is "member" or "function",
-            _ => string.Equals(kindFilter, normalizedKind, StringComparison.OrdinalIgnoreCase),
-        };
-    }
-
-    private static string TryGetElementName(CodeElement element)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-
-        try
-        {
-            return element.Name ?? string.Empty;
-        }
-        catch
-        {
-            return string.Empty;
-        }
-    }
-
-    private static string TryGetFullName(CodeElement element)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-
-        try
-        {
-            return string.IsNullOrWhiteSpace(element.FullName) ? TryGetElementName(element) : element.FullName;
-        }
-        catch
-        {
-            return TryGetElementName(element);
-        }
-    }
-
-    private static string TryGetSignature(CodeElement element, string fullName, string name)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-
-        try
-        {
-            if (element is CodeFunction function)
-            {
-                return function.get_Prototype(
-                    ((int)vsCMPrototype.vsCMPrototypeFullname)
-                    | ((int)vsCMPrototype.vsCMPrototypeParamTypes)
-                    | ((int)vsCMPrototype.vsCMPrototypeType))
-                    ?? fullName;
-            }
-        }
-        catch (Exception ex)
-        {
-            TraceSearchFailure("TryGetSignature", ex);
-        }
-
-        return string.IsNullOrWhiteSpace(fullName) ? name : fullName;
-    }
-
-    private static int TryGetLine(TextPoint? point)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-
-        try
-        {
-            return point?.Line ?? 0;
-        }
-        catch
-        {
-            return 0;
-        }
-    }
-
-    private static int ScoreSymbolMatch(
-        string query,
-        string name,
-        string fullName,
-        StringComparison comparison,
-        out string matchKind)
-    {
-        matchKind = string.Empty;
-        if (string.IsNullOrWhiteSpace(query))
-        {
-            return 0;
-        }
-
-        if (string.Equals(name, query, comparison))
-        {
-            matchKind = "name-exact";
-            return 1000;
-        }
-
-        if (string.Equals(fullName, query, comparison))
-        {
-            matchKind = "full-name-exact";
-            return 950;
-        }
-
-        if (name.StartsWith(query, comparison))
-        {
-            matchKind = "name-prefix";
-            return 875;
-        }
-
-        if (fullName.StartsWith(query, comparison))
-        {
-            matchKind = "full-name-prefix";
-            return 850;
-        }
-
-        if (name.IndexOf(query, comparison) >= 0)
-        {
-            matchKind = "name-contains";
-            return 760;
-        }
-
-        if (fullName.IndexOf(query, comparison) >= 0)
-        {
-            matchKind = "full-name-contains";
-            return 720;
-        }
-
-        return 0;
-    }
-
-    private static IEnumerable<(string Path, string ProjectUniqueName)> EnumerateSolutionFiles(DTE2 dte)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-
-        if (dte.Solution?.IsOpen != true)
-        {
-            yield break;
-        }
-
-        foreach (Project project in dte.Solution.Projects)
-        {
-            foreach (var file in EnumerateProjectFiles(project))
-            {
-                yield return file;
-            }
-        }
-    }
-
-    private static IEnumerable<(string Path, string ProjectUniqueName)> EnumerateProjectFiles(Project? project)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-
-        if (project is null)
-        {
-            yield break;
-        }
-
-        if (string.Equals(project.Kind, EnvDTE80.ProjectKinds.vsProjectKindSolutionFolder, StringComparison.OrdinalIgnoreCase))
-        {
-            foreach (ProjectItem item in project.ProjectItems)
-            {
-                if (item is null)
-                {
-                    continue;
-                }
-
-                if (item.SubProject is not null)
-                {
-                    foreach (var file in EnumerateProjectFiles(item.SubProject))
-                    {
-                        yield return file;
-                    }
-                }
-            }
-
-            yield break;
-        }
-
-        foreach (ProjectItem item in project.ProjectItems)
-        {
-            if (item is null)
-            {
-                continue;
-            }
-
-            foreach (var file in EnumerateProjectItemFiles(item, project.UniqueName))
-            {
-                yield return file;
-            }
-        }
-    }
-
-    private static IEnumerable<(string Path, string ProjectUniqueName)> EnumerateProjectItemFiles(ProjectItem item, string projectUniqueName)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-
-        if (item is null)
-        {
-            yield break;
-        }
-
-        if (item.FileCount > 0)
-        {
-            for (short i = 1; i <= item.FileCount; i++)
-            {
-                var fileName = item.FileNames[i];
-                if (!string.IsNullOrWhiteSpace(fileName))
-                {
-                    yield return (PathNormalization.NormalizeFilePath(fileName), projectUniqueName);
-                }
-            }
-        }
-
-        if (item.ProjectItems is null)
-        {
-            yield break;
-        }
-
-        foreach (ProjectItem child in item.ProjectItems)
-        {
-            if (child is null)
-            {
-                continue;
-            }
-
-            foreach (var file in EnumerateProjectItemFiles(child, projectUniqueName))
-            {
-                yield return file;
-            }
-        }
-    }
-
-    private static IEnumerable<(string Path, string ProjectUniqueName)> EnumerateOpenFiles(DTE2 dte)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-
-        foreach (Document document in dte.Documents)
-        {
-            string? fullName = null;
-            try
-            {
-                fullName = document.FullName;
-            }
-            catch (Exception ex)
-            {
-                TraceSearchFailure("EnumerateOpenDocumentTargets", ex);
-            }
-
-            if (string.IsNullOrWhiteSpace(fullName))
-            {
-                continue;
-            }
-
-            var normalizedPath = PathNormalization.NormalizeFilePath(fullName);
-            yield return (normalizedPath, document.ProjectItem?.ContainingProject?.UniqueName ?? string.Empty);
-        }
-    }
-
-    private static (string Path, string ProjectUniqueName) TryGetActiveDocumentTarget(DTE2 dte)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-
-        var activeDocument = dte.ActiveDocument;
-        if (activeDocument is null || string.IsNullOrWhiteSpace(activeDocument.FullName))
-        {
-            return (string.Empty, string.Empty);
-        }
-
-        return (PathNormalization.NormalizeFilePath(activeDocument.FullName), activeDocument.ProjectItem?.ContainingProject?.UniqueName ?? string.Empty);
-    }
-
-    private static string? NormalizeSearchPathFilter(DTE2 dte, string? pathFilter)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-
-        if (string.IsNullOrWhiteSpace(pathFilter))
-        {
-            return null;
-        }
-
-        var trimmedPath = pathFilter!.Trim();
-        if (Path.IsPathRooted(trimmedPath))
-        {
-            return PathNormalization.NormalizeFilePath(trimmedPath);
-        }
-
-        var normalizedRelativePath = trimmedPath.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
-        var solutionDirectory = TryGetSolutionDirectory(dte);
-        if (!string.IsNullOrWhiteSpace(solutionDirectory))
-        {
-            var rootedCandidate = Path.GetFullPath(Path.Combine(solutionDirectory, normalizedRelativePath));
-            if (File.Exists(rootedCandidate) || Directory.Exists(rootedCandidate))
-            {
-                return PathNormalization.NormalizeFilePath(rootedCandidate);
-            }
-        }
-
-        return normalizedRelativePath;
-    }
-
-    private static bool MatchesPathFilter(string path, string? pathFilter)
-    {
-        if (string.IsNullOrWhiteSpace(pathFilter))
-        {
-            return true;
-        }
-
-        var normalizedPath = PathNormalization.NormalizeFilePath(path);
-        if (!Path.IsPathRooted(pathFilter))
-        {
-            var normalizedFilter = pathFilter!.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
-            return normalizedPath.IndexOf(normalizedFilter, StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        if (Directory.Exists(pathFilter))
-        {
-            var normalizedDirectory = pathFilter!;
-            normalizedDirectory = normalizedDirectory.TrimEnd('\\');
-            return string.Equals(normalizedPath, normalizedDirectory, StringComparison.OrdinalIgnoreCase)
-                || normalizedPath.StartsWith(normalizedDirectory + "\\", StringComparison.OrdinalIgnoreCase);
-        }
-
-        return string.Equals(normalizedPath, pathFilter, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string? TryGetSolutionDirectory(DTE2 dte)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-
-        var solutionFullName = dte.Solution?.FullName;
-        return string.IsNullOrWhiteSpace(solutionFullName)
-            ? null
-            : Path.GetDirectoryName(solutionFullName);
-    }
-
-    private static (string Path, string ProjectUniqueName) TryResolveExplicitDocumentTarget(DTE2 dte, string? pathFilter)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-
-        if (string.IsNullOrWhiteSpace(pathFilter) || !Path.IsPathRooted(pathFilter) || !File.Exists(pathFilter))
-        {
-            return (string.Empty, string.Empty);
-        }
-
-        foreach (var solutionFile in EnumerateSolutionFiles(dte))
-        {
-            if (string.Equals(solutionFile.Path, pathFilter, StringComparison.OrdinalIgnoreCase))
-            {
-                return solutionFile;
-            }
-        }
-
-        foreach (var openFile in EnumerateOpenFiles(dte))
-        {
-            if (string.Equals(openFile.Path, pathFilter, StringComparison.OrdinalIgnoreCase))
-            {
-                return openFile;
-            }
-        }
-
-        return (pathFilter!, string.Empty);
-    }
-
-    private static string[] ReadSearchLines(DTE2 dte, string path)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-
-        var normalizedPath = PathNormalization.NormalizeFilePath(path);
-        foreach (Document document in dte.Documents)
-        {
-            try
-            {
-                if (!string.Equals(PathNormalization.NormalizeFilePath(document.FullName), normalizedPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (document.Object("TextDocument") is TextDocument textDocument)
-                {
-                    var editPoint = textDocument.StartPoint.CreateEditPoint();
-                    var text = editPoint.GetText(textDocument.EndPoint);
-                    return text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-                }
-            }
-            catch (Exception ex)
-            {
-                TraceSearchFailure("ReadSearchLines", ex);
-            }
-        }
-
-        return File.ReadAllLines(normalizedPath);
-    }
-
-    private static void TraceSearchFailure(string operation, Exception ex)
-    {
-        System.Diagnostics.Debug.WriteLine($"VsIdeBridge.SearchService {operation}: {ex}");
     }
 }

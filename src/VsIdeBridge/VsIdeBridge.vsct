@@ -34,15 +34,6 @@
           <LocCanonicalName>.Tools.VsIdeBridgeHelpMenu</LocCanonicalName>
         </Strings>
       </Button>
-      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeToggleAllowBridgeEditsMenu" priority="0x0110" type="Button">
-        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
-        <Strings>
-          <ButtonText>Allow Bridge Edits</ButtonText>
-          <CommandName>IdeToggleAllowBridgeEditsMenu</CommandName>
-          <CanonicalName>Tools.VsIdeBridgeToggleAllowBridgeEdits</CanonicalName>
-          <LocCanonicalName>.Tools.VsIdeBridgeToggleAllowBridgeEdits</LocCanonicalName>
-        </Strings>
-      </Button>
       <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeToggleAllowBridgeShellExecMenu" priority="0x0115" type="Button">
         <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
         <Strings>
@@ -83,6 +74,15 @@
         <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
         <Strings>
           <ButtonText>Go To Edited Parts</ButtonText>
+    </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeToggleAllowBridgeBuildMenu" priority="0x011A" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <Strings>
+          <ButtonText>Allow Bridge Build</ButtonText>
+          <CommandName>IdeToggleAllowBridgeBuildMenu</CommandName>
+          <CanonicalName>Tools.VsIdeBridgeToggleAllowBridgeBuild</CanonicalName>
+          <LocCanonicalName>.Tools.VsIdeBridgeToggleAllowBridgeBuild</LocCanonicalName>
           <CommandName>IdeToggleGoToEditedPartsMenu</CommandName>
           <CanonicalName>Tools.VsIdeBridgeToggleGoToEditedParts</CanonicalName>
           <LocCanonicalName>.Tools.VsIdeBridgeToggleGoToEditedParts</LocCanonicalName>
@@ -95,6 +95,15 @@
           <CommandName>IdeToggleBestPracticeDiagnosticsMenu</CommandName>
           <CanonicalName>Tools.VsIdeBridgeToggleBestPracticeDiagnostics</CanonicalName>
           <LocCanonicalName>.Tools.VsIdeBridgeToggleBestPracticeDiagnostics</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeToggleHttpServerMenu" priority="0x0140" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <Strings>
+          <ButtonText>HTTP MCP Server</ButtonText>
+          <CommandName>IdeToggleHttpServerMenu</CommandName>
+          <CanonicalName>Tools.VsIdeBridgeToggleHttpServer</CanonicalName>
+          <LocCanonicalName>.Tools.VsIdeBridgeToggleHttpServer</LocCanonicalName>
         </Strings>
       </Button>
       <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeHelp" priority="0x01F0" type="Button">
@@ -968,11 +977,12 @@
       <IDSymbol name="cmdidIdeHelp" value="0x0100" />
       <IDSymbol name="cmdidIdeSmokeTest" value="0x0101" />
       <IDSymbol name="cmdidIdeHelpMenu" value="0x0102" />
-      <IDSymbol name="cmdidIdeToggleAllowBridgeEditsMenu" value="0x0103" />
       <IDSymbol name="cmdidIdeToggleAllowBridgeShellExecMenu" value="0x0106" />
       <IDSymbol name="cmdidIdeToggleAllowBridgePythonExecutionMenu" value="0x0107" />
       <IDSymbol name="cmdidIdeToggleAllowBridgePythonEnvironmentMutationMenu" value="0x0108" />
       <IDSymbol name="cmdidIdeToggleAllowBridgePythonUnrestrictedExecutionMenu" value="0x0109" />
+      <IDSymbol name="cmdidIdeToggleAllowBridgeBuildMenu" value="0x010A" />
+      <IDSymbol name="cmdidIdeToggleHttpServerMenu" value="0x010B" />
       <IDSymbol name="cmdidIdeToggleGoToEditedPartsMenu" value="0x0104" />
       <IDSymbol name="cmdidIdeToggleBestPracticeDiagnosticsMenu" value="0x0105" />
       <IDSymbol name="cmdidIdeGetState" value="0x0200" />

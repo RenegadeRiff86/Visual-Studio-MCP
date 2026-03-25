@@ -14,6 +14,12 @@ internal sealed class BuildService(ReadinessService readinessService)
     private const int DefaultBuildTimeoutMilliseconds = 600_000;
     private const int BuildPollIntervalMilliseconds = 500;
 
+    private const string SolutionNotOpenCode = "solution_not_open";
+    private const string NoSolutionOpen = "No solution is open.";
+    private const string SolutionPathKey = "solutionPath";
+    private const string ActiveConfigurationKey = "activeConfiguration";
+    private const string ActivePlatformKey = "activePlatform";
+
     private readonly ReadinessService _readinessService = readinessService;
 
     public async Task<JObject> BuildSolutionAsync(IdeCommandContext context, int timeoutMilliseconds, string? configuration, string? platform)
@@ -23,7 +29,7 @@ internal sealed class BuildService(ReadinessService readinessService)
         var dte = context.Dte;
         if (dte.Solution?.IsOpen != true)
         {
-            throw new CommandErrorException("solution_not_open", "No solution is open.");
+            throw new CommandErrorException(SolutionNotOpenCode, NoSolutionOpen);
         }
 
         var solutionBuild = dte.Solution.SolutionBuild;
@@ -58,9 +64,9 @@ internal sealed class BuildService(ReadinessService readinessService)
 
         return new JObject
         {
-            ["solutionPath"] = dte.Solution.FullName,
-            ["activeConfiguration"] = solutionBuild.ActiveConfiguration?.Name ?? string.Empty,
-            ["activePlatform"] = (solutionBuild.ActiveConfiguration as SolutionConfiguration2)?.PlatformName ?? string.Empty,
+            [SolutionPathKey] = dte.Solution.FullName,
+            [ActiveConfigurationKey] = solutionBuild.ActiveConfiguration?.Name ?? string.Empty,
+            [ActivePlatformKey] = (solutionBuild.ActiveConfiguration as SolutionConfiguration2)?.PlatformName ?? string.Empty,
             ["lastBuildInfo"] = solutionBuild.LastBuildInfo,
             ["succeeded"] = solutionBuild.LastBuildInfo == 0,
             ["elapsedMilliseconds"] = (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds,
@@ -73,7 +79,7 @@ internal sealed class BuildService(ReadinessService readinessService)
 
         if (dte.Solution?.IsOpen != true)
         {
-            throw new CommandErrorException("solution_not_open", "No solution is open.");
+            throw new CommandErrorException(SolutionNotOpenCode, NoSolutionOpen);
         }
 
         var solutionBuild = dte.Solution.SolutionBuild;
@@ -93,9 +99,9 @@ internal sealed class BuildService(ReadinessService readinessService)
 
         var buildStatus = new JObject
         {
-            ["solutionPath"] = dte.Solution.FullName,
-            ["activeConfiguration"] = solutionBuild.ActiveConfiguration?.Name ?? string.Empty,
-            ["activePlatform"] = (solutionBuild.ActiveConfiguration as SolutionConfiguration2)?.PlatformName ?? string.Empty,
+            [SolutionPathKey] = dte.Solution.FullName,
+            [ActiveConfigurationKey] = solutionBuild.ActiveConfiguration?.Name ?? string.Empty,
+            [ActivePlatformKey] = (solutionBuild.ActiveConfiguration as SolutionConfiguration2)?.PlatformName ?? string.Empty,
             ["buildState"] = solutionBuild.BuildState.ToString(),
             ["lastBuildInfoKnown"] = lastBuildInfoKnown,
             ["lastBuildInfo"] = lastBuildInfoKnown ? lastBuildInfoValue : JValue.CreateNull(),
@@ -115,7 +121,7 @@ internal sealed class BuildService(ReadinessService readinessService)
 
         if (dte.Solution?.IsOpen != true)
         {
-            throw new CommandErrorException("solution_not_open", "No solution is open.");
+            throw new CommandErrorException(SolutionNotOpenCode, NoSolutionOpen);
         }
 
         var solutionBuild = dte.Solution.SolutionBuild;
@@ -136,9 +142,9 @@ internal sealed class BuildService(ReadinessService readinessService)
 
         return new JObject
         {
-            ["solutionPath"] = dte.Solution.FullName,
-            ["activeConfiguration"] = activeConfiguration,
-            ["activePlatform"] = activePlatform,
+            [SolutionPathKey] = dte.Solution.FullName,
+            [ActiveConfigurationKey] = activeConfiguration,
+            [ActivePlatformKey] = activePlatform,
             ["count"] = items.Count,
             ["items"] = items,
         };
@@ -150,7 +156,7 @@ internal sealed class BuildService(ReadinessService readinessService)
 
         if (dte.Solution?.IsOpen != true)
         {
-            throw new CommandErrorException("solution_not_open", "No solution is open.");
+            throw new CommandErrorException(SolutionNotOpenCode, NoSolutionOpen);
         }
 
         var solutionBuild = dte.Solution.SolutionBuild;
@@ -164,10 +170,76 @@ internal sealed class BuildService(ReadinessService readinessService)
 
         return new JObject
         {
-            ["solutionPath"] = dte.Solution.FullName,
-            ["activeConfiguration"] = solutionBuild.ActiveConfiguration?.Name ?? string.Empty,
-            ["activePlatform"] = (solutionBuild.ActiveConfiguration as SolutionConfiguration2)?.PlatformName ?? string.Empty,
+            [SolutionPathKey] = dte.Solution.FullName,
+            [ActiveConfigurationKey] = solutionBuild.ActiveConfiguration?.Name ?? string.Empty,
+            [ActivePlatformKey] = (solutionBuild.ActiveConfiguration as SolutionConfiguration2)?.PlatformName ?? string.Empty,
         };
+    }
+
+    public async Task<JObject> BuildProjectAsync(IdeCommandContext context, int timeoutMilliseconds, string projectName, string? configuration, string? platform)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
+
+        var dte = context.Dte;
+        if (dte.Solution?.IsOpen != true)
+            throw new CommandErrorException(SolutionNotOpenCode, NoSolutionOpen);
+
+        var solutionBuild = dte.Solution.SolutionBuild;
+        if (solutionBuild.BuildState == vsBuildState.vsBuildStateInProgress)
+            throw new CommandErrorException("build_in_progress", "A build is already in progress.");
+
+        string? uniqueName = FindProjectUniqueName(dte, projectName);
+        if (uniqueName is null)
+            throw new CommandErrorException("project_not_found", $"Project '{projectName}' was not found in the solution.");
+
+        TryActivateConfiguration(solutionBuild, configuration, platform);
+
+        string activeConfig = solutionBuild.ActiveConfiguration?.Name ?? "Debug";
+
+        var startedAt = DateTimeOffset.UtcNow;
+        await context.Logger.LogAsync($"IDE Bridge: building project '{uniqueName}'", context.CancellationToken).ConfigureAwait(true);
+        solutionBuild.BuildProject(activeConfig, uniqueName, false);
+
+        var deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeoutMilliseconds <= 0 ? DefaultBuildTimeoutMilliseconds : timeoutMilliseconds);
+        while (solutionBuild.BuildState == vsBuildState.vsBuildStateInProgress)
+        {
+            if (DateTimeOffset.UtcNow >= deadline)
+                throw new CommandErrorException("timeout", "Timed out waiting for the build to finish.");
+            await Task.Delay(BuildPollIntervalMilliseconds, context.CancellationToken).ConfigureAwait(false);
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
+        }
+
+        var elapsed = (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
+        var succeeded = solutionBuild.LastBuildInfo == 0;
+        await context.Logger.LogAsync(
+            $"IDE Bridge: project build {(succeeded ? "succeeded" : "failed")} in {elapsed:0}ms",
+            context.CancellationToken).ConfigureAwait(true);
+
+        return new JObject
+        {
+            ["projectName"] = projectName,
+            ["projectUniqueName"] = uniqueName,
+            [SolutionPathKey] = dte.Solution.FullName,
+            [ActiveConfigurationKey] = solutionBuild.ActiveConfiguration?.Name ?? string.Empty,
+            [ActivePlatformKey] = (solutionBuild.ActiveConfiguration as SolutionConfiguration2)?.PlatformName ?? string.Empty,
+            ["lastBuildInfo"] = solutionBuild.LastBuildInfo,
+            ["succeeded"] = succeeded,
+            ["elapsedMilliseconds"] = elapsed,
+        };
+    }
+
+    private static string? FindProjectUniqueName(DTE2 dte, string projectName)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        foreach (EnvDTE.Project project in dte.Solution.Projects)
+        {
+            if (string.Equals(project.Name, projectName, StringComparison.OrdinalIgnoreCase)
+                || (project.UniqueName?.EndsWith(projectName, StringComparison.OrdinalIgnoreCase) == true))
+            {
+                return project.UniqueName;
+            }
+        }
+        return null;
     }
 
     public async Task<JObject> BuildAndCaptureErrorsAsync(IdeCommandContext context, int timeoutMilliseconds, bool waitForIntellisense)

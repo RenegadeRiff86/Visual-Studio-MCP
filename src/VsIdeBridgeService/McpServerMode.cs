@@ -1,4 +1,7 @@
 using System.Text.Json.Nodes;
+using System.Net;
+using System.Text;
+using System.IO;
 
 namespace VsIdeBridgeService;
 
@@ -117,5 +120,177 @@ internal static class McpServerMode
         McpServerLog.Write($"dispatch tool={toolName}");
 
         return await Registry.DispatchAsync(id, toolName, args, bridge).ConfigureAwait(false);
+    }
+
+    public static async Task RunHttpAsync(string[] args, CancellationToken cancellationToken = default)
+    {
+        int port = 8080;
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--port", StringComparison.OrdinalIgnoreCase))
+            {
+                if (int.TryParse(args[i + 1], out int parsedPort) && parsedPort > 0 && parsedPort < 65536)
+                    port = parsedPort;
+                break;
+            }
+        }
+
+        string prefix = $"http://localhost:{port}/";
+        BridgeConnection bridge = new(args);
+
+        McpServerLog.Write($"MCP HTTP server starting on {prefix}");
+
+        using var listener = new HttpListener();
+        listener.Prefixes.Add(prefix);
+        try
+        {
+            listener.Start();
+            McpServerLog.Write("HTTP listener started successfully");
+        }
+        catch (Exception ex)
+        {
+            McpServerLog.Write($"Failed to start listener: {ex}");
+            throw;
+        }
+
+        // When the cancellationToken fires, stop the listener so GetContextAsync throws
+        // HttpListenerException with IsListening == false and the accept loop exits cleanly.
+        using CancellationTokenRegistration stopReg = cancellationToken.Register(
+            static state => ((HttpListener)state!).Stop(), listener);
+
+        while (true)
+        {
+            HttpListenerContext? context = null;
+            try
+            {
+                context = await listener.GetContextAsync().ConfigureAwait(false);
+                await HandleHttpRequestAsync(context, bridge).ConfigureAwait(false);
+            }
+            catch (HttpListenerException) when (listener.IsListening == false)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                McpServerLog.Write($"HTTP accept error: {ex}");
+            }
+        }
+    }
+
+    private static async Task HandleHttpRequestAsync(HttpListenerContext context, BridgeConnection bridge)
+    {
+        try
+        {
+            string path = context.Request.Url?.AbsolutePath ?? "/";
+            string method = context.Request.HttpMethod;
+
+            McpServerLog.Write($"HTTP {method} {path}");
+
+            if (method == "GET")
+            {
+                // Simple health check / server info for connection test and UI dialogs
+                var info = new JsonObject
+                {
+                    ["name"] = "vs-ide-bridge",
+                    ["version"] = "0.1.0",
+                    ["protocolVersions"] = new JsonArray { "2025-03-26", "2024-11-05" },
+                    ["capabilities"] = new JsonObject { ["tools"] = new JsonObject() },
+                    ["status"] = "ok"
+                };
+                string json = info.ToJsonString();
+                byte[] bytes = Encoding.UTF8.GetBytes(json);
+                context.Response.ContentType = "application/json; charset=utf-8";
+                context.Response.ContentLength64 = bytes.Length;
+                await context.Response.OutputStream.WriteAsync(bytes).ConfigureAwait(false);
+                return;
+            }
+
+            if (method != "POST")
+            {
+                context.Response.StatusCode = 405;
+                context.Response.ContentType = "text/plain";
+                await context.Response.OutputStream.WriteAsync("Method not allowed"u8.ToArray()).ConfigureAwait(false);
+                return;
+            }
+
+            string body;
+            using (var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding ?? Encoding.UTF8))
+            {
+                body = await reader.ReadToEndAsync().ConfigureAwait(false);
+            }
+
+            if (string.IsNullOrWhiteSpace(body))
+            {
+                context.Response.StatusCode = 400;
+                return;
+            }
+
+            JsonObject request;
+            try
+            {
+                var node = JsonNode.Parse(body);
+                request = node as JsonObject ?? throw new InvalidOperationException("Not an object");
+            }
+            catch (Exception)
+            {
+                // JSON parse failure or unexpected node type — return 400 Bad Request.
+                context.Response.StatusCode = 400;
+                await WriteErrorResponse(context, "Invalid JSON");
+                return;
+            }
+
+            McpServerLog.WriteRequest(request, McpProtocol.WireFormat.RawJson);
+
+            JsonObject? response = await HandleRequestAsync(request, bridge).ConfigureAwait(false);
+
+            if (response is not null)
+            {
+                McpServerLog.WriteResponse(response);
+                string jsonResponse = response.ToJsonString();
+                byte[] bytes = Encoding.UTF8.GetBytes(jsonResponse);
+                context.Response.ContentType = "application/json; charset=utf-8";
+                context.Response.ContentLength64 = bytes.Length;
+                await context.Response.OutputStream.WriteAsync(bytes).ConfigureAwait(false);
+            }
+            else
+            {
+                context.Response.StatusCode = 204; // no content for notifications
+            }
+        }
+        catch (McpRequestException ex)
+        {
+            McpServerLog.Write($"HTTP MCP error code={ex.Code}: {ex.Message}");
+            await WriteErrorResponse(context, ex.Message, ex.Code);
+        }
+        catch (Exception ex)
+        {
+            McpServerLog.Write($"HTTP request fatal: {ex}");
+            await WriteErrorResponse(context, ex.Message);
+        }
+        finally
+        {
+            try
+            {
+                context.Response.Close();
+            }
+            catch (ObjectDisposedException) { /* intentional: response already closed during shutdown */ }
+            catch (HttpListenerException) { /* intentional: listener stopped before response could be sent */ }
+        }
+    }
+
+    private static async Task WriteErrorResponse(HttpListenerContext context, string message, int code = -32603)
+    {
+        var errorResponse = new JsonObject
+        {
+            ["jsonrpc"] = "2.0",
+            ["id"] = null,
+            ["error"] = new JsonObject { ["code"] = code, ["message"] = message }
+        };
+        string json = errorResponse.ToJsonString();
+        byte[] bytes = Encoding.UTF8.GetBytes(json);
+        context.Response.ContentType = "application/json; charset=utf-8";
+        context.Response.StatusCode = 200;
+        context.Response.ContentLength64 = bytes.Length;
+        await context.Response.OutputStream.WriteAsync(bytes).ConfigureAwait(false);
     }
 }

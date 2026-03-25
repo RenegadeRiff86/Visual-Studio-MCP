@@ -21,10 +21,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\VsIdeBridgeCli\VsIdeBridgeCli.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
     <Compile Include="..\..\src\VsIdeBridge\Services\MemoryDiscoveryStore.cs" Link="Bridge\MemoryDiscoveryStore.cs" />
   </ItemGroup>
 </Project>

@@ -1,0 +1,12 @@
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Diagnostics\bin\Debug\net8.0\VsIdeBridge.Diagnostics.deps.json
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Diagnostics\bin\Debug\net8.0\VsIdeBridge.Diagnostics.dll
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Diagnostics\bin\Debug\net8.0\VsIdeBridge.Diagnostics.pdb
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Diagnostics\obj\Debug\net8.0\VsIdeBridge.Diagnostics.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Diagnostics\obj\Debug\net8.0\VsIdeBridge.Diagnostics.AssemblyInfoInputs.cache
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Diagnostics\obj\Debug\net8.0\VsIdeBridge.Diagnostics.AssemblyInfo.cs
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Diagnostics\obj\Debug\net8.0\VsIdeBridge.Diagnostics.csproj.CoreCompileInputs.cache
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Diagnostics\obj\Debug\net8.0\VsIdeBridge.Diagnostics.dll
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Diagnostics\obj\Debug\net8.0\refint\VsIdeBridge.Diagnostics.dll
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Diagnostics\obj\Debug\net8.0\VsIdeBridge.Diagnostics.pdb
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Diagnostics\obj\Debug\net8.0\ref\VsIdeBridge.Diagnostics.dll
+C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Diagnostics\obj\Debug\net8.0\VsIdeBridge.Diagnostics.csproj.AssemblyReference.cache

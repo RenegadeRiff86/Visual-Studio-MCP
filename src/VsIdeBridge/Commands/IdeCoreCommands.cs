@@ -280,13 +280,13 @@ internal static class IdeCoreCommands
     {
         return new JObject
         {
-            ["allowBridgeEdits"] = context.Runtime.UiSettings.AllowBridgeEdits,
             ["allowBridgeShellExec"] = context.Runtime.UiSettings.AllowBridgeShellExec,
             ["allowBridgePythonExecution"] = context.Runtime.UiSettings.AllowBridgePythonExecution,
             ["allowBridgePythonUnrestrictedExecution"] = context.Runtime.UiSettings.AllowBridgePythonUnrestrictedExecution,
             ["allowBridgePythonEnvironmentMutation"] = context.Runtime.UiSettings.AllowBridgePythonEnvironmentMutation,
             ["bestPracticeDiagnostics"] = context.Runtime.UiSettings.BestPracticeDiagnosticsEnabled,
             ["goToEditedParts"] = context.Runtime.UiSettings.GoToEditedParts,
+            ["allowBridgeBuild"] = context.Runtime.UiSettings.AllowBridgeBuild,
         };
     }
 
@@ -294,15 +294,6 @@ internal static class IdeCoreCommands
     {
         return Task.FromResult(new CommandExecutionResult(
             "IDE Bridge UI settings captured.",
-            GetUiSettingsData(context)));
-    }
-
-    private static Task<CommandExecutionResult> ToggleAllowBridgeEditsAsync(IdeCommandContext context)
-    {
-        var enabled = !context.Runtime.UiSettings.AllowBridgeEdits;
-        context.Runtime.UiSettings.AllowBridgeEdits = enabled;
-        return Task.FromResult(new CommandExecutionResult(
-            enabled ? "Bridge edits enabled." : "Bridge edits disabled.",
             GetUiSettingsData(context)));
     }
 
@@ -342,6 +333,15 @@ internal static class IdeCoreCommands
             GetUiSettingsData(context)));
     }
 
+    private static Task<CommandExecutionResult> ToggleAllowBridgeBuildAsync(IdeCommandContext context)
+    {
+        var enabled = !context.Runtime.UiSettings.AllowBridgeBuild;
+        context.Runtime.UiSettings.AllowBridgeBuild = enabled;
+        return Task.FromResult(new CommandExecutionResult(
+            enabled ? "Bridge build enabled." : "Bridge build disabled.",
+            GetUiSettingsData(context)));
+    }
+
     private static Task<CommandExecutionResult> ToggleGoToEditedPartsAsync(IdeCommandContext context)
     {
         var enabled = !context.Runtime.UiSettings.GoToEditedParts;
@@ -349,6 +349,42 @@ internal static class IdeCoreCommands
         return Task.FromResult(new CommandExecutionResult(
             enabled ? "Go To Edited Parts enabled." : "Go To Edited Parts disabled.",
             GetUiSettingsData(context)));
+    }
+
+    private static async Task<CommandExecutionResult> ToggleHttpServerAsync(IdeCommandContext context)
+    {
+        var enabled = !HttpServerStateManager.IsEnabled;
+
+        try
+        {
+            if (enabled)
+            {
+                HttpServerStateManager.Enable();
+            }
+            else
+            {
+                HttpServerStateManager.Disable();
+            }
+
+            context.Runtime.UiSettings.HttpServerEnabled = enabled;
+
+            var statusMessage = enabled 
+                ? $"HTTP MCP server enabled on {HttpServerStateManager.Url}"
+                : "HTTP MCP server disabled.";
+
+            return new CommandExecutionResult(
+                statusMessage,
+                new JObject
+                {
+                    ["enabled"] = enabled,
+                    ["port"] = HttpServerStateManager.DefaultPort,
+                    ["url"] = HttpServerStateManager.Url
+                });
+        }
+        catch (Exception ex)
+        {
+            throw new CommandErrorException("http_toggle_failed", $"Failed to toggle HTTP server: {ex.Message}");
+        }
     }
 
     private static async Task<CommandExecutionResult> ToggleBestPracticeDiagnosticsAsync(IdeCommandContext context)
@@ -432,21 +468,39 @@ internal static class IdeCoreCommands
         }
     }
 
-    internal sealed class IdeToggleAllowBridgeEditsMenuCommand : IdeCommandBase
+    internal sealed class IdeToggleAllowBridgeBuildMenuCommand : IdeCommandBase
     {
-        public IdeToggleAllowBridgeEditsMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0103, acceptsParameters: false)
+        public IdeToggleAllowBridgeBuildMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x010A, acceptsParameters: false)
         {
-            MenuCommand.BeforeQueryStatus += (_, _) => MenuCommand.Checked = Runtime.UiSettings.AllowBridgeEdits;
+            MenuCommand.BeforeQueryStatus += (_, _) => MenuCommand.Checked = Runtime.UiSettings.AllowBridgeBuild;
         }
 
-        protected override string CanonicalName => "Tools.VsIdeBridgeToggleAllowBridgeEdits";
+        protected override string CanonicalName => "Tools.VsIdeBridgeToggleAllowBridgeBuild";
 
         internal override bool AllowAutomationInvocation => false;
 
         protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            return ToggleAllowBridgeEditsAsync(context);
+            return ToggleAllowBridgeBuildAsync(context);
+        }
+    }
+
+    internal sealed class IdeToggleHttpServerMenuCommand : IdeCommandBase
+    {
+        public IdeToggleHttpServerMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x010B, acceptsParameters: false)
+        {
+            MenuCommand.BeforeQueryStatus += (_, _) => MenuCommand.Checked = HttpServerStateManager.IsEnabled;
+        }
+
+        protected override string CanonicalName => "Tools.VsIdeBridgeToggleHttpServer";
+
+        internal override bool AllowAutomationInvocation => false;
+
+        protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            return ToggleHttpServerAsync(context);
         }
     }
 
@@ -550,7 +604,6 @@ internal static class IdeCoreCommands
             var operation = args.GetRequiredString("operation");
             var approvalKind = operation switch
             {
-                "edit" => BridgeApprovalKind.Edit,
                 "shell_exec" => BridgeApprovalKind.ShellExec,
                 "python_exec" => BridgeApprovalKind.PythonExecution,
                 "python_env_mutation" => BridgeApprovalKind.PythonEnvironmentMutation,

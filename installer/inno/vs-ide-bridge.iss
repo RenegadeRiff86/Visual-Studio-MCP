@@ -1,10 +1,11 @@
 #define MyAppName "VS IDE Bridge"
 #define MyAppPublisher "RenegadeRiff86"
 #define MyAppURL "https://github.com/RenegadeRiff86/vs-ide-bridge"
-#define MyAppVersion "2.2.1"
+#define MyAppVersion "2.2.6"
 #define ServiceName "VsIdeBridgeService"
 #define VsixId "RenegadeRiff86.VsIdeBridge"
 #define LegacyVsixId "StanElston.VsIdeBridge"
+#define Configuration "Release"
 
 [Setup]
 AppId={{F0B67A29-5A6A-4A0F-AD99-9F8A907A2A2E}
@@ -39,10 +40,11 @@ Name: "service"; Description: "Install Windows service (automatic start)"
 Name: "startservice"; Description: "Start service after install"; Check: WizardIsTaskSelected('service')
 
 [Files]
-Source: "..\..\src\VsIdeBridgeCli\bin\Release\net8.0\*"; DestDir: "{app}\cli"; Flags: recursesubdirs createallsubdirs ignoreversion restartreplace uninsrestartdelete; BeforeInstall: KillCliProcesses
-Source: "..\..\src\VsIdeBridgeService\bin\Release\net8.0-windows\*"; DestDir: "{app}\service"; Flags: recursesubdirs createallsubdirs ignoreversion restartreplace uninsrestartdelete
-Source: "..\..\src\VsIdeBridge\bin\Release\net472\VsIdeBridge.vsix"; DestDir: "{app}\vsix"; Flags: ignoreversion
-Source: "..\..\src\VsIdeBridgeInstaller\bin\Release\net8.0-windows\python-runtime\*"; DestDir: "{app}\python\managed-runtime"; Flags: recursesubdirs createallsubdirs ignoreversion uninsrestartdelete; Check: ShouldInstallManagedPython
+Source: "..\..\src\VsIdeBridgeService\bin\{#Configuration}\net8.0-windows\VsIdeBridgeService.exe"; DestDir: "{app}\cli"; DestName: "vs-ide-bridge.exe"; Flags: ignoreversion restartreplace uninsrestartdelete; BeforeInstall: KillCliProcesses
+Source: "..\..\src\VsIdeBridgeService\bin\{#Configuration}\net8.0-windows\*"; DestDir: "{app}\cli"; Flags: recursesubdirs createallsubdirs ignoreversion restartreplace uninsrestartdelete; Excludes: "VsIdeBridgeService.exe"
+Source: "..\..\src\VsIdeBridgeService\bin\{#Configuration}\net8.0-windows\*"; DestDir: "{app}\service"; Flags: recursesubdirs createallsubdirs ignoreversion restartreplace uninsrestartdelete
+Source: "..\..\src\VsIdeBridge\bin\{#Configuration}\net472\VsIdeBridge.vsix"; DestDir: "{app}\vsix"; Flags: ignoreversion
+Source: "..\..\src\VsIdeBridgeInstaller\bin\{#Configuration}\net8.0-windows\python-runtime\*"; DestDir: "{app}\python\managed-runtime"; Flags: recursesubdirs createallsubdirs ignoreversion uninsrestartdelete; Check: ShouldInstallManagedPython
 
 [UninstallRun]
 Filename: "{sys}\sc.exe"; Parameters: "stop ""{#ServiceName}"""; Flags: runhidden waituntilterminated; RunOnceId: "{#ServiceName}-stop"; StatusMsg: "Stopping VS IDE Bridge service..."
@@ -295,6 +297,21 @@ begin
   Result := Format('description "%s" "VS IDE Bridge service host (automatic start, idle auto-stop)."', [GetServiceName()]);
 end;
 
+function GetServiceFailureParameters(): string;
+begin
+  // Restart after 3s, 10s, 30s — reset failure count after 0s (never).
+  // This ensures the service restarts after an idle auto-stop.
+  Result := Format('failure "%s" reset= 0 actions= restart/3000/restart/10000/restart/30000', [GetServiceName()]);
+end;
+
+function GetServiceFailureFlagParameters(): string;
+begin
+  // Trigger restart actions even on a clean exit (code 0), not just on crash.
+  // Without this, the idle auto-stop (which calls Stop() with code 0) would
+  // not trigger the recovery actions above.
+  Result := Format('failureflag "%s" 1', [GetServiceName()]);
+end;
+
 function GetVsixLogFileArgument(const LogFileName: string): string;
 begin
   Result := ExpandConstant(VsixInstallerLogArgumentPrefix + '"{log}\' + LogFileName + '"');
@@ -395,13 +412,22 @@ var
   ExitCode: Integer;
 begin
   Result := '';
-  Log('PrepareToInstall: killing vs-ide-bridge.exe processes to release file locks...');
+  // Stop the service gracefully via SCM first so it cannot be auto-restarted
+  // while Inno Setup is copying the service binary.  Taskkill alone bypasses
+  // the SCM and can lose the race against an immediate SCM restart.
+  Log('PrepareToInstall: stopping VsIdeBridgeService via sc.exe...');
+  Exec(ExpandConstant('{sys}\sc.exe'), 'stop VsIdeBridgeService', '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+  Log(Format('sc stop VsIdeBridgeService exited with code %d.', [ExitCode]));
+  Sleep(2000);  { Give the service time to drain and release its file handles. }
+
+  Log('PrepareToInstall: killing residual vs-ide-bridge.exe / VsIdeBridgeService.exe processes...');
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM vs-ide-bridge.exe', '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
   Log(Format('taskkill vs-ide-bridge.exe exited with code %d (0=killed, 128=not running).', [ExitCode]));
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM VsIdeBridgeService.exe', '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
   Log(Format('taskkill VsIdeBridgeService.exe exited with code %d.', [ExitCode]));
-  Sleep(500);
+  Sleep(500);  { Brief pause before Inno Setup proceeds with file copies. }
 end;
+
 
 procedure ShowVsixInstallerMissingMessage();
 begin
@@ -418,7 +444,7 @@ begin
   Result := 1;
 
   if WizardIsTaskSelected('service') then
-    Result := Result + 4;
+    Result := Result + 6;  { stop, delete, create, description, failure, failureflag }
 
   if WizardIsTaskSelected('startservice') then
     Result := Result + 1;
@@ -551,6 +577,22 @@ begin
         ScPath,
         GetServiceDescriptionParameters(),
         True);
+      RunPostInstallStep(
+        StepIndex,
+        TotalSteps,
+        'Configuring VS IDE Bridge service recovery...',
+        'sc failure',
+        ScPath,
+        GetServiceFailureParameters(),
+        False);
+      RunPostInstallStep(
+        StepIndex,
+        TotalSteps,
+        'Configuring VS IDE Bridge service recovery flag...',
+        'sc failureflag',
+        ScPath,
+        GetServiceFailureFlagParameters(),
+        False);
     end;
 
     if WizardIsTaskSelected('startservice') then
@@ -618,6 +660,12 @@ begin
         'Visual Studio extension install was skipped (VSIXInstaller.exe not found).';
   end;
 end;
+
+
+
+
+
+
 
 
 

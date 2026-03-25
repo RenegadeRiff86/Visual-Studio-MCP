@@ -1,0 +1,8 @@
+is_global = true
+build_property.RootNamespace = VsIdeBridge.Tooling
+build_property.ProjectDir = C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Tooling\
+build_property.EnableComHosting = 
+build_property.EnableGeneratedComInterfaceComImportInterop = 
+build_property.CsWinRTUseWindowsUIXamlProjections = false
+build_property.EffectiveAnalysisLevelStyle = 
+build_property.EnableCodeStyleSeverity = 

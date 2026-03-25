@@ -1,0 +1,23 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "VsIdeBridge.Discovery/2.2.6": {
+        "runtime": {
+          "VsIdeBridge.Discovery.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "VsIdeBridge.Discovery/2.2.6": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

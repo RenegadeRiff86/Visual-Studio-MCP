@@ -2,12 +2,15 @@ using EnvDTE;
 using EnvDTE80;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 using VsIdeBridge.Services;
+using VsIdeBridge.Commands;
 
 namespace VsIdeBridge;
 
@@ -32,6 +35,7 @@ public sealed class VsIdeBridgePackage : AsyncPackage, IAsyncDisposable
     private CancellationTokenSource? _bestPracticeRefreshCts;
     private string? _lastActivatedDocumentPath;
     private bool _disposed;
+    private bool _noSolutionRequested;
 
     internal IdeBridgeRuntime Runtime => _runtime ?? throw new InvalidOperationException("Runtime is not initialized.");
 
@@ -141,6 +145,13 @@ public sealed class VsIdeBridgePackage : AsyncPackage, IAsyncDisposable
 
     private void OnSolutionOpened()
     {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        if (_noSolutionRequested)
+        {
+            _noSolutionRequested = false;
+            _dte?.Solution?.Close(SaveFirst: false);
+            return;
+        }
         _pipeServer?.UpdateDiscovery(_dte?.Solution?.FullName ?? string.Empty);
         QueueBestPracticeRefresh(waitForIntellisense: true);
     }
@@ -195,6 +206,22 @@ public sealed class VsIdeBridgePackage : AsyncPackage, IAsyncDisposable
         _ = JoinableTaskFactory.RunAsync(() => RunBestPracticeRefreshAsync(dte, runtime, waitForIntellisense, cancellationToken));
     }
 
+    private static bool IsBridgeNoSolutionRequested()
+    {
+        string flagFile = Path.Combine(
+            Path.GetTempPath(), "vs-ide-bridge",
+            $"bridge-nosolution-{System.Diagnostics.Process.GetCurrentProcess().Id}.flag");
+        if (!File.Exists(flagFile))
+            return false;
+        try
+        {
+            File.Delete(flagFile);
+        }
+        catch (IOException) { /* intentional: flag file cleanup — deletion failure is non-fatal */ }
+        catch (UnauthorizedAccessException) { /* intentional: flag file cleanup — deletion failure is non-fatal */ }
+        return true;
+    }
+
     private async Task InitializeDteAsync(IdeBridgeRuntime runtime)
     {
         try
@@ -206,6 +233,10 @@ public sealed class VsIdeBridgePackage : AsyncPackage, IAsyncDisposable
             _dte = dte;
             _pipeServer?.UpdateDiscovery(dte.Solution?.FullName ?? string.Empty);
             HookBestPracticeRefreshEvents(dte);
+
+            _noSolutionRequested = IsBridgeNoSolutionRequested();
+            if (_noSolutionRequested && dte.Solution?.IsOpen == true)
+                dte.Solution.Close(SaveFirst: false);
 
             if (dte.Solution?.IsOpen != true)
                 return;

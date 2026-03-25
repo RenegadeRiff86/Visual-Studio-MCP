@@ -1,6 +1,4 @@
-using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
-using Microsoft.VisualStudio.Shell.Interop;
 using System.Text;
 using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
@@ -10,7 +8,7 @@ namespace VsIdeBridge.Commands;
 
 internal static class PatchCommands
 {
-    private const int DiagnosticsRefreshTimeoutMilliseconds = 30_000;
+    private const string InvalidArguments = "invalid_arguments";
 
     internal sealed class IdeApplyUnifiedDiffCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0221)
     {
@@ -25,14 +23,6 @@ internal static class PatchCommands
 
             var patchFile = args.GetString("patch-file");
             var baseDirectory = args.GetString("base-directory");
-            var approvalData = await context.Runtime.BridgeApprovalService
-                .RequestApprovalAsync(
-                    context,
-                    BridgeApprovalKind.Edit,
-                    BuildPatchApprovalSubject(patchFile, patchText),
-                    BuildPatchApprovalDetails(baseDirectory, patchFile, patchText))
-                .ConfigureAwait(true);
-
             var openChangedFiles = args.GetBoolean("open-changed-files", defaultValue: true);
 
             var commandData = await context.Runtime.PatchService.ApplyUnifiedDiffAsync(
@@ -42,28 +32,13 @@ internal static class PatchCommands
                 patchText,
                 baseDirectory,
                 openChangedFiles,
-                args.GetBoolean("save-changed-files", false)).ConfigureAwait(true);
+                args.GetBoolean("save-changed-files", false),
+                args.GetBoolean("best-practice-warnings", false)).ConfigureAwait(true);
 
-            await context.Runtime.ErrorListService.GetErrorListAsync(
-                context,
-                waitForIntellisense: true,
-                DiagnosticsRefreshTimeoutMilliseconds,
-                query: new ErrorListQuery { Max = 1 },
-                afterEdit: true).ConfigureAwait(true);
-
-            commandData["approval"] = approvalData["approval"]?.DeepClone();
-            commandData["approvalOperation"] = approvalData["operation"]?.DeepClone();
-            commandData["approvalPromptShown"] = approvalData["promptShown"]?.DeepClone();
-            commandData["diagnosticsRefreshed"] = true;
+            commandData["diagnosticsRefreshQueued"] = true;
 
             return new CommandExecutionResult($"Applied unified diff to {commandData["count"]} file(s).", commandData);
         }
-
-        private static string BuildPatchApprovalSubject(string? patchFile, string? patchText)
-            => PatchCommands.BuildPatchApprovalSubject(patchFile, patchText);
-
-        private static string? BuildPatchApprovalDetails(string? baseDirectory, string? patchFile, string? patchText)
-            => PatchCommands.BuildPatchApprovalDetails(baseDirectory, patchFile, patchText);
     }
 
     private static string DecodePatchTextBase64(string patchTextBase64)
@@ -75,83 +50,10 @@ internal static class PatchCommands
         catch (System.FormatException ex)
         {
             throw new CommandErrorException(
-                "invalid_arguments",
+                InvalidArguments,
                 "Value passed to --patch-text-base64 was not valid base64.",
                 new { exception = ex.Message });
         }
-    }
-
-    private static string BuildPatchApprovalSubject(string? patchFile, string? patchText)
-    {
-        var fileSummary = SummarizePatchFiles(patchText);
-        if (!string.IsNullOrWhiteSpace(fileSummary))
-            return "Apply patch: " + fileSummary;
-        if (!string.IsNullOrWhiteSpace(patchFile))
-            return "Apply patch file: " + patchFile;
-        return "Apply patch to files in this solution";
-    }
-
-    private static string? BuildPatchApprovalDetails(string? baseDirectory, string? patchFile, string? patchText)
-    {
-        var builder = new StringBuilder();
-        if (!string.IsNullOrWhiteSpace(baseDirectory))
-            builder.Append("baseDir=").Append(baseDirectory);
-        if (!string.IsNullOrWhiteSpace(patchFile))
-        {
-            if (builder.Length > 0) builder.Append(", ");
-            builder.Append("patchFile=").Append(patchFile);
-        }
-        var patchSummary = SummarizePatchFiles(patchText);
-        if (!string.IsNullOrWhiteSpace(patchSummary))
-        {
-            if (builder.Length > 0) builder.Append(", ");
-            builder.Append("targets=").Append(patchSummary);
-        }
-        return builder.Length == 0 ? null : builder.ToString();
-    }
-
-    private static string? SummarizePatchFiles(string? patchText)
-    {
-        if (string.IsNullOrWhiteSpace(patchText))
-            return null;
-
-        var files = new System.Collections.Generic.List<string>();
-        var lines = patchText!.Split(["\r\n", "\n"], System.StringSplitOptions.None);
-        foreach (var rawLine in lines)
-        {
-            var line = rawLine.Trim();
-            if (line.StartsWith("*** Update File: ", System.StringComparison.Ordinal) ||
-                line.StartsWith("*** Add File: ", System.StringComparison.Ordinal) ||
-                line.StartsWith("*** Delete File: ", System.StringComparison.Ordinal))
-            {
-                var separatorIndex = line.IndexOf(':');
-                if (separatorIndex >= 0 && separatorIndex + 1 < line.Length)
-                    files.Add(line.Substring(separatorIndex + 1).Trim());
-            }
-            else if (line.StartsWith("+++ b/", System.StringComparison.Ordinal) ||
-                line.StartsWith("--- a/", System.StringComparison.Ordinal))
-            {
-                files.Add(line.Substring(6).Trim());
-            }
-        }
-
-        if (files.Count == 0)
-            return null;
-
-        var seen = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
-        var unique = new System.Collections.Generic.List<string>();
-        foreach (var file in files)
-        {
-            if (seen.Add(file))
-                unique.Add(file);
-        }
-
-        if (unique.Count == 1)
-            return unique[0];
-
-        return unique.Count <= 3
-            ? string.Join(", ", unique)
-            : unique[0] + ", " + unique[1] + ", " + unique[2] + $" (+{unique.Count - 3} more)";
     }
 
     internal sealed class IdeWriteFileCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x024D)
@@ -161,10 +63,10 @@ internal static class PatchCommands
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
             var file = args.GetString("file")
-                ?? throw new CommandErrorException("invalid_arguments", "Missing required --file argument.");
+                ?? throw new CommandErrorException(InvalidArguments, "Missing required --file argument.");
 
             var contentBase64 = args.GetString("content-base64")
-                ?? throw new CommandErrorException("invalid_arguments", "Missing required --content-base64 argument.");
+                ?? throw new CommandErrorException(InvalidArguments, "Missing required --content-base64 argument.");
 
             string content;
             try
@@ -173,19 +75,31 @@ internal static class PatchCommands
             }
             catch (System.FormatException ex)
             {
-                throw new CommandErrorException("invalid_arguments", "Value passed to --content-base64 was not valid base64.", new { exception = ex.Message });
+                throw new CommandErrorException(InvalidArguments, "Value passed to --content-base64 was not valid base64.", new { exception = ex.Message });
             }
 
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             var resolvedPath = context.Runtime.PatchService.ResolveFilePath(context.Dte, file);
 
-            var approvalData = await context.Runtime.BridgeApprovalService
-                .RequestApprovalAsync(
-                    context,
-                    BridgeApprovalKind.Edit,
-                    $"Write file: {System.IO.Path.GetFileName(resolvedPath)}",
-                    $"path={resolvedPath}, bytes={Encoding.UTF8.GetByteCount(content)}")
-                .ConfigureAwait(true);
+            // Guard: refuse to overwrite a large file with a suspiciously small snippet.
+            // This catches the common mistake of passing only a code block instead of the full
+            // file — write_file replaces the entire file, so a partial write destroys content.
+            if (!args.GetBoolean("allow-truncation", false) && System.IO.File.Exists(resolvedPath))
+            {
+                var existingLineCount = System.IO.File.ReadAllLines(resolvedPath).Length;
+                var newLineCount = content.Split('\n').Length;
+                const int TruncationGuardMinLines = 50;
+                if (existingLineCount >= TruncationGuardMinLines && newLineCount < existingLineCount / 2)
+                {
+                    throw new CommandErrorException(
+                        InvalidArguments,
+                        $"Refusing to write {newLineCount} lines to {System.IO.Path.GetFileName(resolvedPath)}, " +
+                        $"which currently has {existingLineCount} lines. " +
+                        "write_file replaces the ENTIRE file — this looks like a partial snippet, not a complete replacement. " +
+                        "Pass --allow-truncation true to override if you genuinely intend to replace the file with shorter content.",
+                        new { existingLineCount, newLineCount });
+                }
+            }
 
             var writeResult = await context.Runtime.DocumentService.WriteDocumentTextAsync(
                 context.Dte,
@@ -193,7 +107,8 @@ internal static class PatchCommands
                 content,
                 line: 1,
                 column: 1,
-                saveChanges: true).ConfigureAwait(true);
+                saveChanges: true,
+                includeBestPracticeWarnings: args.GetBoolean("best-practice-warnings", false)).ConfigureAwait(true);
 
             var commandData = new Newtonsoft.Json.Linq.JObject
             {
@@ -202,19 +117,9 @@ internal static class PatchCommands
                 ["lineCount"] = content.Split('\n').Length,
                 ["editorBacked"] = writeResult["editorBacked"] ?? false,
                 ["saved"] = writeResult["saved"] ?? true,
-                ["approval"] = approvalData["approval"]?.DeepClone(),
-                ["approvalOperation"] = approvalData["operation"]?.DeepClone(),
-                ["approvalPromptShown"] = approvalData["promptShown"]?.DeepClone(),
             };
 
-            await context.Runtime.ErrorListService.GetErrorListAsync(
-                context,
-                waitForIntellisense: true,
-                DiagnosticsRefreshTimeoutMilliseconds,
-                query: new ErrorListQuery { Max = 1 },
-                afterEdit: true).ConfigureAwait(true);
-
-            commandData["diagnosticsRefreshed"] = true;
+            commandData["diagnosticsRefreshQueued"] = true;
 
             return new CommandExecutionResult($"Wrote {commandData["lineCount"]} lines to {System.IO.Path.GetFileName(resolvedPath)}.", commandData);
         }

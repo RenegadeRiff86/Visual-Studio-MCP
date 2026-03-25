@@ -8,13 +8,14 @@ namespace VsIdeBridge.Services;
 internal sealed class BridgeUiSettingsService
 {
     private const string CollectionPath = "VsIdeBridge";
-    private const string AllowEditsKey = "AllowBridgeEdits";
     private const string AllowShellExecKey = "AllowBridgeShellExec";
     private const string AllowPythonExecutionKey = "AllowBridgePythonExecution";
     private const string AllowPythonUnrestrictedExecutionKey = "AllowBridgePythonUnrestrictedExecution";
     private const string AllowPythonEnvironmentMutationKey = "AllowBridgePythonEnvironmentMutation";
     private const string GoToEditedPartsKey = "GoToEditedParts";
     private const string BestPracticeDiagnosticsEnabledKey = "BestPracticeDiagnosticsEnabled";
+    private const string AllowBuildKey = "AllowBridgeBuild";
+    private const string HttpServerEnabledKey = "HttpServerEnabled";
 
     private readonly WritableSettingsStore? _store;
 #pragma warning disable IDE0028 // Preserving the comparer requires the explicit dictionary constructor.
@@ -36,12 +37,6 @@ internal sealed class BridgeUiSettingsService
         {
             _store = null;
         }
-    }
-
-    public bool AllowBridgeEdits
-    {
-        get => ReadBoolean(AllowEditsKey, defaultValue: false);
-        set => WriteBoolean(AllowEditsKey, value);
     }
 
     public bool AllowBridgeShellExec
@@ -78,6 +73,18 @@ internal sealed class BridgeUiSettingsService
     {
         get => ReadBoolean(BestPracticeDiagnosticsEnabledKey, defaultValue: true);
         set => WriteBoolean(BestPracticeDiagnosticsEnabledKey, value);
+    }
+
+    public bool AllowBridgeBuild
+    {
+        get => ReadBoolean(AllowBuildKey, defaultValue: false);
+        set => WriteBoolean(AllowBuildKey, value);
+    }
+
+    public bool HttpServerEnabled
+    {
+        get => ReadBoolean(HttpServerEnabledKey, defaultValue: false);
+        set => WriteBoolean(HttpServerEnabledKey, value);
     }
 
     private bool ReadBoolean(string name, bool defaultValue)

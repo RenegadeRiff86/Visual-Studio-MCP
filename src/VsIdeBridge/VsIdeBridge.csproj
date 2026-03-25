@@ -17,13 +17,13 @@
     <PlatformTarget>AnyCPU</PlatformTarget>
     <CreateVsixContainer>true</CreateVsixContainer>
     <InstallationTargetVersion>18.0</InstallationTargetVersion>
-    <InstallationTargetProductArchitecture>amd64</InstallationTargetProductArchitecture>
     <VisualStudioSDKImplicitPackageVersion>17.14.40265</VisualStudioSDKImplicitPackageVersion>
-    <VSSDKBuildToolsImplicitPackageVersion>18.4.33</VSSDKBuildToolsImplicitPackageVersion>
+    <VSSDKBuildToolsImplicitPackageVersion>18.5.38461</VSSDKBuildToolsImplicitPackageVersion>
+    <InstallationTargetProductArchitecture>amd64</InstallationTargetProductArchitecture>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
   </ItemGroup>
 
   <ItemGroup>
@@ -34,8 +34,14 @@
 
   <ItemGroup>
     <Compile Include="..\Shared\AddFilePatchSemantics.cs" Link="Shared\AddFilePatchSemantics.cs" />
-    <Compile Include="..\Shared\BridgeCommandCatalog.cs" Link="Shared\BridgeCommandCatalog.cs" />
-    <Compile Include="..\Shared\NamedPipeAccessDefaults.cs" Link="Shared\NamedPipeAccessDefaults.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VsIdeBridge.Tooling\VsIdeBridge.Tooling.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VsIdeBridge.Diagnostics\VsIdeBridge.Diagnostics.csproj" />
   </ItemGroup>
 
   <ItemGroup>

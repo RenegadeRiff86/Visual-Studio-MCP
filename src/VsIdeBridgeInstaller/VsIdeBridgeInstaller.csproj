@@ -13,6 +13,14 @@
     <PackageReference Include="$(ManagedPythonPackageId)" Version="$(ManagedPythonPackageVersion)" GeneratePathProperty="true" />
   </ItemGroup>
 
+  <!-- Build-order dependencies: ensure Service and VSIX outputs exist before ISCC runs -->
+  <ItemGroup>
+    <ProjectReference Include="..\VsIdeBridgeService\VsIdeBridgeService.csproj"
+                      ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
+    <ProjectReference Include="..\VsIdeBridge\VsIdeBridge.csproj"
+                      ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" />
+  </ItemGroup>
+
   <Target Name="CopyManagedPythonRuntime" AfterTargets="Build" Condition="'$(Pkgpython)' != '' and Exists('$(Pkgpython)\\tools')">
     <ItemGroup>
       <ManagedPythonRuntime Include="$(Pkgpython)\tools\**\*" />
@@ -41,12 +49,35 @@
     Auto-install after every Release build if the scheduled task is registered.
     Silently skips if the task does not exist (non-elevated dev machines).
   -->
-  <Target Name="AutoInstall" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+  <Target Name="AutoInstall" AfterTargets="BuildInstaller" Condition="'$(Configuration)' == 'Release'">
     <Exec Command="powershell -NonInteractive -Command &quot;Start-ScheduledTask -TaskName 'VsIdeBridgeInstall' -ErrorAction SilentlyContinue&quot;"
           IgnoreExitCode="true"
           CustomErrorRegularExpression="^$"
           CustomWarningRegularExpression="^$" />
   </Target>
 
-</Project>
+  <!--
+    Build the distributed Inno Setup installer (vs-ide-bridge-setup-*.exe).
+    Auto-detects Inno Setup (common locations) or uses IsccPath property.
+    Runs on every build of the installer project.
+    Trigger by building the VsIdeBridgeInstaller project.
+  -->
+  <Target Name="BuildInstaller" AfterTargets="CopyManagedPythonRuntime" Condition="'$(Configuration)' == 'Release'">
+    <PropertyGroup>
+      <InnoScriptPath>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\installer\inno\vs-ide-bridge.iss'))</InnoScriptPath>
+      <InnoConfig>Configuration=$(Configuration)</InnoConfig>
+      <IsccPath Condition="'$(IsccPath)' == ''">iscc</IsccPath>
+      <IsccPath Condition="!Exists('$(IsccPath)') and Exists('C:\Program Files (x86)\Inno Setup 6\ISCC.exe')">C:\Program Files (x86)\Inno Setup 6\ISCC.exe</IsccPath>
+      <IsccPath Condition="!Exists('$(IsccPath)') and Exists('C:\Program Files\Inno Setup 6\ISCC.exe')">C:\Program Files\Inno Setup 6\ISCC.exe</IsccPath>
+    </PropertyGroup>
+    <Exec Command="&quot;$(IsccPath)&quot; /D&quot;$(InnoConfig)&quot; &quot;$(InnoScriptPath)&quot;" 
+          IgnoreExitCode="true"
+          ContinueOnError="true"
+          ConsoleToMSBuild="true">
+      <Output TaskParameter="ExitCode" PropertyName="InnoExitCode" />
+    </Exec>
+    <Message Condition="'$(InnoExitCode)' == '0'" Text="Inno Setup completed successfully. Setup executable is in output\ folder." Importance="high" />
+    <Message Condition="'$(InnoExitCode)' != '0'" Text="Skipping Inno Setup (iscc not found or failed with code $(InnoExitCode)). Install Inno Setup or set IsccPath property to build the setup.exe." Importance="normal" />
+  </Target>
 
+</Project>

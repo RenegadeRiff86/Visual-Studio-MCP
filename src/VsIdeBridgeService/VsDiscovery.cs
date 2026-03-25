@@ -175,8 +175,8 @@ internal static class VsDiscovery
 
                 if (instances.Count > 0) return instances;
             }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            catch (IOException) { /* intentional: pipe directory may be inaccessible or mid-cleanup — skip this discovery path */ }
+            catch (UnauthorizedAccessException) { /* intentional: pipe directory may be inaccessible or mid-cleanup — skip this discovery path */ }
         }
 
         return [];

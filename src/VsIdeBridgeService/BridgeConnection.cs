@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using VsIdeBridgeService.Diagnostics;
 
 namespace VsIdeBridgeService;
 
@@ -15,6 +16,7 @@ internal sealed class BridgeConnection
     private readonly DiscoveryMode _discoveryMode;
     private readonly int _timeoutMs;
     private readonly object _gate = new();
+    private readonly DocumentDiagnosticsCoordinator _documentDiagnostics;
 
     private BridgeInstanceSelector _selector = new();
     private BridgeInstance? _cached;
@@ -24,6 +26,8 @@ internal sealed class BridgeConnection
     {
         _discoveryMode = ResolveMode(args);
         _timeoutMs = GetIntArg(args, "timeout-ms", DefaultTimeoutMs);
+        _documentDiagnostics = new DocumentDiagnosticsCoordinator(this);
+        _documentDiagnostics.QueueRefreshAndGetSnapshot("startup");
     }
 
     // ── Public API used by tool handlers ──────────────────────────────────────
@@ -50,6 +54,8 @@ internal sealed class BridgeConnection
     }
 
     public DiscoveryMode Mode => _discoveryMode;
+
+    public DocumentDiagnosticsCoordinator DocumentDiagnostics => _documentDiagnostics;
 
     // Bind to a specific instance and return binding info.
     public async Task<JsonObject> BindAsync(JsonNode? id, JsonObject? args)

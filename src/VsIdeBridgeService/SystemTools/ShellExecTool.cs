@@ -20,7 +20,11 @@ internal static class ShellExecTool
         string arguments = args?["args"]?.GetValue<string>() ?? string.Empty;
         string workingDirectory = ResolveWorkingDirectory(args, bridge);
         int timeoutMs = args?["timeout_ms"]?.GetValue<int?>() ?? DefaultTimeoutMs;
-        int tailLines = args?["tail_lines"]?.GetValue<int?>() ?? 0;
+        int tailLines  = args?["tail_lines"]?.GetValue<int?>() ?? 0;
+        int headLines  = args?["head_lines"]?.GetValue<int?>() ?? 0;
+        int maxLines   = args?["max_lines"]?.GetValue<int?>() ?? 200;
+        bool useMaxCap = headLines <= 0 && tailLines <= 0;
+        int effectiveHead = useMaxCap ? maxLines : headLines;
 
         ProcessStartInfo processStartInfo = new()
         {
@@ -51,6 +55,9 @@ internal static class ShellExecTool
         string stdout = await stdoutTask.ConfigureAwait(false);
         string stderr = await stderrTask.ConfigureAwait(false);
 
+        bool outputTruncated = useMaxCap && (
+            stdout.Split('\n').Length > maxLines || stderr.Split('\n').Length > maxLines);
+
         JsonObject payload = new()
         {
             ["success"] = process.ExitCode == 0,
@@ -58,8 +65,9 @@ internal static class ShellExecTool
             ["command"] = executable,
             ["workingDirectory"] = workingDirectory,
             ["args"] = arguments,
-            ["stdout"] = Tail(stdout, tailLines),
-            ["stderr"] = Tail(stderr, tailLines),
+            ["stdout"] = Truncate(stdout, effectiveHead, tailLines),
+            ["stderr"] = Truncate(stderr, effectiveHead, tailLines),
+            ["outputTruncated"] = outputTruncated,
         };
 
         return new JsonObject
@@ -88,17 +96,30 @@ internal static class ShellExecTool
         return ServiceToolPaths.ResolveSolutionDirectory(bridge);
     }
 
-    private static string Tail(string text, int tailLines)
+    private static string Truncate(string text, int headLines, int tailLines)
     {
-        if (tailLines <= 0 || string.IsNullOrEmpty(text))
-        {
+        if (string.IsNullOrEmpty(text) || (headLines <= 0 && tailLines <= 0))
             return text;
+
+        string[] lines = text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+
+        if (headLines > 0 && tailLines > 0)
+        {
+            int headEnd = Math.Min(headLines, lines.Length);
+            int tailStart = Math.Max(headEnd, lines.Length - tailLines);
+            if (tailStart <= headEnd)
+                return string.Join(Environment.NewLine, lines);
+            int omitted = tailStart - headEnd;
+            return string.Join(Environment.NewLine, lines[..headEnd])
+                + $"{Environment.NewLine}... ({omitted} lines omitted) ...{Environment.NewLine}"
+                + string.Join(Environment.NewLine, lines[tailStart..]);
         }
 
-        string[] normalizedLines = text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
-        int startIndex = Math.Max(0, normalizedLines.Length - tailLines);
-        string[] selectedLines = normalizedLines[startIndex..];
-        return string.Join(Environment.NewLine, selectedLines);
+        if (headLines > 0)
+            return string.Join(Environment.NewLine, lines[..Math.Min(headLines, lines.Length)]);
+
+        int startIndex = Math.Max(0, lines.Length - tailLines);
+        return string.Join(Environment.NewLine, lines[startIndex..]);
     }
 
     private static void TryKill(Process process)
@@ -112,6 +133,7 @@ internal static class ShellExecTool
         }
         catch
         {
+            // Process may have already exited or been killed — ignore.
         }
     }
 }

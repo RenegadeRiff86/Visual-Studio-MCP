@@ -82,10 +82,14 @@ internal static class PipeCommandNames
         ["Tools.IdeQueryProjectReferences"] = ["query-project-references"],
         ["Tools.IdeQueryProjectOutputs"] = ["query-project-outputs"],
         ["Tools.IdeAddProject"] = ["add-project"],
+        ["Tools.IdeCreateProject"] = ["create-project"],
         ["Tools.IdeRemoveProject"] = ["remove-project"],
         ["Tools.IdeSetStartupProject"] = ["set-startup-project"],
         ["Tools.IdeAddFileToProject"] = ["add-file-to-project"],
         ["Tools.IdeRemoveFileFromProject"] = ["remove-file-from-project"],
+        ["Tools.IdeSetPythonProjectEnv"] = ["set-python-project-env"],
+        ["Tools.IdeSetPythonStartupFile"] = ["set-python-startup-file"],
+        ["Tools.IdeGetPythonStartupFile"] = ["get-python-startup-file"],
         ["Tools.IdeSearchSolutions"] = ["search-solutions"],
     };
 

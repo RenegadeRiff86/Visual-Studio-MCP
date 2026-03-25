@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>VsIdeBridge.Discovery</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\ToolCategoryDefinition.cs" Link="ToolCategoryDefinition.cs" />
+    <Compile Include="..\Shared\ToolDefinition.cs" Link="ToolDefinition.cs" />
+    <Compile Include="..\Shared\ToolDefinitionCatalog.cs" Link="ToolDefinitionCatalog.cs" />
+    <Compile Include="..\Shared\ToolDefinitionCatalog\Builders.cs" Link="ToolDefinitionCatalog\Builders.cs" />
+    <Compile Include="..\Shared\ToolDefinitionCatalog\DiscoveryTools.cs" Link="ToolDefinitionCatalog\DiscoveryTools.cs" />
+    <Compile Include="..\Shared\ToolDefinitionCatalog\DocumentTools.cs" Link="ToolDefinitionCatalog\DocumentTools.cs" />
+    <Compile Include="..\Shared\ToolDefinitionCatalog\SearchTools.cs" Link="ToolDefinitionCatalog\SearchTools.cs" />
+    <Compile Include="..\Shared\ToolRegistry.cs" Link="ToolRegistry.cs" />
+    <Compile Include="..\Shared\ToolRegistry\Defaults.cs" Link="ToolRegistry\Defaults.cs" />
+    <Compile Include="..\Shared\ToolRegistry\Listing.cs" Link="ToolRegistry\Listing.cs" />
+    <Compile Include="..\Shared\ToolRegistry\Lookup.cs" Link="ToolRegistry\Lookup.cs" />
+    <Compile Include="..\Shared\ToolRegistry\Recommendations.cs" Link="ToolRegistry\Recommendations.cs" />
+  </ItemGroup>
+</Project>

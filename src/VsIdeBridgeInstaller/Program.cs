@@ -75,7 +75,7 @@ internal static class Program
         var idleHardSeconds = GetIntOption(options, "idle-hard-seconds", 1200);
 
         var cliSource = GetPathOption(options, "cli-source")
-            ?? Path.Combine(repoRoot, "src", "VsIdeBridgeCli", "bin", configuration, "net8.0");
+            ?? Path.Combine(repoRoot, "src", "VsIdeBridgeService", "bin", configuration, "cli", "net8.0");
         var serviceSource = GetPathOption(options, "service-source")
             ?? Path.Combine(repoRoot, "src", "VsIdeBridgeService", "bin", configuration, "net8.0-windows");
         var vsixPath = GetPathOption(options, "vsix-path")

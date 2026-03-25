@@ -23,13 +23,13 @@ internal sealed class ReadinessService
             throw new CommandErrorException("solution_not_open", "No solution is open.");
         }
 
-        var startedAt = DateTimeOffset.UtcNow;
+        DateTimeOffset startedAt = DateTimeOffset.UtcNow;
         await context.Logger.LogAsync("IDE Bridge: waiting for IntelliSense readiness", context.CancellationToken).ConfigureAwait(true);
-        var timeout = TimeSpan.FromMilliseconds(timeoutMilliseconds <= 0 ? DefaultReadinessTimeoutMilliseconds : timeoutMilliseconds);
-        var service = await context.Package.GetServiceAsync(typeof(SVsOperationProgressStatusService)).ConfigureAwait(true) as IVsOperationProgressStatusService;
+        TimeSpan timeout = TimeSpan.FromMilliseconds(timeoutMilliseconds <= 0 ? DefaultReadinessTimeoutMilliseconds : timeoutMilliseconds);
+        IVsOperationProgressStatusService? service = await context.Package.GetServiceAsync(typeof(SVsOperationProgressStatusService)).ConfigureAwait(true) as IVsOperationProgressStatusService;
         var stage = service?.GetStageStatusForSolutionLoad(CommonOperationProgressStageIds.Intellisense);
-        var statusbar = await context.Package.GetServiceAsync(typeof(SVsStatusbar)).ConfigureAwait(true) as IVsStatusbar;
-        var deadline = startedAt.Add(timeout);
+        IVsStatusbar? statusbar = await context.Package.GetServiceAsync(typeof(SVsStatusbar)).ConfigureAwait(true) as IVsStatusbar;
+        DateTimeOffset deadline = startedAt.Add(timeout);
 
         // After an edit, VS needs a moment to schedule IntelliSense re-analysis.
         // Wait one poll interval so IsInProgress has a chance to transition from
@@ -40,11 +40,11 @@ internal sealed class ReadinessService
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
         }
 
-        var readyStatusSamples = 0;
-        var lastStatusBarText = string.Empty;
-        var statusBarReady = false;
-        var intellisenseCompleted = stage?.IsInProgress == false;
-        var satisfiedBy = intellisenseCompleted ? "intellisense" : "pending";
+        int readyStatusSamples = 0;
+        string lastStatusBarText = string.Empty;
+        bool statusBarReady = false;
+        bool intellisenseCompleted = stage?.IsInProgress == false;
+        string satisfiedBy = intellisenseCompleted ? "intellisense" : "pending";
 
         while (DateTimeOffset.UtcNow < deadline)
         {
@@ -110,7 +110,7 @@ internal sealed class ReadinessService
 
         try
         {
-            statusbar.GetText(out var text);
+            statusbar.GetText(out string? text);
             return text?.Trim() ?? string.Empty;
         }
         catch

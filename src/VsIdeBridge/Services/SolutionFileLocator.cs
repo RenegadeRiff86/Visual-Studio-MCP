@@ -1,4 +1,4 @@
-using EnvDTE;
+﻿using EnvDTE;
 using EnvDTE80;
 using Microsoft.VisualStudio.Shell;
 using System;
@@ -296,6 +296,9 @@ internal static class SolutionFileLocator
 
         foreach (Project project in dte.Solution.Projects)
         {
+            if (project is null)
+                continue;
+
             foreach (var file in EnumerateProjectFiles(project))
             {
                 yield return file;
@@ -324,6 +327,9 @@ internal static class SolutionFileLocator
 
             yield break;
         }
+
+        if (project.ProjectItems is null)
+            yield break;
 
         foreach (ProjectItem item in project.ProjectItems)
         {
@@ -362,3 +368,4 @@ internal static class SolutionFileLocator
         }
     }
 }
+

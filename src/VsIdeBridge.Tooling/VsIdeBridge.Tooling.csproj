@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net472;net8.0</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>VsIdeBridge.Tooling</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\BridgeCommandCatalog.cs" Link="BridgeCommandCatalog.cs" />
+    <Compile Include="..\Shared\NamedPipeAccessDefaults.cs" Link="NamedPipeAccessDefaults.cs" />
+  </ItemGroup>
+</Project>

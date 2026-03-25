@@ -28,237 +28,90 @@ The installed Windows service (`VsIdeBridgeService`) is the primary MCP host. Th
    - `Command`: `C:\Program Files\VsIdeBridge\service\VsIdeBridgeService.exe`
    - `Arguments`: `mcp-server`
 
-   Both **Codex** and **Claude Code / Claude Desktop** are first-class supported MCP clients. The only real difference is the config file format.
+   For clients that support HTTP-type custom MCP servers (such as GitHub Copilot Chat):
+   - Launch with `C:\Program Files\VsIdeBridge\service\VsIdeBridgeService.exe mcp-http --port 8080`
+   - In the dialog:
+     - **Server ID**: `vs-ide-bridge` (or any unique identifier)
+     - **Type**: HTTP
+     - **URL**: `http://localhost:8080/`
+     - **Headers** (optional): use the "+ Add" button (e.g. `Content-Type: application/json`, `Authorization: Bearer <token>`, or `X-MCP-Session: <id>`). The server currently ignores incoming headers but logs requests for debugging.
 
-   **Codex** uses `%USERPROFILE%\.codex\config.toml`:
-
-   ```toml
-   [mcp_servers.vs-ide-bridge]
-   command = "C:\\Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe"
-   args = ["mcp-server"]
-   ```
-
-   **Claude Code / Claude Desktop / other JSON-based clients** use `.mcp.json` or the client's JSON MCP config file:
-
-   ```json
-   {
-     "mcpServers": {
-       "vs-ide-bridge": {
-         "command": "C:\\Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe",
-         "args": ["mcp-server"]
-       }
-     }
-   }
-   ```
-
-3. **Open Visual Studio, then restart your MCP client.** Start a session by binding to the solution you want and checking bridge health. Good first calls are:
-
-   > `bind_solution`
-   > `bridge_health`
-   > `tool_help`
-
-4. **Tell the model what you want in plain English.** Examples:
-
-   > "Show me any build errors."
-   > "Take a slice of AuthService.cs around the login code."
-   > "Apply this fix to AuthService.cs."
-
-**CLI fallback:** If your MCP client is unavailable, the installed `vs-ide-bridge` command still exposes terminal fallback commands. Run `vs-ide-bridge help` for a full list of backup verbs.
-
-## Requirements
-
-- Windows
-- Visual Studio 2026 / 18
-
-The extension targets VS 18. The build script probes the `Community` install path first and then falls back to the VS 2022 Community path. If you use Professional or Enterprise, adjust that path in `scripts\build.bat`.
-
-## Build And Install
-
-**Before building and installing:** close both Visual Studio *and* your MCP client (Claude Desktop, Codex, etc.). The MCP server subprocess (`vs-ide-bridge.exe mcp-server`) loads `VsIdeBridge.dll` and will lock it even after VS exits, causing the installer to fail.
-
-### Preferred Full Build
-
-```bat
-scripts\build.bat
-```
-
-This is the only build script. It builds the solution, including:
-
-- the VSIX package in `src\VsIdeBridge\bin\<Configuration>\net472\VsIdeBridge.vsix`
-- the native pipe client in `src\VsIdeBridgeCli\bin\<Configuration>\net8.0\vs-ide-bridge.exe`
-
-Debug is the default configuration. Pass a configuration name as the first argument:
-
-```bat
-scripts\build.bat Release
-```
-
-### Managed-Only Fallback Build
-
-If the full solution build fails in an unrelated native project, such as `src\IdeBridgeJsonProbe\IdeBridgeJsonProbe.vcxproj`, build just the bridge extension and CLI:
-
-```bat
-"C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" src\VsIdeBridge\VsIdeBridge.csproj /restore /p:Configuration=Debug
-dotnet build src\VsIdeBridgeCli\VsIdeBridgeCli.csproj -c Debug
-```
-
-This is enough to produce:
-
-- `src\VsIdeBridge\bin\Debug\net472\VsIdeBridge.vsix`
-- `src\VsIdeBridge\bin\Debug\net472\VsIdeBridge.dll`
-- `src\VsIdeBridgeCli\bin\Debug\net8.0\vs-ide-bridge.exe`
-
-### Install (Preferred)
-
-**One-time task registration** (elevated terminal, once per machine):
-
-```
-msbuild src\VsIdeBridgeInstaller\VsIdeBridgeInstaller.csproj -t:RegisterInstallTask
-```
-
-This registers a Windows scheduled task (`VsIdeBridgeInstall`) that runs the installer as SYSTEM. After registration, every Release build in Visual Studio automatically installs without a UAC prompt.
-
-To install manually without the scheduled task:
-
-```powershell
-# Elevated terminal
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1
-```
-
-If vswhere doesn't find MSBuild (can happen with Preview VS installs), use the direct MSBuild path as a fallback:
-
-```powershell
-& "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" `
-    VsIdeBridge.sln /restore /m /p:Configuration=Release
-```
-
-### Legacy Manual VSIX Update (Troubleshooting)
-
-**Prerequisites - before running the installer:**
-
-1. Close Visual Studio (`send --command close-ide` via bridge, or File -> Exit).
-2. Kill any lingering helper processes - `clangd.exe`, `ServiceHub.RoslynCodeAnalysisService.exe`, `DevHub.exe` - they block the installer even after VS exits.
-3. If the version in `source.extension.vsixmanifest` has not changed since the last install, bump it (for example `0.1.0` -> `0.1.1`); the installer exits 209 ("already installed") otherwise and copies nothing.
-
-**Install command - use PowerShell, not `cmd.exe /c`:**
-
-`cmd.exe /c` silently swallows errors and returns exit 0 without running the installer. Use PowerShell `Start-Process` with an argument array instead:
-
-```powershell
-powershell.exe -Command "
-  \$p = Start-Process \`
-    -FilePath 'C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\VSIXInstaller.exe' \`
-    -ArgumentList @('/quiet', '/instanceIds:8fd42dc7', 'C:\path\to\VsIdeBridge.vsix') \`
-    -PassThru -Wait
-  Write-Host \"Exit: \$(\$p.ExitCode)\"
-"
-```
-
-Exit 0 = success. A new log appears in `%TEMP%\dd_VSIXInstaller_*.log` and a new folder under `%LOCALAPPDATA%\Microsoft\VisualStudio\18.0_8fd42dc7\Extensions\` contains `VsIdeBridge.dll`.
-
-**Direct-copy fallback** (when the installer is not cooperating):
-
-1. Find the installed folder under `%LOCALAPPDATA%\Microsoft\VisualStudio\18.0_*\Extensions\`.
-2. Copy these files from `src\VsIdeBridge\bin\Debug\net472\` into that folder while VS is closed:
-   - `VsIdeBridge.dll`
-   - `VsIdeBridge.pkgdef`
-   - `extension.vsixmanifest`
-
-Start Visual Studio after either method; it picks up the updated extension on the next load.
-
-### Validate The Install
-
-After install, verify the bridge with:
-
-```bat
-"C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe" ensure --solution "C:\path\to\Your.sln"
-"C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe" current --format keyvalue
-"C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe" catalog --instance <instanceId>
-```
-
-## Start The Bridge
-
-Preferred:
-
-```bat
-"C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe" ensure --solution "C:\path\to\Your.sln"
-```
-
-Optional PowerShell wrapper:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\start_bridge.ps1 `
-  -SolutionPath "C:\path\to\Your.sln"
-```
-
-After install, the service is started immediately and the bridge starts automatically with Visual Studio. The native `ensure` command:
-
-- reuses an already-running bridge if it matches the solution
-- otherwise starts Visual Studio with the requested solution
-- waits until the bridge responds over the named pipe
-- exits with code `0` on success and `1` on failure
-
-The PowerShell script is now just a thin wrapper over `vs-ide-bridge ensure`.
-
-Bridge UI defaults:
-
-- pipe activity writes to the `IDE Bridge` Output pane and updates the Visual Studio status bar
-- `IDE Bridge > Allow Bridge Edits` is off by default
-- `IDE Bridge > Allow Bridge Python Execution` is off by default
-- `IDE Bridge > Allow Bridge Python Unrestricted Execution` is off by default
-- `IDE Bridge > Allow Bridge Python Environment Mutation` is off by default
-- `IDE Bridge > Go To Edited Parts` is on by default
-
-That means reads and diagnostics are visible in VS immediately, but `apply-diff` will refuse to change files until you explicitly allow bridge edits from the menu. Python execution is approval-gated by default, and `python_repl` / `python_run_file` stay in restricted scratch mode unless you explicitly turn on unrestricted Python in the IDE Bridge menu.
-
-Bridge edits now apply through the live editor buffer with temporary line markers: added/modified regions are color-highlighted, and deletions are shown as deletion markers so review can happen directly in Visual Studio before save.
-
-Optional parameters:
-
-- `-Configuration Debug|Release`
-- `-StartupTimeoutSeconds 180`
-- `-PollIntervalMilliseconds 1000`
-- `-OutputPath C:\temp\ide-state.json`
-- `-SkipWaitForReady`
+   The HTTP mode re-uses the same tool registry, bridge connection logic, and protocol versions as the stdio mode.
 
 ## Quick Start
 
 1. **Close Visual Studio and your MCP client** before installing.
 2. **Download the installer** (`vs-ide-bridge-setup-<version>.exe`) from [GitHub Releases](https://github.com/RenegadeRiff86/vs-ide-bridge/releases/latest) and run it. The installer sets everything up automatically.
-3. **Set up your client.**
-
-   Codex and Claude are both supported first-class here. Pick the config format your client expects.
-
-   If your app shows separate fields instead of a config file, use:
-
-   - `Server name`: `vs-ide-bridge`
-   - `Command`: `C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe`
-   - `Arguments`: `mcp-server --tools-only`
-
-   **Codex**: add this block to `%USERPROFILE%\.codex\config.toml`:
-
-   ```toml
-   [mcp_servers.vs-ide-bridge]
-   command = "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe"
-   args = ["mcp-server", "--tools-only"]
-   ```
-
-   **Claude Code / Claude Desktop / other JSON-based clients**: add this MCP config:
-
-   ```json
-   {
-     "mcpServers": {
-       "vs-ide-bridge": {
-         "command": "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe",
-         "args": ["mcp-server", "--tools-only"]
-       }
-     }
-   }
-   ```
-
+3. **Set up your client.** Codex and Claude are both supported first-class here. Pick the config format your client expects (see MCP client examples below).
 4. Open Visual Studio, then restart your MCP client.
 5. Start by binding to the solution and checking health with `bind_solution` and `bridge_health`.
 6. If the MCP client ever can't connect, use the installed `vs-ide-bridge` command from a terminal as a fallback.
+
+## MCP Configuration Tips
+
+If your client supports both stdio and HTTP, prefer stdio for lower latency. Use HTTP when the client UI only offers the HTTP type or for remote/shared server scenarios.
+
+## MCP Configuration Examples
+
+**Codex**: add this block to `%USERPROFILE%\.codex\config.toml`:
+
+```toml
+[mcp_servers.vs-ide-bridge]
+command = "C:\\ Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe"
+args = ["mcp-server"]
+```
+
+**Claude Code / Claude Desktop / other JSON-based clients**: add this MCP config:
+
+```json
+{
+  "mcpServers": {
+    "vs-ide-bridge": {
+      "command": "C:\\ Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe",
+      "args": ["mcp-server"]
+    }
+  }
+}
+```
+
+**Continue**: use this YAML workspace block (.continue/mcpServers/vs-ide-bridge.yaml):
+
+```yaml
+name: VS IDE Bridge
+version: 0.0.1
+schema: v1
+mcpServers:
+  - name: vs-ide-bridge
+    command: C:\ Program Files\VsIdeBridge\service\VsIdeBridgeService.exe
+    args:
+      - mcp-server
+```
+
+**Cursor / Roo Code**: add this to your Cursor or Roo Code MCP config:
+
+```json
+{
+  "mcpServers": {
+    "vs-ide-bridge": {
+      "command": "C:\\ Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe",
+      "args": ["mcp-server"]
+    }
+  }
+}
+```
+
+**Generic JSON-based clients**: for tools that expect a JSON MCP config, use:
+
+```json
+{
+  "mcpServers": {
+    "vs-ide-bridge": {
+      "command": "C:\\ Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe",
+      "args": ["mcp-server"]
+    }
+  }
+}
+```
 
 ## MCP Command Catalog
 
@@ -640,7 +493,7 @@ Execute multiple commands in a single bridge request:
 batch --file "C:\temp\batch.json" --out "C:\temp\batch-result.json"
 ```
 
-Add `--stop-on-error` to halt on first failure. The result envelope contains a `results[]` array with per-step `success`, `summary`, and `data`.
+Add `--stop-on-error` to halt on first failure. The result envelope contains a `results[]` array with per-step `success`, `summary`, `data`.
 
 ### `IdeGoToDefinition`
 
@@ -877,13 +730,13 @@ Recommended agent pattern:
 
 ### MCP server (`mcp-server`)
 
-Run a stdio MCP server on Windows next to Visual Studio:
+Run the installed service-hosted MCP server on Windows next to Visual Studio:
 
 ```bat
-"C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe" mcp-server --tools-only
+"C:\Program Files\VsIdeBridge\service\VsIdeBridgeService.exe" mcp-server
 ```
 
-Add `--instance <instanceId>` only when you intentionally want to pin one client to one specific live Visual Studio instance.
+Use the installed CLI only for fallback/recovery workflows like `ensure`, `current`, or `instances`. Add `--instance <instanceId>` only when you intentionally want to pin one client to one specific live Visual Studio instance.
 
 Exposed MCP tools use simple names. See the MCP Command Catalog below or call `tool_help` for the live installed list and schemas:
 
@@ -943,16 +796,15 @@ The MCP layer is intentionally thin: it forwards to the bridge command surface a
 
 Implementation note: the server advertises MCP `tools` capability only. `resources/*` and `prompts/*` methods are still implemented, but not advertised, to avoid eager startup probes from MCP clients that can trigger Visual Studio automation calls before the IDE is fully ready.
 
-Example MCP client registration. Codex, Claude Code, Claude Desktop, Continue, and other MCP clients all point at the same installed Windows command:
+Example MCP client registration. Codex, Claude Code, Claude Desktop, Continue, and other MCP clients should point at the installed Windows service:
 
 ```json
 {
   "mcpServers": {
     "vs-ide-bridge": {
-      "command": "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe",
+      "command": "C:\\ Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe",
       "args": [
-        "mcp-server",
-        "--tools-only"
+        "mcp-server"
       ]
     }
   }
@@ -973,8 +825,8 @@ Recommended pattern:
 
 1. Install the bridge on the Windows box.
 2. Verify the service is running: `sc.exe query VsIdeBridgeService`
-3. Start or reuse the target IDE session: `"C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe" ensure --solution "C:\path\to\Your.sln"`
-4. Run the MCP server on that Windows box: `"C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe" mcp-server --tools-only`
+3. Start or reuse the target IDE session: `"C:\ Program Files\VsIdeBridge\cli\vs-ide-bridge.exe" ensure --solution "C:\path\to\Your.sln"`
+4. Run the MCP server on that Windows box: `"C:\ Program Files\VsIdeBridge\service\VsIdeBridgeService.exe" mcp-server`
 5. Point your non-Windows client at that Windows command through your normal remote-shell path.
 
 Example using `ssh` from macOS/Linux/WSL to a Windows host with OpenSSH enabled:
@@ -986,9 +838,8 @@ Example using `ssh` from macOS/Linux/WSL to a Windows host with OpenSSH enabled:
       "command": "ssh",
       "args": [
         "your-windows-host",
-        "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe",
-        "mcp-server",
-        "--tools-only"
+        "C:\\ Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe",
+        "mcp-server"
       ]
     }
   }
@@ -998,20 +849,20 @@ Example using `ssh` from macOS/Linux/WSL to a Windows host with OpenSSH enabled:
 Notes:
 
 - the Windows machine still needs Visual Studio 18 and the installed bridge stack
-- the remote client does not need the VSIX; it only needs a way to launch the installed Windows CLI
+- the remote client does not need the VSIX; it only needs a way to launch the installed Windows service host
 - if you target a specific IDE instance from a remote client, add `--instance <instanceId>` after confirming the instance with `current` or `instances` on Windows
 
 ### MCP client examples
 
-All of the examples below use the same installed Windows CLI as the MCP server host:
+All of the examples below use the same installed Windows service host as the MCP server path:
 
-`C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe mcp-server --tools-only`
+`C:\ Program Files\VsIdeBridge\service\VsIdeBridgeService.exe mcp-server`
 
 Before using any client:
 
 1. Install the bridge with `vs-ide-bridge-setup-<version>.exe` on Windows.
 2. Verify the service is running: `sc.exe query VsIdeBridgeService`
-3. Start or reuse the Visual Studio session you want to target: `"C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe" ensure --solution "C:\path\to\Your.sln"`
+3. Start or reuse the Visual Studio session you want to target: `"C:\ Program Files\VsIdeBridge\cli\vs-ide-bridge.exe" ensure --solution "C:\path\to\Your.sln"`
 
 #### Codex
 
@@ -1019,22 +870,22 @@ Before using any client:
 
 ```toml
 [mcp_servers.vs-ide-bridge]
-command = "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe"
-args = ["mcp-server", "--tools-only"]
+command = "C:\\ Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe"
+args = ["mcp-server"]
 ```
 
 If Codex asks for UI fields instead of TOML, enter:
 
 - `Server name`: `vs-ide-bridge`
-- `Command`: `C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe`
-- `Arguments`: `mcp-server --tools-only`
+- `Command`: `C:\ Program Files\VsIdeBridge\service\VsIdeBridgeService.exe`
+- `Arguments`: `mcp-server`
 
-If you keep a compatibility alias around for older sessions, point it at the same installed CLI:
+If you keep a compatibility alias around for older sessions, point it at the same installed service host:
 
 ```toml
 [mcp_servers.vs-ide-bridge-pr]
-command = "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe"
-args = ["mcp-server", "--tools-only"]
+command = "C:\\ Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe"
+args = ["mcp-server"]
 ```
 
 Codex does not read project-local `.mcp.json`. Use `%USERPROFILE%\.codex\config.toml`, restart Codex, then start with `bind_solution`, `bridge_health`, and `tool_help`.
@@ -1051,17 +902,16 @@ version: 0.0.1
 schema: v1
 mcpServers:
   - name: vs-ide-bridge
-    command: C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe
+    command: C:\ Program Files\VsIdeBridge\service\VsIdeBridgeService.exe
     args:
       - mcp-server
-      - --tools-only
 ```
 
 If Continue shows separate UI fields instead of a YAML file, use:
 
 - `Server name`: `vs-ide-bridge`
-- `Command`: `C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe`
-- `Arguments`: `mcp-server --tools-only`
+- `Command`: `C:\ Program Files\VsIdeBridge\service\VsIdeBridgeService.exe`
+- `Arguments`: `mcp-server`
 
 Continue can also ingest JSON MCP configs copied into `.continue/mcpServers/` if you prefer the same JSON shape used by Claude Desktop, Cursor, or Cline. Do not add `--instance` unless you intentionally want Continue pinned to one live Visual Studio window.
 
@@ -1073,8 +923,8 @@ Project-local `.mcp.json`:
 {
   "mcpServers": {
     "vs-ide-bridge": {
-      "command": "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe",
-      "args": ["mcp-server", "--tools-only"]
+      "command": "C:\\ Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe",
+      "args": ["mcp-server"]
     }
   }
 }
@@ -1087,8 +937,50 @@ If you use Claude Code, the easiest setup is a project-local `.mcp.json` in the 
 If Claude asks for UI fields instead of JSON, enter:
 
 - `Server name`: `vs-ide-bridge`
-- `Command`: `C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe`
-- `Arguments`: `mcp-server --tools-only`
+- `Command`: `C:\ Program Files\VsIdeBridge\service\VsIdeBridgeService.exe`
+- `Arguments`: `mcp-server`
+
+#### Cursor
+
+Cursor uses the same JSON `mcpServers` shape. Add this to your Cursor MCP config:
+
+```json
+{
+  "mcpServers": {
+    "vs-ide-bridge": {
+      "command": "C:\\ Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe",
+      "args": ["mcp-server"]
+    }
+  }
+}
+```
+
+If Cursor shows UI fields instead of raw JSON, enter:
+
+- `Server name`: `vs-ide-bridge`
+- `Command`: `C:\ Program Files\VsIdeBridge\service\VsIdeBridgeService.exe`
+- `Arguments`: `mcp-server`
+
+#### Roo Code
+
+Roo Code uses the same JSON `mcpServers` shape. Add this to your Roo Code MCP config:
+
+```json
+{
+  "mcpServers": {
+    "vs-ide-bridge": {
+      "command": "C:\\ Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe",
+      "args": ["mcp-server"]
+    }
+  }
+}
+```
+
+If Roo Code shows UI fields instead of raw JSON, enter:
+
+- `Server name`: `vs-ide-bridge`
+- `Command`: `C:\ Program Files\VsIdeBridge\service\VsIdeBridgeService.exe`
+- `Arguments`: `mcp-server`
 
 #### Generic JSON-based clients
 
@@ -1098,8 +990,8 @@ For tools that expect a JSON MCP config, use:
 {
   "mcpServers": {
     "vs-ide-bridge": {
-      "command": "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe",
-      "args": ["mcp-server", "--tools-only"]
+      "command": "C:\\ Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe",
+      "args": ["mcp-server"]
     }
   }
 }
@@ -1107,7 +999,7 @@ For tools that expect a JSON MCP config, use:
 
 #### macOS, Linux, or WSL client talking to a Windows host
 
-If the client is not running on Windows, keep the bridge installed on the Windows machine that is running Visual Studio and launch the installed CLI remotely:
+If the client is not running on Windows, keep the bridge installed on the Windows machine that is running Visual Studio and launch the installed service host remotely:
 
 ```json
 {
@@ -1116,9 +1008,8 @@ If the client is not running on Windows, keep the bridge installed on the Window
       "command": "ssh",
       "args": [
         "your-windows-host",
-        "C:\\Program Files\\VsIdeBridge\\cli\\vs-ide-bridge.exe",
-        "mcp-server",
-        "--tools-only"
+        "C:\\ Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe",
+        "mcp-server"
       ]
     }
   }

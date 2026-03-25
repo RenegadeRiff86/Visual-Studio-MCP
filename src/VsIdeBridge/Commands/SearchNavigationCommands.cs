@@ -402,9 +402,12 @@ internal static class SearchNavigationCommands
             var requestedLine = args.GetNullableInt32("line");
             var baseLine = requestedLine ?? 1;
             var contextBefore = args.GetInt32("context-before", 0);
-            var contextAfter = args.GetInt32("context-after", 0);
+            var contextAfter = args.GetNullableInt32("context-after");
             var startLine = args.GetInt32("start-line", Math.Max(1, baseLine - contextBefore));
-            var endLine = args.GetInt32("end-line", Math.Max(startLine, baseLine + contextAfter));
+            // When only a file is given (no line/range params), default to 200 lines from start
+            var endLine = args.GetInt32("end-line", requestedLine.HasValue || contextAfter.HasValue
+                ? Math.Max(startLine, baseLine + (contextAfter ?? 0))
+                : startLine + 199);
             var revealInEditor = args.GetBoolean("reveal-in-editor", true);
             var revealLine = requestedLine ?? (startLine + ((endLine - startLine) / 2));
 
@@ -438,9 +441,9 @@ internal static class SearchNavigationCommands
                 args.GetBoolean("whole-word", false),
                 args.GetBoolean("regex", false),
                 args.GetString("project"),
-                args.GetInt32("max-contexts", 5),
-                args.GetInt32("context-before", 20),
-                args.GetInt32("context-after", 20),
+                args.GetInt32("max-contexts", 3),
+                args.GetInt32("context-before", 10),
+                args.GetInt32("context-after", 10),
                 args.GetBoolean("populate-results-window", true),
                 args.GetInt32("results-window", 1)).ConfigureAwait(true);
 
