@@ -52,6 +52,7 @@ This file is for LLMs and coding agents.
 - Project-local `.mcp.json` should not auto-launch a second foreground host by default.
 - Older docs or sessions may refer to the CLI as an MCP host. Verify before repeating that claim.
 - Python support currently includes stateless `python_eval` and `python_exec` scratchpad tools, not a persistent REPL session.
+- `shell_exec` is a last-resort escape hatch. Treat it as arbitrary command execution and prefer typed bridge tools unless the user explicitly wants shell-level access.
 
 ## Key Files
 

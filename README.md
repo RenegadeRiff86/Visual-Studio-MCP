@@ -63,6 +63,81 @@ For clients that require stdio MCP:
 - `VsIdeBridgeService.exe mcp-server` is a dedicated foreground host mode, not service attachment.
 - Use it only when that process model is acceptable.
 
+## MCP Config Examples
+
+These examples are intentionally explicit because the installed product supports two different MCP connection models today.
+
+### HTTP MCP example
+
+Use this when your client can talk to an MCP server over HTTP and you want to reuse the installed Windows service.
+
+```json
+{
+  "mcpServers": {
+    "vs-ide-bridge": {
+      "transport": {
+        "type": "http",
+        "url": "http://localhost:8080/"
+      }
+    }
+  }
+}
+```
+
+Operator notes:
+
+- Enable the HTTP listener before using this config.
+- This is the only verified in-process reuse path for the installed Windows service.
+
+### Stdio MCP example
+
+Use this only when your client requires stdio MCP and you are comfortable with a separate foreground host process.
+
+```json
+{
+  "mcpServers": {
+    "vs-ide-bridge": {
+      "command": "C:\\Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe",
+      "args": ["mcp-server"]
+    }
+  }
+}
+```
+
+Operator notes:
+
+- This starts a dedicated foreground MCP host.
+- It does not attach to the already-running SCM-managed Windows service.
+- Do not describe this path as service attachment in docs or client examples.
+
+### Tool safety example
+
+If your MCP client supports allowlists, blocklists, or per-tool approvals, disable `shell_exec` by default and only enable it for trusted sessions.
+
+Example shape:
+
+```json
+{
+  "mcpServers": {
+    "vs-ide-bridge": {
+      "command": "C:\\Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe",
+      "args": ["mcp-server"],
+      "disabledTools": ["shell_exec"]
+    }
+  }
+}
+```
+
+The exact field name varies by client. Some use `disabledTools`, others use tool allowlists, approval rules, or policy settings. The important part is the policy: do not leave `shell_exec` broadly available unless you intend to give the model arbitrary command execution.
+
+## Shell Safety
+
+`shell_exec` is intentionally a last-resort tool. If you allow an LLM to use it freely, you are effectively allowing it to run arbitrary shell commands on the machine with access equivalent to the bridge host process.
+
+- Do not expose `shell_exec` to untrusted prompts or unattended automation unless you are comfortable with that level of control.
+- Prefer the bridge's typed tools for editing, diagnostics, build, Git, Python scratchpad work, and project inspection before allowing shell access.
+- Treat `shell_exec` as an operator-approved escape hatch, not a normal path for day-to-day use.
+
 ## Visual Studio Flow
 
 The normal product flow is:
@@ -96,6 +171,7 @@ Important docs:
 - Prefer bridge-native edits for files in the active Visual Studio solution.
 - Use `python_eval` for one-expression math checks and `python_exec` for short stateless snippets.
 - Do not document Python support as a REPL until a persistent session tool actually exists.
+- Do not normalize `shell_exec` as a convenience tool. Prefer typed bridge tools first, because `shell_exec` can run arbitrary commands when the host allows it.
 
 ## Status
 
