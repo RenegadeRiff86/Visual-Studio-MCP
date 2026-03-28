@@ -53,6 +53,7 @@ internal static class BestPracticeAnalyzer
                 .Concat(FindImplicitVarUsage(file, content))
                 .Concat(FindBroadCatchException(file, content))
                 .Concat(FindFrameworkTypeAliases(file, content))
+                .Concat(FindLongMainThreadScopes(file, content))
                 .Concat(FindSuspiciousRoundDown(file, content))
                 .Concat(FindEmptyCatchBlocks(file, content))
                 .Concat(FindAsyncVoid(file, content))
@@ -640,6 +641,86 @@ internal static class BestPracticeAnalyzer
                 line: GetLineNumber(content, match.Index),
                 symbol: typeName,
                 helpUri: BP1035HelpUri);
+            findingCount++;
+            if (findingCount >= MaxSuppressionFindingsPerFile)
+            {
+                yield break;
+            }
+        }
+    }
+
+    public static IEnumerable<JObject> FindLongMainThreadScopes(string file, string content)
+    {
+        string[] lines = content.Split('\n');
+        int findingCount = 0;
+
+        foreach (Match match in CSharpMethodSignaturePattern.Matches(content))
+        {
+            string methodName = match.Groups[1].Value;
+            int startLine = GetLineNumber(content, match.Index);
+
+            bool hasNearbyBrace = false;
+            for (int i = startLine - 1; i < Math.Min(lines.Length, startLine + MethodBraceLookAheadLines); i++)
+            {
+                if (lines[i].IndexOf('{') >= 0)
+                {
+                    hasNearbyBrace = true;
+                    break;
+                }
+            }
+
+            if (!hasNearbyBrace)
+            {
+                continue;
+            }
+
+            int methodLength = CountBracedBlockLines(lines, startLine - 1);
+            int methodEndExclusive = Math.Min(lines.Length, startLine - 1 + methodLength);
+            int switchLineIndex = -1;
+            int nonEmptyLinesBeforeSwitch = 0;
+
+            for (int i = startLine - 1; i < methodEndExclusive; i++)
+            {
+                string trimmedLine = lines[i].Trim();
+                if (trimmedLine.Length > 0)
+                {
+                    nonEmptyLinesBeforeSwitch++;
+                }
+
+                if (trimmedLine.IndexOf("SwitchToMainThreadAsync", StringComparison.Ordinal) >= 0)
+                {
+                    switchLineIndex = i;
+                    break;
+                }
+            }
+
+            if (switchLineIndex < 0 || nonEmptyLinesBeforeSwitch > MainThreadSwitchEarlyLineThreshold)
+            {
+                continue;
+            }
+
+            int nonEmptyLinesAfterSwitch = 0;
+            for (int i = switchLineIndex + 1; i < methodEndExclusive; i++)
+            {
+                if (!string.IsNullOrWhiteSpace(lines[i]))
+                {
+                    nonEmptyLinesAfterSwitch++;
+                }
+            }
+
+            if (nonEmptyLinesAfterSwitch < MainThreadScopeWarningThreshold)
+            {
+                continue;
+            }
+
+            yield return DiagnosticRowFactory.CreateBestPracticeRow(
+                code: "BP1043",
+                message: $"Method '{methodName}' switches to the Visual Studio UI thread early and then keeps {nonEmptyLinesAfterSwitch} non-empty lines in that scope. Narrow the main-thread region.",
+                file: file,
+                line: switchLineIndex + 1,
+                symbol: methodName,
+                helpUri: BP1043HelpUri);
+
             findingCount++;
             if (findingCount >= MaxSuppressionFindingsPerFile)
             {

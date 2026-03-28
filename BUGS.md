@@ -28,3 +28,7 @@ This file tracks current bridge/runtime issues that affect how the product shoul
 
 - Keep runtime docs aligned with verified installed behavior, not older setup guidance.
   - If README examples and installed behavior diverge, update the docs to match the product that actually ships.
+
+- Python tooling currently exposes stateless scratchpad commands, not a persistent REPL.
+  - `python_eval` and `python_exec` are available for math and quick transforms.
+  - Do not describe Python support as an interactive REPL until a real session-based tool exists.

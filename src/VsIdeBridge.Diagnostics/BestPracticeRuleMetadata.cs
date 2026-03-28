@@ -200,6 +200,10 @@ internal static class BestPracticeRuleMetadata
                 "PowerShell aliases make scripts harder to read and less portable across readers who do not know the shorthand.",
                 "Replace cmdlet aliases with full cmdlet names.",
                 "Replace this PowerShell alias with the full cmdlet name so the script is easier to read, search, and maintain."),
+            [BestPracticeRuleCatalog.BP1043.Code] = new(
+                "Switching to the Visual Studio UI thread too early and then doing substantial work there can freeze the IDE and make the bridge look hung.",
+                "Keep the command on a background thread by default and limit UI-thread work to the smallest block that truly requires DTE or shell services.",
+                "Refactor this method so it stays off the Visual Studio UI thread by default. Move SwitchToMainThreadAsync as close as possible to the specific DTE or shell call that needs it, and move back to background work for parsing, shaping, and serialization."),
         };
     }
 }

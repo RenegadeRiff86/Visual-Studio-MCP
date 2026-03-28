@@ -18,6 +18,34 @@ internal static partial class ToolCatalog
 
     private static IEnumerable<ToolEntry> PythonDiscoveryTools()
     {
+        yield return new("python_eval",
+            "Evaluate a single Python expression in a stateless scratchpad for math and quick checks.",
+            ObjectSchema(
+                Req("expression", "Python expression to evaluate, for example \"math.sqrt(2)\"."),
+                Opt(Path, "Optional interpreter path. Defaults to the active interpreter, managed runtime, or first discovered Python.")),
+            Python,
+            async (id, args, bridge) =>
+            {
+                string expression = RequireArg(id, args, "expression");
+                string python = ResolvePythonInterpreterPath(id, args);
+                return await RunPythonEvalAsync(id, python, expression, timeoutMs: 5_000)
+                    .ConfigureAwait(false);
+            });
+
+        yield return new("python_exec",
+            "Execute a short stateless Python snippet for calculations and quick data transforms.",
+            ObjectSchema(
+                Req("code", "Short Python snippet. If you assign to a variable named result, it will be returned separately."),
+                Opt(Path, "Optional interpreter path. Defaults to the active interpreter, managed runtime, or first discovered Python.")),
+            Python,
+            async (id, args, bridge) =>
+            {
+                string code = RequireArg(id, args, "code");
+                string python = ResolvePythonInterpreterPath(id, args);
+                return await RunPythonExecAsync(id, python, code, timeoutMs: 10_000)
+                    .ConfigureAwait(false);
+            });
+
         yield return new("python_list_envs",
             "Enumerate available Python interpreters: PATH entries, common venv locations under " +
             "the solution directory, and the bridge-managed Python runtime if present.",
@@ -176,6 +204,50 @@ internal static partial class ToolCatalog
             workingDirectory: null, timeoutMs).ConfigureAwait(false);
     }
 
+    private static async Task<JsonNode> RunPythonEvalAsync(
+        JsonNode? id, string python, string expression, int timeoutMs)
+    {
+        string script =
+            "import json, math, statistics, decimal, fractions, base64, sys; " +
+            "expr = base64.b64decode(sys.stdin.read()).decode('utf-8'); " +
+            "safe = {'abs': abs, 'min': min, 'max': max, 'sum': sum, 'round': round, 'len': len}; " +
+            "globals_dict = {'__builtins__': safe, 'math': math, 'statistics': statistics, 'decimal': decimal, 'fractions': fractions}; " +
+            "value = eval(expr, globals_dict, {}); " +
+            "payload = {'expression': expr, 'type': type(value).__name__, 'repr': repr(value)}; " +
+            "json.dumps(value); payload['json'] = value; " +
+            "print(json.dumps(payload))";
+
+        string encodedExpression = Convert.ToBase64String(Encoding.UTF8.GetBytes(expression));
+        return await RunSubprocessAsync(id, python, $"-c \"{script.Replace("\"", "\\\"")}\"",
+            workingDirectory: null, timeoutMs, encodedExpression).ConfigureAwait(false);
+    }
+
+    private static async Task<JsonNode> RunPythonExecAsync(
+        JsonNode? id, string python, string code, int timeoutMs)
+    {
+        string script =
+            "import json, math, statistics, decimal, fractions, base64, io, contextlib, sys\n" +
+            "source = base64.b64decode(sys.stdin.read()).decode('utf-8')\n" +
+            "safe = {'abs': abs, 'min': min, 'max': max, 'sum': sum, 'round': round, 'len': len, 'range': range, 'print': print}\n" +
+            "globals_dict = {'__builtins__': safe, 'math': math, 'statistics': statistics, 'decimal': decimal, 'fractions': fractions}\n" +
+            "locals_dict = {}\n" +
+            "stdout_buffer = io.StringIO()\n" +
+            "with contextlib.redirect_stdout(stdout_buffer):\n" +
+            "    exec(source, globals_dict, locals_dict)\n" +
+            "payload = {'stdout': stdout_buffer.getvalue(), 'hasResult': 'result' in locals_dict}\n" +
+            "if 'result' in locals_dict:\n" +
+            "    value = locals_dict['result']\n" +
+            "    payload['resultType'] = type(value).__name__\n" +
+            "    payload['resultRepr'] = repr(value)\n" +
+            "    json.dumps(value)\n" +
+            "    payload['resultJson'] = value\n" +
+            "print(json.dumps(payload))";
+
+        string encodedCode = Convert.ToBase64String(Encoding.UTF8.GetBytes(code));
+        return await RunSubprocessAsync(id, python, $"-c \"{script.Replace("\"", "\\\"")}\"",
+            workingDirectory: null, timeoutMs, encodedCode).ConfigureAwait(false);
+    }
+
     /// <summary>Run a python -m module command (e.g. pip install ...).</summary>
     private static async Task<JsonNode> RunPythonModuleAsync(
         JsonNode? id, string python, string moduleArgs, int timeoutMs)
@@ -186,13 +258,14 @@ internal static partial class ToolCatalog
 
     /// <summary>General-purpose subprocess runner for python/conda tools.</summary>
     private static async Task<JsonNode> RunSubprocessAsync(
-        JsonNode? id, string exe, string args, string? workingDirectory, int timeoutMs)
+        JsonNode? id, string exe, string args, string? workingDirectory, int timeoutMs, string? standardInput = null)
     {
         ProcessStartInfo psi = new()
         {
             FileName = exe,
             Arguments = args,
             WorkingDirectory = workingDirectory ?? string.Empty,
+            RedirectStandardInput = standardInput is not null,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -202,6 +275,12 @@ internal static partial class ToolCatalog
         using Process process = Process.Start(psi)
             ?? throw new McpRequestException(id, McpErrorCodes.BridgeError,
                 $"Failed to start process '{exe}'.");
+
+        if (standardInput is not null)
+        {
+            await process.StandardInput.WriteAsync(standardInput).ConfigureAwait(false);
+            process.StandardInput.Close();
+        }
 
         Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
         Task<string> stderrTask = process.StandardError.ReadToEndAsync();
@@ -229,6 +308,37 @@ internal static partial class ToolCatalog
         };
 
         return MakePythonResult(payload, success);
+    }
+
+    private static string ResolvePythonInterpreterPath(JsonNode? id, JsonObject? args)
+    {
+        string? explicitPath = args?[Path]?.GetValue<string>();
+        if (!string.IsNullOrWhiteSpace(explicitPath))
+        {
+            return explicitPath;
+        }
+
+        string? activeInterpreterPath = PythonInterpreterState.LoadActiveInterpreterPath();
+        if (!string.IsNullOrWhiteSpace(activeInterpreterPath) && File.Exists(activeInterpreterPath))
+        {
+            return activeInterpreterPath;
+        }
+
+        string managedRuntimePath = IOPath.GetFullPath(
+            IOPath.Combine(AppContext.BaseDirectory, "..", "python", "managed-runtime", "python.exe"));
+        if (File.Exists(managedRuntimePath))
+        {
+            return managedRuntimePath;
+        }
+
+        string fallbackPython = FindSystemPython();
+        if (File.Exists(fallbackPython))
+        {
+            return fallbackPython;
+        }
+
+        throw new McpRequestException(id, McpErrorCodes.BridgeError,
+            "Python interpreter not found. Pass 'path' explicitly or install the managed Python runtime.");
     }
 
     private static JsonNode MakePythonResult(JsonObject payload, bool success)

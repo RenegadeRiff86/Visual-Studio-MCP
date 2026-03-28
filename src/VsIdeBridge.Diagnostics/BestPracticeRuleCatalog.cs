@@ -262,6 +262,13 @@ internal static class BestPracticeRuleCatalog
         public const string HelpUri = ErrorListConstants.BP1042HelpUri;
     }
 
+    public static class BP1043
+    {
+        public const string Code = "BP1043";
+        public const string HelpUri = ErrorListConstants.BP1043HelpUri;
+        public static readonly int Threshold = ErrorListConstants.MainThreadScopeWarningThreshold;
+    }
+
     public static string GetGuidance(string code)
     {
         return BestPracticeRuleMetadata.TryGetRuleText(code)?.Guidance ?? string.Empty;
@@ -323,6 +330,7 @@ internal static class BestPracticeRuleCatalog
             "BP1040" => ErrorListConstants.BP1040HelpUri,
             "BP1041" => ErrorListConstants.BP1041HelpUri,
             "BP1042" => ErrorListConstants.BP1042HelpUri,
+            "BP1043" => ErrorListConstants.BP1043HelpUri,
             _ => string.Empty,
         };
     }

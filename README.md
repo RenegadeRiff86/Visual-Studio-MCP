@@ -22,13 +22,15 @@ There are two broad tool families:
 
 ## Current Runtime Truth
 
-The source and the installed product do not currently support the same client-hosting story in every path. The following statements are the verified behavior as of March 26, 2026:
+The source and the installed product do not currently support the same client-hosting story in every path. The following statements are the verified behavior as of March 28, 2026:
 
 - The Windows service `VsIdeBridgeService` is the primary installed runtime.
 - Running `C:\Program Files\VsIdeBridge\service\VsIdeBridgeService.exe mcp-server` starts a separate foreground MCP host process.
 - That `mcp-server` mode does not attach to the already-running SCM-managed Windows service.
 - The optional HTTP MCP listener is the only verified in-process reuse path for the existing Windows service.
 - The installed `C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe` is not currently a verified stdio attach client.
+- The installed bridge exposes stateless Python scratchpad tools (`python_eval` and `python_exec`) for math and quick transforms.
+- The installed bridge does not currently expose a persistent Python REPL session tool.
 
 If you need the latest caveats, check [BUGS.md](BUGS.md) before configuring a client.
 
@@ -39,6 +41,7 @@ Typical installed paths:
 - Service binary: `C:\Program Files\VsIdeBridge\service\VsIdeBridgeService.exe`
 - Installed CLI path: `C:\Program Files\VsIdeBridge\cli\vs-ide-bridge.exe`
 - VSIX payload: `C:\Program Files\VsIdeBridge\vsix\VsIdeBridge.vsix`
+- Optional managed Python runtime: `C:\Program Files\VsIdeBridge\python\managed-runtime\python.exe`
 
 ## Recommended Usage
 
@@ -91,6 +94,8 @@ Important docs:
 - Use the installed bridge tool catalog as the runtime source of truth.
 - Use `tool_help`, `list_tool_categories`, and `list_tools` to inspect the live installed surface.
 - Prefer bridge-native edits for files in the active Visual Studio solution.
+- Use `python_eval` for one-expression math checks and `python_exec` for short stateless snippets.
+- Do not document Python support as a REPL until a persistent session tool actually exists.
 
 ## Status
 

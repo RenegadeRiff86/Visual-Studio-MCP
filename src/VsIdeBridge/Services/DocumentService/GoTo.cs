@@ -253,7 +253,8 @@ internal sealed partial class DocumentService
 
         string sourcePath = (string?)sourceLocation[ResolvedPathProperty] ?? string.Empty;
         int sourceLine = (int?)sourceLocation["line"] ?? 0;
-        string word = (string?)sourceLocation[SelectedTextProperty] ?? string.Empty;
+        string word = ((string?)sourceLocation[SelectedTextProperty] ?? string.Empty).Trim();
+        sourceLocation[SelectedTextProperty] = word;
 
         if (!HasNavigableSymbolText(word))
         {

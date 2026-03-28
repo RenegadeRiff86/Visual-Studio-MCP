@@ -16,6 +16,7 @@ internal static class VsDiscovery
     private const int MemoryCapacityBytes = 1024 * 1024;
 
     private static readonly TimeSpan MutexWait = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan HeadlessProcessGracePeriod = TimeSpan.FromSeconds(30);
     private static readonly (string Map, string Mutex, string Source)[] MemoryStores =
     [
         (LocalMapName,  LocalMutexName,  "memory://local/VsIdeBridge.Discovery.v1"),
@@ -191,7 +192,7 @@ internal static class VsDiscovery
             string json = await File.ReadAllTextAsync(path).ConfigureAwait(false);
             JsonObject? obj = JsonNode.Parse(json) as JsonObject;
             if (obj is null) return null;
-            BridgeInstance? instance = ParseInstanceFromObject(obj, path);
+            BridgeInstance? instance = ParseInstanceFromObject(obj, path, File.GetLastWriteTimeUtc(path));
             if (instance is null)
             {
                 return null;
@@ -244,7 +245,7 @@ internal static class VsDiscovery
         }
     }
 
-    private static BridgeInstance? ParseInstanceFromObject(JsonObject obj, string source)
+    private static BridgeInstance? ParseInstanceFromObject(JsonObject obj, string source, DateTime? fallbackLastWriteTimeUtc = null)
     {
         string? instanceId = obj["instanceId"]?.GetValue<string>();
         string? pipeName = obj["pipeName"]?.GetValue<string>();
@@ -263,7 +264,9 @@ internal static class VsDiscovery
             StartedAtUtc = obj["startedAtUtc"]?.GetValue<string>(),
             DiscoveryFile = source,
             LastWriteTimeUtc = DateTime.TryParse(
-                obj["lastWriteTimeUtc"]?.GetValue<string>(), out DateTime dt) ? dt : DateTime.MinValue,
+                obj["lastWriteTimeUtc"]?.GetValue<string>(), out DateTime dt)
+                ? dt
+                : fallbackLastWriteTimeUtc ?? DateTime.MinValue,
         };
     }
 
@@ -352,12 +355,44 @@ internal static class VsDiscovery
         try
         {
             using Process process = Process.GetProcessById(instance.ProcessId);
-            return !process.HasExited;
+            if (process.HasExited)
+            {
+                return false;
+            }
+
+            if (HasUsableMainWindow(process))
+            {
+                return true;
+            }
+
+            return IsWithinHeadlessGracePeriod(instance);
         }
         catch
         {
             return false;
         }
+    }
+
+    private static bool HasUsableMainWindow(Process process)
+    {
+        try
+        {
+            return process.MainWindowHandle != IntPtr.Zero;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsWithinHeadlessGracePeriod(BridgeInstance instance)
+    {
+        if (instance.LastWriteTimeUtc == DateTime.MinValue)
+        {
+            return false;
+        }
+
+        return DateTime.UtcNow - instance.LastWriteTimeUtc <= HeadlessProcessGracePeriod;
     }
 
     private static void TryDeleteStaleDiscoveryFile(string path)

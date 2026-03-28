@@ -62,18 +62,23 @@ internal abstract class IdeCommandBase
         string outputPath = string.Empty;
         string? requestId = null;
 
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(Package.DisposalToken);
-        DTE2? dte = await Package.GetServiceAsync(typeof(SDTE)).ConfigureAwait(true) as DTE2;
+        await Package.JoinableTaskFactory.SwitchToMainThreadAsync(Package.DisposalToken);
+        DTE2? dte = await Package.GetServiceAsync(typeof(SDTE)) as DTE2;
         Assumes.Present(dte);
 
         IdeCommandContext context = new IdeCommandContext(Package, dte, Runtime.Logger, Runtime, Package.DisposalToken);
+        await Task.Factory.StartNew(
+            static () => { },
+            System.Threading.CancellationToken.None,
+            TaskCreationOptions.None,
+            TaskScheduler.Default).ConfigureAwait(false);
 
         try
         {
             CommandArguments args = CommandArgumentParser.Parse(rawArguments);
             outputPath = ResolveOutputPath(args);
             requestId = args.GetString("request-id");
-            CommandExecutionResult commandResult = await ExecuteAsync(context, args).ConfigureAwait(true);
+            CommandExecutionResult commandResult = await ExecuteAsync(context, args).ConfigureAwait(false);
             CommandEnvelope envelope = new CommandEnvelope
             {
                 SchemaVersion = JsonSchemaVersioning.CurrentSchemaVersion,
@@ -89,15 +94,15 @@ internal abstract class IdeCommandBase
             };
 
             await CommandResultWriter.WriteAsync(outputPath, envelope, Package.DisposalToken).ConfigureAwait(false);
-            await context.Logger.LogAsync($"IDE Bridge: {CanonicalName} OK - {commandResult.Summary} -> {outputPath}", Package.DisposalToken, activatePane: true).ConfigureAwait(true);
+            await context.Logger.LogAsync($"IDE Bridge: {CanonicalName} OK - {commandResult.Summary} -> {outputPath}", Package.DisposalToken, activatePane: true).ConfigureAwait(false);
         }
         catch (CommandErrorException ex)
         {
-            await HandleCommandErrorAsync(context, ex, requestId, outputPath, startedAt).ConfigureAwait(true);
+            await HandleCommandErrorAsync(context, ex, requestId, outputPath, startedAt).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            await HandleUnexpectedExceptionAsync(context, ex, requestId, outputPath, startedAt).ConfigureAwait(true);
+            await HandleUnexpectedExceptionAsync(context, ex, requestId, outputPath, startedAt).ConfigureAwait(false);
         }
     }
 
@@ -117,7 +122,7 @@ internal abstract class IdeCommandBase
 
     private async Task HandleCommandErrorAsync(IdeCommandContext context, CommandErrorException ex, string? requestId, string outputPath, DateTimeOffset startedAt)
     {
-        Newtonsoft.Json.Linq.JToken? failureData = await Runtime.FailureContextService.CaptureAsync(context).ConfigureAwait(true);
+        Newtonsoft.Json.Linq.JToken? failureData = await Runtime.FailureContextService.CaptureAsync(context).ConfigureAwait(false);
         CommandEnvelope envelope = new CommandEnvelope
         {
             SchemaVersion = JsonSchemaVersioning.CurrentSchemaVersion,
@@ -133,13 +138,13 @@ internal abstract class IdeCommandBase
         };
         if (!string.IsNullOrWhiteSpace(outputPath))
             await CommandResultWriter.WriteAsync(outputPath, envelope, Package.DisposalToken).ConfigureAwait(false);
-        await context.Logger.LogAsync($"IDE Bridge: {CanonicalName} FAIL - {ex.Code}", Package.DisposalToken, activatePane: true).ConfigureAwait(true);
+        await context.Logger.LogAsync($"IDE Bridge: {CanonicalName} FAIL - {ex.Code}", Package.DisposalToken, activatePane: true).ConfigureAwait(false);
         ActivityLog.LogError(nameof(VsIdeBridgePackage), ex.ToString());
     }
 
     private async Task HandleUnexpectedExceptionAsync(IdeCommandContext context, Exception ex, string? requestId, string outputPath, DateTimeOffset startedAt)
     {
-        Newtonsoft.Json.Linq.JToken? failureData = await Runtime.FailureContextService.CaptureAsync(context).ConfigureAwait(true);
+        Newtonsoft.Json.Linq.JToken? failureData = await Runtime.FailureContextService.CaptureAsync(context).ConfigureAwait(false);
         CommandEnvelope envelope = new CommandEnvelope
         {
             SchemaVersion = JsonSchemaVersioning.CurrentSchemaVersion,
@@ -155,7 +160,7 @@ internal abstract class IdeCommandBase
         };
         if (!string.IsNullOrWhiteSpace(outputPath))
             await CommandResultWriter.WriteAsync(outputPath, envelope, Package.DisposalToken).ConfigureAwait(false);
-        await context.Logger.LogAsync($"IDE Bridge: {CanonicalName} FAIL - internal_error", Package.DisposalToken, activatePane: true).ConfigureAwait(true);
+        await context.Logger.LogAsync($"IDE Bridge: {CanonicalName} FAIL - internal_error", Package.DisposalToken, activatePane: true).ConfigureAwait(false);
         ActivityLog.LogError(nameof(VsIdeBridgePackage), ex.ToString());
     }
 }

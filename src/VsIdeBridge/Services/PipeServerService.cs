@@ -499,8 +499,8 @@ internal sealed class PipeServerService : IDisposable
                 var dte = await GetDteAsync(commandToken).ConfigureAwait(false);
                 Assumes.Present(dte);
 
-                await _package.JoinableTaskFactory.SwitchToMainThreadAsync(commandToken);
-                QueueDiscoveryUpdate(GetSolutionPath(dte!));
+                string? solutionPath = await CaptureSolutionPathAsync(dte!, commandToken).ConfigureAwait(false);
+                QueueDiscoveryUpdate(solutionPath);
 
                 var ctx = new IdeCommandContext(_package, dte!, _runtime.Logger, _runtime, commandToken);
                 failureContext = ctx;
@@ -668,8 +668,13 @@ internal sealed class PipeServerService : IDisposable
 
     private async Task<DTE2?> GetDteAsync(CancellationToken cancellationToken)
     {
+        return await _package.GetServiceAsync(typeof(SDTE)).ConfigureAwait(false) as DTE2;
+    }
+
+    private async Task<string?> CaptureSolutionPathAsync(DTE2 dte, CancellationToken cancellationToken)
+    {
         await _package.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
-        return await _package.GetServiceAsync(typeof(SDTE)).ConfigureAwait(true) as DTE2;
+        return GetSolutionPath(dte);
     }
 
     private static bool IsDiagnosticsCommand(string commandName)

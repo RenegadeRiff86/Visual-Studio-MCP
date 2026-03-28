@@ -21,9 +21,9 @@ internal static class SearchNavigationCommands
     private const string SolutionScope = "solution";
     private const string OpenScope = "open";
 
-    private static CommandExecutionResult CreateFoundResult(string itemLabel, JObject data)
+    private static CommandExecutionResult CreateFoundResult(string itemLabel, JObject data, string detailsLocation = "Data.matches")
     {
-        return new CommandExecutionResult($"Found {data[CountKey]} {itemLabel}.", data);
+        return new CommandExecutionResult($"Found {data[CountKey]} {itemLabel}. See {detailsLocation} for details.", data);
     }
 
     internal sealed class IdeFindTextCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0202)
@@ -91,7 +91,7 @@ internal static class SearchNavigationCommands
                 args.GetString("path"),
                 args.GetInt32("max-queries-per-chunk", 5)).ConfigureAwait(true);
 
-            return CreateFoundResult("match(es)", commandData);
+            return CreateFoundResult("match(es)", commandData, "Data.queryResults and Data.matches");
         }
     }
 
@@ -423,9 +423,12 @@ internal static class SearchNavigationCommands
                 revealLine)
                 .ConfigureAwait(true);
 
-            return new CommandExecutionResult(
-                $"Captured lines {documentSlice["actualStartLine"]}-{documentSlice["actualEndLine"]}.",
-                documentSlice);
+            string documentText = (string?)documentSlice["text"] ?? string.Empty;
+            string documentSummary = string.IsNullOrWhiteSpace(documentText)
+                ? $"Captured lines {documentSlice["actualStartLine"]}-{documentSlice["actualEndLine"]}."
+                : documentText;
+
+            return new CommandExecutionResult(documentSummary, documentSlice);
         }
     }
 
@@ -450,7 +453,7 @@ internal static class SearchNavigationCommands
                 args.GetInt32("results-window", 1)).ConfigureAwait(true);
 
             return new CommandExecutionResult(
-                $"Captured {smartContextResult["contextCount"]} smart context(s) from {smartContextResult["totalMatchCount"]} match(es).",
+                $"Captured {smartContextResult["contextCount"]} smart context(s) from {smartContextResult["totalMatchCount"]} match(es). See Data.contexts and Data.matches for details.",
                 smartContextResult);
         }
     }

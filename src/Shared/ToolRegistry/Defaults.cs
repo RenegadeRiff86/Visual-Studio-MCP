@@ -48,7 +48,7 @@ public sealed partial class ToolRegistry
         new("documents", "Editor and files", "Open, close, save, format, and manage files and windows."),
         new("debug", "Debugger inspection", "Breakpoints, stacks, locals, watches, threads, and modules."),
         new("git", "Version control", "Bridge-managed Git and GitHub helpers, with fallback paths where needed."),
-        new("python", "Python runtime", "Python environments, packages, REPL, and run-file tools."),
+        new("python", "Python runtime", "Python environments, packages, and stateless scratchpad tools."),
         new("project", "Projects and solutions", "Projects, references, outputs, NuGet, and solution structure."),
         new("system", "Discovery and host", "Tool discovery, host control, and last-resort process execution."),
     ];
