@@ -51,6 +51,7 @@ internal static class ErrorListConstants
     public const string AuthorityKey = "authority";
     public const string GuidanceKey = "guidance";
     public const string SuggestedActionKey = "suggestedAction";
+    public const string LlmFixPromptKey = "llmFixPrompt";
     public const string HelpUriKey = "helpUri";
     public const string WarningSeverity = "Warning";
     public const string BestPracticeCategory = "best-practice";
@@ -58,6 +59,7 @@ internal static class ErrorListConstants
     public const string StyleCopAuthority = "stylecop";
     public const string PythonDocsAuthority = "python-docs";
     public const string CppCoreGuidelinesAuthority = "cpp-core-guidelines";
+    public const string PowerShellAuthority = "powershell-guidance";
     public const string ProjectLocalAuthority = "project-local";
 
     // Documentation URIs surfaced in MCP error output so AI assistants can link to the relevant guidance.
@@ -91,8 +93,20 @@ internal static class ErrorListConstants
     public const string BP1028HelpUri = "https://learn.microsoft.com/en-us/dotnet/csharp/fundamentals/coding-style/coding-conventions";
     public const string BP1029HelpUri = "https://learn.microsoft.com/en-us/dotnet/fundamentals/code-analysis/style-rules/ide0130";
     public const string BP1030HelpUri = "https://learn.microsoft.com/en-us/dotnet/standard/base-types/character-encoding";
+    public const string BP1031HelpUri = "https://learn.microsoft.com/en-us/powershell/utility-modules/psscriptanalyzer/rules/avoidusingwritehost";
+    public const string BP1032HelpUri = "https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/set-strictmode";
+    public const string BP1033HelpUri = "https://learn.microsoft.com/en-us/dotnet/csharp/programming-guide/classes-and-structs/implicitly-typed-local-variables";
+    public const string BP1034HelpUri = "https://learn.microsoft.com/en-us/dotnet/standard/exceptions/best-practices-for-exceptions";
+    public const string BP1035HelpUri = "https://learn.microsoft.com/en-us/dotnet/csharp/fundamentals/coding-style/coding-conventions#language-guidelines";
+    public const string BP1036HelpUri = "https://learn.microsoft.com/en-us/dotnet/visual-basic/language-reference/statements/option-strict-statement";
+    public const string BP1037HelpUri = "https://learn.microsoft.com/en-us/dotnet/visual-basic/programming-guide/program-structure/how-to-break-and-combine-statements-in-code";
+    public const string BP1038HelpUri = "https://learn.microsoft.com/en-us/dotnet/visual-basic/programming-guide/program-structure/how-to-break-and-combine-statements-in-code";
+    public const string BP1039HelpUri = "https://learn.microsoft.com/en-us/dotnet/fsharp/style-guide/conventions#immutability-and-mutation";
+    public const string BP1040HelpUri = "https://learn.microsoft.com/en-us/dotnet/fsharp/style-guide/formatting#comments";
+    public const string BP1041HelpUri = "https://peps.python.org/pep-0008/#programming-recommendations";
+    public const string BP1042HelpUri = "https://learn.microsoft.com/en-us/powershell/utility-modules/psscriptanalyzer/rules/avoidusingcmdletaliases";
 
-    public static readonly string[] BestPracticeCodeExtensionValues = [".cs", ".vb", ".fs", ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".py"];
+    public static readonly string[] BestPracticeCodeExtensionValues = [".cs", ".vb", ".fs", ".fsi", ".fsx", ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".py", ".ps1", ".psm1", ".psd1"];
     public static readonly HashSet<string> BestPracticeCodeExtensions = new(BestPracticeCodeExtensionValues, StringComparer.OrdinalIgnoreCase);
     public static readonly string[] IgnoredBestPracticePathFragments = ["\\.vs\\", "\\bin\\", "\\obj\\", "\\output\\"];
     public static readonly string[] BuildOutputPaneNames = ["Build", "Build Order"];

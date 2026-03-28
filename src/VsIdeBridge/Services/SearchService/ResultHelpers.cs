@@ -4,6 +4,7 @@ using Microsoft.VisualStudio.Shell;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using VsIdeBridge.Infrastructure;
 
 namespace VsIdeBridge.Services;
@@ -128,7 +129,7 @@ internal sealed partial class SearchService
             {
                 fullName = document.FullName;
             }
-            catch (Exception ex)
+            catch (COMException ex)
             {
                 TraceSearchFailure("EnumerateOpenDocumentTargets", ex);
             }
@@ -268,7 +269,7 @@ internal sealed partial class SearchService
                     return text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
                 }
             }
-            catch (Exception ex)
+            catch (COMException ex)
             {
                 TraceSearchFailure("ReadSearchLines", ex);
             }

@@ -22,7 +22,7 @@ internal static partial class ToolCatalog
             {
                 JsonObject response = await bridge.SendAsync(id, pipeCommand, buildArgs(args))
                     .ConfigureAwait(false);
-                return BridgeResult(response);
+                return BridgeResult(response, args);
             });
 
     private static ToolEntry BridgeTool(
@@ -45,7 +45,7 @@ internal static partial class ToolCatalog
             {
                 JsonObject response = await bridge.SendAsync(id, pipeCommand, buildArgs(args))
                     .ConfigureAwait(false);
-                return BridgeResult(response);
+                return BridgeResult(response, args);
             },
             title,
             annotations,
@@ -58,14 +58,25 @@ internal static partial class ToolCatalog
             mutating,
             destructive);
 
-    private static JsonNode BridgeResult(JsonObject response)
+    private static JsonNode BridgeResult(JsonObject response, JsonObject? args = null)
     {
         bool success = response["Success"]?.GetValue<bool>() ?? false;
-        return ToolResult(response, isError: !success);
+        return ToolResultFormatter.StructuredToolResult(response, args, isError: !success);
     }
+}
 
-    private static JsonNode ToolResult(JsonObject response, bool isError = false)
+internal static class ToolResultFormatter
+{
+    internal static JsonNode StructuredToolResult(
+        JsonObject response,
+        JsonObject? args = null,
+        bool isError = false,
+        string? successText = null)
     {
+        bool showFullPayload = isError || WantsFullSuccessPayload(args);
+        string text = showFullPayload
+            ? response.ToJsonString()
+            : successText ?? CreateSuccessText(response);
         return new JsonObject
         {
             ["content"] = new JsonArray
@@ -73,11 +84,32 @@ internal static partial class ToolCatalog
                 new JsonObject
                 {
                     ["type"] = "text",
-                    ["text"] = response.ToJsonString(),
+                    ["text"] = text,
                 },
             },
             ["isError"] = isError,
             ["structuredContent"] = response.DeepClone(),
         };
+    }
+
+    private static bool WantsFullSuccessPayload(JsonObject? args)
+        => args?["verbose"]?.GetValue<bool?>() == true
+            || args?["full"]?.GetValue<bool?>() == true;
+
+    private static string CreateSuccessText(JsonObject response)
+    {
+        string? summary = response["Summary"]?.GetValue<string>();
+        if (!string.IsNullOrWhiteSpace(summary))
+        {
+            string? command = response["Command"]?.GetValue<string>();
+            return string.IsNullOrWhiteSpace(command)
+                ? summary
+                : $"{command}: {summary}";
+        }
+
+        string? commandName = response["Command"]?.GetValue<string>();
+        return string.IsNullOrWhiteSpace(commandName)
+            ? "Command completed successfully."
+            : $"{commandName}: completed successfully.";
     }
 }

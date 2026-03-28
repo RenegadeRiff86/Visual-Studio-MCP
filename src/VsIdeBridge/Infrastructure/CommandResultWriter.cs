@@ -11,13 +11,13 @@ internal static class CommandResultWriter
 {
     public static async Task WriteAsync(string outputPath, CommandEnvelope envelope, CancellationToken cancellationToken)
     {
-        var normalizedPath = PathNormalization.NormalizeFilePath(outputPath);
+        string normalizedPath = PathNormalization.NormalizeFilePath(outputPath);
         if (string.IsNullOrWhiteSpace(normalizedPath))
         {
             throw new CommandErrorException("output_write_failed", "Output path is empty.");
         }
 
-        var directory = Path.GetDirectoryName(normalizedPath);
+        string? directory = Path.GetDirectoryName(normalizedPath);
         if (string.IsNullOrWhiteSpace(directory))
         {
             throw new CommandErrorException("output_write_failed", $"Could not determine output directory from '{normalizedPath}'.");
@@ -25,13 +25,13 @@ internal static class CommandResultWriter
 
         Directory.CreateDirectory(directory);
 
-        var tempPath = Path.Combine(directory, Path.GetRandomFileName());
-        var json = JsonConvert.SerializeObject(envelope, Formatting.Indented);
+        string tempPath = Path.Combine(directory, Path.GetRandomFileName());
+        string json = JsonConvert.SerializeObject(envelope, Formatting.Indented);
 
         try
         {
-            using (var stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
-            using (var writer = new StreamWriter(stream, new UTF8Encoding(false)))
+            using (FileStream stream = new(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            using (StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false)))
             {
                 await writer.WriteAsync(json).ConfigureAwait(false);
                 await writer.FlushAsync().ConfigureAwait(false);
@@ -45,7 +45,11 @@ internal static class CommandResultWriter
 
             File.Move(tempPath, normalizedPath);
         }
-        catch (Exception ex)
+        catch (IOException ex)
+        {
+            throw new CommandErrorException("output_write_failed", $"Failed to write output file '{normalizedPath}'.", new { exception = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
         {
             throw new CommandErrorException("output_write_failed", $"Failed to write output file '{normalizedPath}'.", new { exception = ex.Message });
         }
@@ -64,7 +68,11 @@ internal static class CommandResultWriter
         {
             File.Delete(path);
         }
-        catch (Exception ex)
+        catch (IOException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Temp file cleanup failed: {ex.Message}");
+        }
+        catch (UnauthorizedAccessException ex)
         {
             System.Diagnostics.Debug.WriteLine($"Temp file cleanup failed: {ex.Message}");
         }

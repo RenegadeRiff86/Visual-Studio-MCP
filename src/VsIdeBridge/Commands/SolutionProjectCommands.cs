@@ -104,13 +104,21 @@ internal static partial class SolutionProjectCommands
     private static JObject ProjectToJson(Project p, IReadOnlyCollection<string> startupProjects)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var uniqueName = p.UniqueName;
+        string uniqueName = p.UniqueName;
         string? fullName = null;
         try
         {
             fullName = p.FullName;
         }
-        catch (Exception)
+        catch (COMException)
+        {
+            // Unloaded/external projects can throw COM failures when resolving FullName.
+        }
+        catch (NotImplementedException)
+        {
+            // Unloaded/external projects can report that FullName is not implemented.
+        }
+        catch (NotSupportedException)
         {
             // Unloaded/external projects throw E_NOTIMPL from GetFileName(); treat path as empty.
         }
@@ -153,12 +161,12 @@ internal static partial class SolutionProjectCommands
             return [];
         }
 
-        var paths = new List<string>();
-        for (var index = 1; index <= item.FileCount; index++)
+        List<string> paths = new List<string>();
+        for (int index = 1; index <= item.FileCount; index++)
         {
             try
             {
-                var candidate = item.FileNames[(short)index];
+                string candidate = item.FileNames[(short)index];
                 if (!string.IsNullOrWhiteSpace(candidate))
                 {
                     paths.Add(PathNormalization.NormalizeFilePath(candidate));
@@ -228,7 +236,7 @@ internal static partial class SolutionProjectCommands
     private static string? TryGetPropertyString(Properties? properties, string name)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var value = TryGetPropertyValue(properties, name);
+        JToken? value = TryGetPropertyValue(properties, name);
         return value?.Type == JTokenType.Null
             ? null
             : value?.ToString();
@@ -237,13 +245,13 @@ internal static partial class SolutionProjectCommands
     private static IReadOnlyList<(string Name, JToken Value)> EnumerateProjectProperties(Project project)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var properties = project.Properties;
+        Properties? properties = project.Properties;
         if (properties is null)
         {
             return [];
         }
 
-        var values = new List<(string Name, JToken Value)>();
+        List<(string Name, JToken Value)> values = new List<(string Name, JToken Value)>();
 
         foreach (Property property in properties)
         {
@@ -251,7 +259,7 @@ internal static partial class SolutionProjectCommands
             try
             {
                 name = property.Name;
-                var value = NormalizeProjectPropertyValue(project, name, ToJsonToken(property.Value));
+                JToken? value = NormalizeProjectPropertyValue(project, name, ToJsonToken(property.Value));
                 if (!string.IsNullOrWhiteSpace(name) && value is not null)
                 {
                     values.Add((name, value));
@@ -292,23 +300,23 @@ internal static partial class SolutionProjectCommands
         ThreadHelper.ThrowIfNotOnUIThread();
         if (value.Type == JTokenType.String)
         {
-            var current = value.ToString();
+            string current = value.ToString();
             if (!string.IsNullOrWhiteSpace(current) && !int.TryParse(current, out _))
             {
                 return value;
             }
         }
 
-        var targetFrameworks = TryGetPropertyString(project.Properties, "TargetFrameworks");
+        string? targetFrameworks = TryGetPropertyString(project.Properties, "TargetFrameworks");
         if (!string.IsNullOrWhiteSpace(targetFrameworks))
         {
             return targetFrameworks;
         }
 
-        var moniker = TryGetPropertyString(project.Properties, "TargetFrameworkMoniker")
+        string? moniker = TryGetPropertyString(project.Properties, "TargetFrameworkMoniker")
             ?? TryGetPropertyString(project.Properties, "TargetFrameworkMonikers");
 
-        var friendlyTargetFramework = TryConvertFrameworkMonikerToTfm(
+        string? friendlyTargetFramework = TryConvertFrameworkMonikerToTfm(
             moniker,
             TryGetPropertyString(project.Properties, "TargetPlatformIdentifier"),
             TryGetPropertyString(project.Properties, "TargetPlatformVersion"));
@@ -325,8 +333,8 @@ internal static partial class SolutionProjectCommands
             return null;
         }
 
-        var monikerText = moniker!;
-        var primaryMoniker = monikerText
+        string monikerText = moniker!;
+        string? primaryMoniker = monikerText
             .Split([';'], StringSplitOptions.RemoveEmptyEntries)
             .Select(value => value.Trim())
             .FirstOrDefault(static value => value.Length > 0);
@@ -401,22 +409,22 @@ internal static partial class SolutionProjectCommands
             return true;
         }
 
-        var normalizedPaths = paths.ToArray();
+        string[] normalizedPaths = paths.ToArray();
         if (normalizedPaths.Length == 0)
         {
             return false;
         }
 
-        var filter = (pathFilter ?? string.Empty).Replace('/', '\\').Trim();
+        string filter = (pathFilter ?? string.Empty).Replace('/', '\\').Trim();
         if (Path.IsPathRooted(filter))
         {
-            var normalizedFilter = PathNormalization.NormalizeFilePath(filter);
+            string normalizedFilter = PathNormalization.NormalizeFilePath(filter);
             return normalizedPaths.Any(path =>
                 PathNormalization.AreEquivalent(path, normalizedFilter) ||
                 path.StartsWith(normalizedFilter + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
         }
 
-        var rootedFilter = PathNormalization.NormalizeFilePath(Path.Combine(solutionDirectory, filter));
+        string rootedFilter = PathNormalization.NormalizeFilePath(Path.Combine(solutionDirectory, filter));
         if (normalizedPaths.Any(path =>
             PathNormalization.AreEquivalent(path, rootedFilter) ||
             path.StartsWith(rootedFilter + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)))
@@ -424,7 +432,7 @@ internal static partial class SolutionProjectCommands
             return true;
         }
 
-        var normalizedFragment = filter.Trim('\\');
+        string normalizedFragment = filter.Trim('\\');
         return normalizedPaths.Any(path =>
             path.IndexOf(normalizedFragment, StringComparison.OrdinalIgnoreCase) >= 0);
     }
@@ -470,7 +478,7 @@ internal static partial class SolutionProjectCommands
     private static JObject ProjectConfigurationToJson(Configuration configuration, Configuration? activeConfiguration)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var moniker = GetConfigurationMoniker(configuration);
+        string moniker = GetConfigurationMoniker(configuration) ?? string.Empty;
         return new JObject
         {
             ["name"] = moniker,
@@ -497,7 +505,7 @@ internal static partial class SolutionProjectCommands
     private static Configuration? TryGetActiveProjectConfiguration(Project project)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var configurationManager = TryGetConfigurationManager(project);
+        ConfigurationManager? configurationManager = TryGetConfigurationManager(project);
         if (configurationManager is null)
         {
             return null;
@@ -526,7 +534,7 @@ internal static partial class SolutionProjectCommands
     private static string? GetNormalizedProjectPropertyString(Project project, string name)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var token = TryGetNormalizedPropertyValue(project, name);
+        JToken? token = TryGetNormalizedPropertyValue(project, name);
         return token is null || token.Type == JTokenType.Null
             ? null
             : NormalizeXmlValue(token.ToString());
@@ -535,13 +543,13 @@ internal static partial class SolutionProjectCommands
     private static string GetNormalizedOutputType(Project project)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var raw = GetNormalizedProjectPropertyString(project, "OutputType");
+        string? raw = GetNormalizedProjectPropertyString(project, "OutputType");
         if (string.IsNullOrWhiteSpace(raw))
         {
             return "Unknown";
         }
 
-        if (!int.TryParse(raw, out var numericValue))
+        if (!int.TryParse(raw, out int numericValue))
         {
             return raw!;
         }
@@ -556,17 +564,17 @@ internal static partial class SolutionProjectCommands
 
     private static string[] GetOutputDirectoryCandidates(string projectDirectory, string configurationName, string? platformName, string? targetFramework)
     {
-        var candidates = new List<string>();
+        List<string> candidates = new List<string>();
 
         void AddCandidate(params string[] parts)
         {
-            var filtered = parts.Where(part => !string.IsNullOrWhiteSpace(part)).ToArray();
+            string[] filtered = parts.Where(part => !string.IsNullOrWhiteSpace(part)).ToArray();
             if (filtered.Length == 0)
             {
                 return;
             }
 
-            var candidate = PathNormalization.NormalizeFilePath(Path.Combine(filtered));
+            string candidate = PathNormalization.NormalizeFilePath(Path.Combine(filtered));
             if (!candidates.Contains(candidate, StringComparer.OrdinalIgnoreCase))
             {
                 candidates.Add(candidate);
@@ -587,16 +595,16 @@ internal static partial class SolutionProjectCommands
 
     private static string? FindPrimaryOutputPath(IEnumerable<string> candidateDirectories, string assemblyName)
     {
-        foreach (var directory in candidateDirectories)
+        foreach (string directory in candidateDirectories)
         {
             if (!Directory.Exists(directory))
             {
                 continue;
             }
 
-            foreach (var extension in PreferredOutputExtensions)
+            foreach (string extension in PreferredOutputExtensions)
             {
-                var candidate = Path.Combine(directory, assemblyName + extension);
+                string candidate = Path.Combine(directory, assemblyName + extension);
                 if (File.Exists(candidate))
                 {
                     return PathNormalization.NormalizeFilePath(candidate);
@@ -624,7 +632,7 @@ internal static partial class SolutionProjectCommands
     private static string GetFallbackTargetExtension(Project project, string normalizedOutputType)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var projectDirectory = Path.GetDirectoryName(project.FullName) ?? string.Empty;
+        string projectDirectory = Path.GetDirectoryName(project.FullName) ?? string.Empty;
         if (File.Exists(Path.Combine(projectDirectory, "source.extension.vsixmanifest")))
         {
             return ".vsix";
@@ -644,19 +652,19 @@ internal static partial class SolutionProjectCommands
         string normalizedOutputType)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var projectDirectory = Path.GetDirectoryName(project.FullName) ?? string.Empty;
-        var candidateDirectories = GetOutputDirectoryCandidates(projectDirectory, configurationName, platformName, targetFramework);
-        var primaryOutputPath = FindPrimaryOutputPath(candidateDirectories, assemblyName);
-        var outputDirectory = primaryOutputPath is null
+        string projectDirectory = Path.GetDirectoryName(project.FullName) ?? string.Empty;
+        string[] candidateDirectories = GetOutputDirectoryCandidates(projectDirectory, configurationName, platformName, targetFramework);
+        string? primaryOutputPath = FindPrimaryOutputPath(candidateDirectories, assemblyName);
+        string? outputDirectory = primaryOutputPath is null
             ? candidateDirectories.FirstOrDefault()
             : Path.GetDirectoryName(primaryOutputPath);
-        var targetExtension = primaryOutputPath is null
+        string targetExtension = primaryOutputPath is null
             ? GetFallbackTargetExtension(project, normalizedOutputType)
             : Path.GetExtension(primaryOutputPath);
-        var targetName = primaryOutputPath is null
+        string targetName = primaryOutputPath is null
             ? assemblyName
             : Path.GetFileNameWithoutExtension(primaryOutputPath);
-        var targetFileName = primaryOutputPath is null
+        string targetFileName = primaryOutputPath is null
             ? targetName + targetExtension
             : Path.GetFileName(primaryOutputPath);
 
@@ -723,11 +731,11 @@ internal static partial class SolutionProjectCommands
     private static bool? TryGetAutomationBoolean(object? target, string propertyName)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var value = TryGetAutomationProperty(target, propertyName);
+        object? value = TryGetAutomationProperty(target, propertyName);
         return value switch
         {
             bool boolean => boolean,
-            _ when bool.TryParse(value?.ToString(), out var parsed) => parsed,
+            _ when bool.TryParse(value?.ToString(), out bool parsed) => parsed,
             _ => null,
         };
     }
@@ -735,7 +743,7 @@ internal static partial class SolutionProjectCommands
     private static int? TryGetAutomationInt32(object? target, string propertyName)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var value = TryGetAutomationProperty(target, propertyName);
+        object? value = TryGetAutomationProperty(target, propertyName);
         return value switch
         {
             byte byteValue => byteValue,
@@ -802,15 +810,16 @@ internal static partial class SolutionProjectCommands
 
     private static string? TryResolveProjectRelativePath(string projectDirectory, string? include)
     {
-        var normalized = NormalizeXmlValue(include);
+        string? normalized = NormalizeXmlValue(include);
         if (string.IsNullOrWhiteSpace(normalized))
         {
             return null;
         }
 
-        var candidate = Path.IsPathRooted(normalized)
-            ? normalized
-            : Path.Combine(projectDirectory, normalized);
+        string includePath = normalized!;
+        string candidate = Path.IsPathRooted(includePath)
+            ? includePath
+            : Path.Combine(projectDirectory, includePath);
 
         return PathNormalization.NormalizeFilePath(candidate);
     }
@@ -850,8 +859,8 @@ internal static partial class SolutionProjectCommands
 
     private static JObject GetDeclaredMetadata(XElement element, params string[] excludedNames)
     {
-        var excluded = new HashSet<string>(excludedNames, StringComparer.OrdinalIgnoreCase);
-        var metadata = new JObject();
+        HashSet<string> excluded = new HashSet<string>(excludedNames, StringComparer.OrdinalIgnoreCase);
+        JObject metadata = new JObject();
 
         foreach (var attribute in element.Attributes())
         {
@@ -860,7 +869,7 @@ internal static partial class SolutionProjectCommands
                 continue;
             }
 
-            var value = NormalizeXmlValue(attribute.Value);
+            string? value = NormalizeXmlValue(attribute.Value);
             if (value is not null)
             {
                 metadata[attribute.Name.LocalName] = value;
@@ -874,7 +883,7 @@ internal static partial class SolutionProjectCommands
                 continue;
             }
 
-            var value = NormalizeXmlValue(child.Value);
+            string? value = NormalizeXmlValue(child.Value);
             if (value is not null)
             {
                 metadata[child.Name.LocalName] = value;
@@ -922,9 +931,9 @@ internal static partial class SolutionProjectCommands
     private static JObject CreateDeclaredProjectReference(XElement element, string projectDirectory, IEnumerable<Project> solutionProjects)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var include = NormalizeXmlValue(element.Attribute("Include")?.Value) ?? string.Empty;
-        var projectPath = TryResolveProjectRelativePath(projectDirectory, include);
-        var sourceProject = FindProjectByPath(solutionProjects, projectPath);
+        string include = NormalizeXmlValue(element.Attribute("Include")?.Value) ?? string.Empty;
+        string? projectPath = TryResolveProjectRelativePath(projectDirectory, include);
+        Project? sourceProject = FindProjectByPath(solutionProjects, projectPath);
         return CreateDeclaredReference(
             sourceProject?.Name ?? Path.GetFileNameWithoutExtension(include),
             include,
@@ -942,7 +951,7 @@ internal static partial class SolutionProjectCommands
     private static JObject CreateDeclaredPackageReference(XElement element)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var include = NormalizeXmlValue(element.Attribute("Include")?.Value) ?? string.Empty;
+        string include = NormalizeXmlValue(element.Attribute("Include")?.Value) ?? string.Empty;
         return CreateDeclaredReference(
             include,
             include,
@@ -959,7 +968,7 @@ internal static partial class SolutionProjectCommands
     private static JObject CreateDeclaredFrameworkReference(XElement element)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var include = NormalizeXmlValue(element.Attribute("Include")?.Value) ?? string.Empty;
+        string include = NormalizeXmlValue(element.Attribute("Include")?.Value) ?? string.Empty;
         return CreateDeclaredReference(
             include,
             include,
@@ -976,9 +985,9 @@ internal static partial class SolutionProjectCommands
     private static JObject CreateDeclaredAssemblyReference(XElement element, string projectDirectory)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var include = NormalizeXmlValue(element.Attribute("Include")?.Value) ?? string.Empty;
-        var hintPath = TryResolveProjectRelativePath(projectDirectory, GetElementOrAttributeValue(element, "HintPath"));
-        var origin = hintPath is not null && IsFrameworkReferencePath(hintPath)
+        string include = NormalizeXmlValue(element.Attribute("Include")?.Value) ?? string.Empty;
+        string? hintPath = TryResolveProjectRelativePath(projectDirectory, GetElementOrAttributeValue(element, "HintPath"));
+        string origin = hintPath is not null && IsFrameworkReferencePath(hintPath)
             ? FrameworkOrigin
             : (hintPath is null ? "local" : GetReferenceOrigin(sourceProject: null, hintPath));
 
@@ -1016,7 +1025,7 @@ internal static partial class SolutionProjectCommands
             throw new CommandErrorException(UnsupportedProjectTypeCode, $"Project '{project.Name}' does not expose a project file path.");
         }
 
-        var projectPath = PathNormalization.NormalizeFilePath(project.FullName);
+        string projectPath = PathNormalization.NormalizeFilePath(project.FullName);
         if (!File.Exists(projectPath))
         {
             throw new CommandErrorException("project_file_not_found", $"Project file not found: {projectPath}");
@@ -1027,7 +1036,21 @@ internal static partial class SolutionProjectCommands
         {
             document = XDocument.Load(projectPath, LoadOptions.None);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or XmlException)
+        catch (IOException ex)
+        {
+            throw new CommandErrorException(
+                "project_file_read_failed",
+                $"Project file could not be read: {projectPath}",
+                new { exception = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new CommandErrorException(
+                "project_file_read_failed",
+                $"Project file could not be read: {projectPath}",
+                new { exception = ex.Message });
+        }
+        catch (XmlException ex)
         {
             throw new CommandErrorException(
                 "project_file_read_failed",
@@ -1035,7 +1058,7 @@ internal static partial class SolutionProjectCommands
                 new { exception = ex.Message });
         }
 
-        var projectDirectory = Path.GetDirectoryName(projectPath) ?? string.Empty;
+        string projectDirectory = Path.GetDirectoryName(projectPath) ?? string.Empty;
         return [.. document
             .Descendants()
             .Where(element => element.Name.LocalName is "ProjectReference" or "PackageReference" or "FrameworkReference" or "Reference")
@@ -1066,7 +1089,7 @@ internal static partial class SolutionProjectCommands
             return "unknown";
         }
 
-        var normalizedPath = path!;
+        string normalizedPath = path!;
 
         if (IsFrameworkReferencePath(normalizedPath))
         {
@@ -1088,7 +1111,7 @@ internal static partial class SolutionProjectCommands
             return false;
         }
 
-        var normalizedPath = path!;
+        string normalizedPath = path!;
         return normalizedPath.IndexOf("\\Reference Assemblies\\", StringComparison.OrdinalIgnoreCase) >= 0 ||
                (normalizedPath.IndexOf("\\packs\\", StringComparison.OrdinalIgnoreCase) >= 0 &&
                 normalizedPath.IndexOf("\\ref\\", StringComparison.OrdinalIgnoreCase) >= 0);
@@ -1102,9 +1125,9 @@ internal static partial class SolutionProjectCommands
     private static JObject ProjectReferenceToJson(object reference)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var sourceProject = TryGetAutomationProperty(reference, "SourceProject") as Project;
-        var path = TryGetAutomationString(reference, "Path");
-        var origin = GetReferenceOrigin(sourceProject, path);
+        Project? sourceProject = TryGetAutomationProperty(reference, "SourceProject") as Project;
+        string? path = TryGetAutomationString(reference, "Path");
+        string origin = GetReferenceOrigin(sourceProject, path);
         return new JObject
         {
             ["name"] = TryGetAutomationString(reference, "Name"),
@@ -1135,8 +1158,8 @@ internal static partial class SolutionProjectCommands
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             EnsureSolutionOpen(context.Dte);
 
-            var startupProjects = GetStartupProjects(context.Dte);
-            var projects = EnumerateAllProjects(context.Dte)
+            IReadOnlyCollection<string> startupProjects = GetStartupProjects(context.Dte);
+            JObject[] projects = EnumerateAllProjects(context.Dte)
                 .Select(p => ProjectToJson(p, startupProjects))
                 .ToArray();
 
@@ -1155,21 +1178,21 @@ internal static partial class SolutionProjectCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var projectQuery = args.GetRequiredString("project");
-            var pathFilter = args.GetString("path");
-            var max = args.GetInt32("max", 500);
+            string projectQuery = args.GetRequiredString("project");
+            string? pathFilter = args.GetString("path");
+            int max = args.GetInt32("max", 500);
 
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             EnsureSolutionOpen(context.Dte);
 
-            var project = FindProject(context.Dte, projectQuery)
+            Project project = FindProject(context.Dte, projectQuery)
                 ?? throw CreateProjectNotFound(projectQuery);
 
-            var solutionDirectory = Path.GetDirectoryName(context.Dte.Solution.FullName) ?? string.Empty;
-            var items = new List<JObject>();
+            string solutionDirectory = Path.GetDirectoryName(context.Dte.Solution.FullName) ?? string.Empty;
+            List<JObject> items = new List<JObject>();
             foreach (var projectItem in EnumerateProjectItems(project.ProjectItems))
             {
-                var paths = GetProjectItemPaths(projectItem);
+                string[] paths = GetProjectItemPaths(projectItem);
                 if (!MatchesPathFilter(paths, pathFilter, solutionDirectory))
                 {
                     continue;
@@ -1204,17 +1227,17 @@ internal static partial class SolutionProjectCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var projectQuery = args.GetRequiredString("project");
-            var requestedNames = SplitRequestedNames(args.GetString("names"));
+            string projectQuery = args.GetRequiredString("project");
+            string[]? requestedNames = SplitRequestedNames(args.GetString("names"));
 
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             EnsureSolutionOpen(context.Dte);
 
-            var project = FindProject(context.Dte, projectQuery)
+            Project project = FindProject(context.Dte, projectQuery)
                 ?? throw CreateProjectNotFound(projectQuery);
 
-            var properties = new JObject();
-            var missing = new JArray();
+            JObject properties = new JObject();
+            JArray missing = new JArray();
             if (requestedNames.Length == 0)
             {
                 foreach (var (name, value) in EnumerateProjectProperties(project))
@@ -1226,7 +1249,7 @@ internal static partial class SolutionProjectCommands
             {
                 foreach (var name in requestedNames)
                 {
-                    var value = TryGetNormalizedPropertyValue(project, name);
+                    JToken? value = TryGetNormalizedPropertyValue(project, name);
                     if (value is null)
                     {
                         missing.Add(name);
@@ -1259,12 +1282,12 @@ internal static partial class SolutionProjectCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var projectQuery = args.GetRequiredString("project");
+            string projectQuery = args.GetRequiredString("project");
 
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             EnsureSolutionOpen(context.Dte);
 
-            var project = FindProject(context.Dte, projectQuery)
+            Project project = FindProject(context.Dte, projectQuery)
                 ?? throw CreateProjectNotFound(projectQuery);
 
             ConfigurationManager? configurationManager;
@@ -1297,7 +1320,7 @@ internal static partial class SolutionProjectCommands
                 Debug.WriteLine($"Unable to read active configuration for '{project.Name}': {ex.Message}");
             }
 
-            var configurations = EnumerateProjectConfigurations(configurationManager)
+            JObject[] configurations = EnumerateProjectConfigurations(configurationManager)
                 .Select(configuration => ProjectConfigurationToJson(configuration, activeConfiguration))
                 .OrderBy(configuration => configuration["name"]?.ToString(), StringComparer.OrdinalIgnoreCase)
                 .ToArray();
@@ -1324,25 +1347,25 @@ internal static partial class SolutionProjectCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var projectQuery = args.GetRequiredString("project");
-            var includeFramework = args.GetBoolean("include-framework", false);
-            var declaredOnly = args.GetBoolean("declared-only", false);
+            string projectQuery = args.GetRequiredString("project");
+            bool includeFramework = args.GetBoolean("include-framework", false);
+            bool declaredOnly = args.GetBoolean("declared-only", false);
 
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             EnsureSolutionOpen(context.Dte);
 
-            var project = FindProject(context.Dte, projectQuery)
+            Project project = FindProject(context.Dte, projectQuery)
                 ?? throw CreateProjectNotFound(projectQuery);
 
             JObject[] allReferences;
             if (declaredOnly)
             {
-                var solutionProjects = EnumerateAllProjects(context.Dte).ToArray();
+                Project[] solutionProjects = EnumerateAllProjects(context.Dte).ToArray();
                 allReferences = EnumerateDeclaredProjectReferences(project, solutionProjects);
             }
             else
             {
-                var referencesObject = TryGetAutomationProperty(project.Object, "References")
+                object? referencesObject = TryGetAutomationProperty(project.Object, "References")
                     ?? throw new CommandErrorException(
                         UnsupportedProjectTypeCode,
                         $"Project '{project.Name}' does not expose automation references.");
@@ -1355,11 +1378,11 @@ internal static partial class SolutionProjectCommands
                 ];
             }
 
-            var references = includeFramework
+            JObject[] references = includeFramework
                 ? allReferences
                 : [.. allReferences.Where(reference => !IsFrameworkReference(reference))];
 
-            var omittedFrameworkCount = allReferences.Length - references.Length;
+            int omittedFrameworkCount = allReferences.Length - references.Length;
 
             return new CommandExecutionResult(
                 $"Found {references.Length} {(declaredOnly ? "declared " : string.Empty)}reference(s) for '{project.Name}'.",
@@ -1386,32 +1409,32 @@ internal static partial class SolutionProjectCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var projectQuery = args.GetRequiredString("project");
-            var requestedConfiguration = NormalizeXmlValue(args.GetString("configuration"));
-            var requestedPlatform = NormalizeXmlValue(args.GetString("platform"));
-            var requestedTargetFramework = NormalizeXmlValue(args.GetString("target-framework"));
+            string projectQuery = args.GetRequiredString("project");
+            string? requestedConfiguration = NormalizeXmlValue(args.GetString("configuration"));
+            string? requestedPlatform = NormalizeXmlValue(args.GetString("platform"));
+            string? requestedTargetFramework = NormalizeXmlValue(args.GetString("target-framework"));
 
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             EnsureSolutionOpen(context.Dte);
 
-            var project = FindProject(context.Dte, projectQuery)
+            Project project = FindProject(context.Dte, projectQuery)
                 ?? throw CreateProjectNotFound(projectQuery);
 
-            var activeConfiguration = TryGetActiveProjectConfiguration(project);
-            var configurationName = requestedConfiguration
+            Configuration? activeConfiguration = TryGetActiveProjectConfiguration(project);
+            string configurationName = requestedConfiguration
                 ?? NormalizeXmlValue(activeConfiguration?.ConfigurationName)
                 ?? NormalizeXmlValue(context.Dte.Solution?.SolutionBuild?.ActiveConfiguration?.Name?.Split('|').FirstOrDefault())
                 ?? "Debug";
-            var platformName = requestedPlatform
+            string platformName = requestedPlatform
                 ?? NormalizeXmlValue(activeConfiguration?.PlatformName)
                 ?? NormalizeXmlValue(context.Dte.Solution?.SolutionBuild?.ActiveConfiguration?.Name?.Split('|').Skip(1).FirstOrDefault())
                 ?? "Any CPU";
-            var targetFramework = requestedTargetFramework
+            string? targetFramework = requestedTargetFramework
                 ?? GetPrimaryValue(GetNormalizedProjectPropertyString(project, "TargetFramework"));
-            var assemblyName = GetNormalizedProjectPropertyString(project, "AssemblyName")
+            string assemblyName = GetNormalizedProjectPropertyString(project, "AssemblyName")
                 ?? project.Name;
-            var outputType = GetNormalizedOutputType(project);
-            var output = ProjectOutputToJson(project, configurationName, platformName, targetFramework, assemblyName, outputType);
+            string outputType = GetNormalizedOutputType(project);
+            JObject output = ProjectOutputToJson(project, configurationName, platformName, targetFramework, assemblyName, outputType);
 
             return new CommandExecutionResult(
                 $"Resolved project outputs for '{project.Name}'.",
@@ -1428,16 +1451,16 @@ internal static partial class SolutionProjectCommands
 
         protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var rootPath = args.GetString("path") ?? GetDefaultSearchRoot();
-            var query = args.GetString("query");
-            var maxDepth = args.GetInt32("max-depth", 6);
-            var maxResults = args.GetInt32("max", 200);
+            string rootPath = args.GetString("path") ?? GetDefaultSearchRoot();
+            string? query = args.GetString("query");
+            int maxDepth = args.GetInt32("max-depth", 6);
+            int maxResults = args.GetInt32("max", 200);
 
             if (!Directory.Exists(rootPath))
                 throw new CommandErrorException("path_not_found", $"Search root not found: {rootPath}");
 
-            var matches = FindSolutions(rootPath, query, maxDepth, maxResults);
-            var results = matches
+            List<string> matches = FindSolutions(rootPath, query, maxDepth, maxResults);
+            JObject[] results = matches
                 .Select(f => new JObject
                 {
                     ["name"] = Path.GetFileNameWithoutExtension(f),
@@ -1455,14 +1478,14 @@ internal static partial class SolutionProjectCommands
 
         private static string GetDefaultSearchRoot()
         {
-            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            var reposPath = Path.Combine(userProfile, "source", "repos");
+            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string reposPath = Path.Combine(userProfile, "source", "repos");
             return Directory.Exists(reposPath) ? reposPath : userProfile;
         }
 
         private static List<string> FindSolutions(string root, string? query, int maxDepth, int maxResults)
         {
-            var results = new List<string>();
+            List<string> results = new();
             SearchDirectory(root, query, maxDepth, 0, results, maxResults);
             results.Sort((a, b) => File.GetLastWriteTime(b).CompareTo(File.GetLastWriteTime(a)));
             return results;
@@ -1473,16 +1496,16 @@ internal static partial class SolutionProjectCommands
             if (depth > maxDepth || results.Count >= maxResults) return;
             try
             {
-                foreach (var file in Directory.EnumerateFiles(dir, "*.sln").Concat(Directory.EnumerateFiles(dir, "*.slnx")))
+                foreach (string file in Directory.EnumerateFiles(dir, "*.sln").Concat(Directory.EnumerateFiles(dir, "*.slnx")))
                 {
                     if (results.Count >= maxResults) break;
                     if (query is null || Path.GetFileNameWithoutExtension(file).IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0)
                         results.Add(file);
                 }
-                foreach (var subDir in Directory.EnumerateDirectories(dir))
+                foreach (string subDir in Directory.EnumerateDirectories(dir))
                 {
                     if (results.Count >= maxResults) break;
-                    var name = Path.GetFileName(subDir);
+                    string name = Path.GetFileName(subDir);
                     if (name.StartsWith(".") || name.Equals("node_modules", StringComparison.OrdinalIgnoreCase)
                         || name.Equals("bin", StringComparison.OrdinalIgnoreCase)
                         || name.Equals("obj", StringComparison.OrdinalIgnoreCase))

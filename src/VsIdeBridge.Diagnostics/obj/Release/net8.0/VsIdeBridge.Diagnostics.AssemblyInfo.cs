@@ -15,7 +15,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyCopyrightAttribute("Copyright © RenegadeRiff86")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("2.2.6.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("2.2.6+7007e246276a0a1cb5ab70fb9a6cbb8e5d14aaab")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("2.2.6+ac79a51d357ade3695974ef54c888f97a68ecc76")]
 [assembly: System.Reflection.AssemblyProductAttribute("VsIdeBridge.Diagnostics")]
 [assembly: System.Reflection.AssemblyTitleAttribute("VsIdeBridge.Diagnostics")]
 [assembly: System.Reflection.AssemblyVersionAttribute("2.2.6.0")]

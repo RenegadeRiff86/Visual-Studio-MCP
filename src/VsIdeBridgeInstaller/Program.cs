@@ -78,6 +78,8 @@ internal static class Program
             ?? Path.Combine(repoRoot, "src", "VsIdeBridgeService", "bin", configuration, "cli", "net8.0");
         var serviceSource = GetPathOption(options, "service-source")
             ?? Path.Combine(repoRoot, "src", "VsIdeBridgeService", "bin", configuration, "net8.0-windows");
+        var launcherSource = GetPathOption(options, "launcher-source")
+            ?? Path.Combine(repoRoot, "src", "VsIdeBridgeLauncher", "bin", configuration);
         var vsixPath = GetPathOption(options, "vsix-path")
             ?? Path.Combine(repoRoot, "src", "VsIdeBridge", "bin", configuration, "net472", "VsIdeBridge.vsix");
 
@@ -102,12 +104,24 @@ internal static class Program
                 return Fail($"Service source directory not found: {serviceSource}");
             }
 
+            if (!Directory.Exists(launcherSource))
+            {
+                return Fail($"Launcher source directory not found: {launcherSource}");
+            }
+
             var serviceDest = Path.Combine(installDir, "service");
             CopyDirectory(serviceSource, serviceDest);
+            CopyDirectory(launcherSource, serviceDest);
             var installedServiceExe = Path.Combine(serviceDest, "VsIdeBridgeService.exe");
+            var installedLauncherExe = Path.Combine(serviceDest, "VsIdeBridgeLauncher.exe");
             if (!File.Exists(installedServiceExe))
             {
                 return Fail($"Service executable not found after copy: {installedServiceExe}");
+            }
+
+            if (!File.Exists(installedLauncherExe))
+            {
+                return Fail($"Launcher executable not found after copy: {installedLauncherExe}");
             }
 
             InstallOrUpdateService(serviceName, installedServiceExe, idleSoftSeconds, idleHardSeconds);

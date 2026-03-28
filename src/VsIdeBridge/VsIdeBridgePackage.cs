@@ -222,6 +222,23 @@ public sealed class VsIdeBridgePackage : AsyncPackage, IAsyncDisposable
         return true;
     }
 
+    private static string? GetBridgeStartupSolutionPath()
+    {
+        string flagFile = Path.Combine(
+            Path.GetTempPath(), "vs-ide-bridge",
+            $"bridge-opensolution-{System.Diagnostics.Process.GetCurrentProcess().Id}.flag");
+        if (!File.Exists(flagFile))
+            return null;
+        try
+        {
+            string solutionPath = File.ReadAllText(flagFile).Trim();
+            File.Delete(flagFile);
+            return string.IsNullOrWhiteSpace(solutionPath) ? null : solutionPath;
+        }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+    }
+
     private async Task InitializeDteAsync(IdeBridgeRuntime runtime)
     {
         try
@@ -231,14 +248,25 @@ public sealed class VsIdeBridgePackage : AsyncPackage, IAsyncDisposable
                 return;
 
             _dte = dte;
-            _pipeServer?.UpdateDiscovery(dte.Solution?.FullName ?? string.Empty);
+            Solution? solution = dte.Solution;
+            _pipeServer?.UpdateDiscovery(solution?.FullName ?? string.Empty);
             HookBestPracticeRefreshEvents(dte);
 
             _noSolutionRequested = IsBridgeNoSolutionRequested();
-            if (_noSolutionRequested && dte.Solution?.IsOpen == true)
-                dte.Solution.Close(SaveFirst: false);
+            if (_noSolutionRequested && solution?.IsOpen == true)
+                solution.Close(SaveFirst: false);
 
-            if (dte.Solution?.IsOpen != true)
+            string? startupSolutionPath = GetBridgeStartupSolutionPath();
+            if (!_noSolutionRequested &&
+                solution is { IsOpen: false } &&
+                startupSolutionPath is string startupSolutionToOpen &&
+                File.Exists(startupSolutionToOpen))
+            {
+                solution.Open(startupSolutionToOpen);
+                _pipeServer?.UpdateDiscovery(solution.FullName ?? startupSolutionToOpen);
+            }
+
+            if (solution?.IsOpen != true)
                 return;
 
             var context = new IdeCommandContext(this, dte, runtime.Logger, runtime, CancellationToken.None);

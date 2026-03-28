@@ -7,18 +7,18 @@ internal static class CommandArgumentParser
 {
     public static CommandArguments Parse(string? rawArguments)
     {
-        var tokens = Tokenize(rawArguments ?? string.Empty);
-        var values = new Dictionary<string, List<string>>(System.StringComparer.OrdinalIgnoreCase);
+        List<string> tokens = Tokenize(rawArguments ?? string.Empty);
+        Dictionary<string, List<string>> values = new(System.StringComparer.OrdinalIgnoreCase);
 
-        for (var i = 0; i < tokens.Count; i++)
+        for (int i = 0; i < tokens.Count; i++)
         {
-            var token = tokens[i];
+            string token = tokens[i];
             if (!token.StartsWith("--", System.StringComparison.Ordinal))
             {
                 throw new CommandErrorException("invalid_arguments", $"Unexpected token '{token}'. Arguments must use --name value form.");
             }
 
-            var name = token.Substring(2);
+            string name = token.Substring(2);
             if (string.IsNullOrWhiteSpace(name))
             {
                 throw new CommandErrorException("invalid_arguments", "Encountered an empty argument name.");
@@ -34,7 +34,7 @@ internal static class CommandArgumentParser
                 value = "true";
             }
 
-            if (!values.TryGetValue(name, out var list))
+            if (!values.TryGetValue(name, out List<string>? list))
             {
                 list = [];
                 values[name] = list;
@@ -48,13 +48,13 @@ internal static class CommandArgumentParser
 
     private static List<string> Tokenize(string text)
     {
-        var tokens = new List<string>();
-        var buffer = new StringBuilder();
-        var inQuotes = false;
+        List<string> tokens = [];
+        StringBuilder buffer = new();
+        bool inQuotes = false;
 
-        for (var i = 0; i < text.Length; i++)
+        for (int i = 0; i < text.Length; i++)
         {
-            var ch = text[i];
+            char ch = text[i];
             if (ch == '\\' && i + 1 < text.Length && (text[i + 1] == '"' || text[i + 1] == '\\'))
             {
                 buffer.Append(text[i + 1]);

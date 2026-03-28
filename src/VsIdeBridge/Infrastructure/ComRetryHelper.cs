@@ -15,7 +15,7 @@ internal static class ComRetryHelper
 
     public static async Task<T> ExecuteAsync<T>(Func<T> func, CancellationToken cancellationToken, int attempts = 20, int delayMilliseconds = 250)
     {
-        for (var attempt = 1; ; attempt++)
+        for (int attempt = 1; ; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 

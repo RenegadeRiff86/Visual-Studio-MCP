@@ -24,29 +24,29 @@ internal sealed partial class PatchService
             return ApplySearchBlockPatch(path, existingText, patch);
         }
 
-        var newline = DetectNewline(existingText);
-        var existingLines = SplitLines(existingText, out var hadFinalNewline);
-        var resultLines = new List<string>();
-        var sourceIndex = 0;
-        var firstChangedLine = 1;
-        var firstChangeCaptured = false;
-        var changedRanges = new List<ChangedRange>();
-        var deletedLineMarkers = new List<int>();
-        var matchedLineCount = 0;
-        var mutationLineCount = 0;
+        string newline = DetectNewline(existingText);
+        IReadOnlyList<string> existingLines = SplitLines(existingText, out bool hadFinalNewline);
+        List<string> resultLines = new List<string>();
+        int sourceIndex = 0;
+        int firstChangedLine = 1;
+        bool firstChangeCaptured = false;
+        List<ChangedRange> changedRanges = new List<ChangedRange>();
+        List<int> deletedLineMarkers = new List<int>();
+        int matchedLineCount = 0;
+        int mutationLineCount = 0;
 
-        foreach (var hunk in GetOrderedHunks(patch.Hunks))
+        foreach (Hunk hunk in GetOrderedHunks(patch.Hunks))
         {
-            var targetIndex = Math.Max(0, hunk.OriginalStart - 1);
+            int targetIndex = Math.Max(0, hunk.OriginalStart - 1);
             ValidateNoHunkOverlap(path, targetIndex, sourceIndex);
-            var firstCheckLine = hunk.Lines.FirstOrDefault(l => l.Kind == ' ' || l.Kind == '-');
+            HunkLine? firstCheckLine = hunk.Lines.FirstOrDefault(l => l.Kind == ' ' || l.Kind == '-');
             targetIndex = AdjustTargetIndexFuzzy(existingLines, targetIndex, sourceIndex, firstCheckLine);
             CopyLinesToTarget(existingLines, resultLines, ref sourceIndex, targetIndex);
 
             int? hunkStartLine = null;
-            var hunkAddedLineCount = 0;
+            int hunkAddedLineCount = 0;
 
-            foreach (var line in hunk.Lines)
+            foreach (HunkLine line in hunk.Lines)
             {
                 switch (line.Kind)
                 {
@@ -93,8 +93,8 @@ internal sealed partial class PatchService
         }
 
         CopyLinesToTarget(existingLines, resultLines, ref sourceIndex, existingLines.Count);
-        var deleteFile = patch.NewPath == DevNullPath;
-        var content = JoinLines(resultLines, newline, !deleteFile && (hadFinalNewline || patch.OldPath == DevNullPath));
+        bool deleteFile = patch.NewPath == DevNullPath;
+        string content = JoinLines(resultLines, newline, !deleteFile && (hadFinalNewline || patch.OldPath == DevNullPath));
         return new ApplyFilePatchResult
         {
             Content = content,
@@ -109,26 +109,26 @@ internal sealed partial class PatchService
 
     private static ApplyFilePatchResult ApplySearchBlockPatch(string path, string existingText, FilePatch patch)
     {
-        var newline = DetectNewline(existingText);
-        var existingLines = SplitLines(existingText, out var hadFinalNewline);
-        var resultLines = new List<string>();
-        var sourceIndex = 0;
-        var firstChangedLine = 1;
-        var firstChangeCaptured = false;
-        var changedRanges = new List<ChangedRange>();
-        var deletedLineMarkers = new List<int>();
-        var matchedLineCount = 0;
-        var mutationLineCount = 0;
+        string newline = DetectNewline(existingText);
+        IReadOnlyList<string> existingLines = SplitLines(existingText, out bool hadFinalNewline);
+        List<string> resultLines = new List<string>();
+        int sourceIndex = 0;
+        int firstChangedLine = 1;
+        bool firstChangeCaptured = false;
+        List<ChangedRange> changedRanges = new List<ChangedRange>();
+        List<int> deletedLineMarkers = new List<int>();
+        int matchedLineCount = 0;
+        int mutationLineCount = 0;
 
-        foreach (var block in patch.SearchBlocks)
+        foreach (SearchBlock block in patch.SearchBlocks)
         {
-            var targetIndex = FindSearchBlockStart(path, existingLines, sourceIndex, block);
+            int targetIndex = FindSearchBlockStart(path, existingLines, sourceIndex, block);
             CopyLinesToTarget(existingLines, resultLines, ref sourceIndex, targetIndex);
 
             int? blockStartLine = null;
-            var blockAddedLineCount = 0;
+            int blockAddedLineCount = 0;
 
-            foreach (var line in block.Lines)
+            foreach (HunkLine line in block.Lines)
             {
                 switch (line.Kind)
                 {
@@ -173,8 +173,8 @@ internal sealed partial class PatchService
         }
 
         CopyLinesToTarget(existingLines, resultLines, ref sourceIndex, existingLines.Count);
-        var deleteFile = patch.NewPath == DevNullPath;
-        var content = JoinLines(resultLines, newline, !deleteFile && (hadFinalNewline || patch.OldPath == DevNullPath));
+        bool deleteFile = patch.NewPath == DevNullPath;
+        string content = JoinLines(resultLines, newline, !deleteFile && (hadFinalNewline || patch.OldPath == DevNullPath));
         return new ApplyFilePatchResult
         {
             Content = content,
@@ -249,7 +249,7 @@ internal sealed partial class PatchService
 
     private static int FindSearchBlockStart(string path, IReadOnlyList<string> existingLines, int sourceIndex, SearchBlock block)
     {
-        var matchLines = block.Lines
+        string[] matchLines = block.Lines
             .Where(line => line.Kind != '+')
             .Select(line => line.Text)
             .ToArray();
@@ -262,13 +262,13 @@ internal sealed partial class PatchService
             return existingLines.Count;
         }
 
-        var maxStart = existingLines.Count - matchLines.Length;
+        int maxStart = existingLines.Count - matchLines.Length;
 
         // Pass 1: exact match.
-        for (var candidate = Math.Max(0, sourceIndex); candidate <= maxStart; candidate++)
+        for (int candidate = Math.Max(0, sourceIndex); candidate <= maxStart; candidate++)
         {
-            var matches = true;
-            for (var offset = 0; offset < matchLines.Length; offset++)
+            bool matches = true;
+            for (int offset = 0; offset < matchLines.Length; offset++)
             {
                 if (!string.Equals(existingLines[candidate + offset], matchLines[offset], StringComparison.Ordinal))
                 {
@@ -284,10 +284,10 @@ internal sealed partial class PatchService
         }
 
         // Second pass: fuzzy match to handle LLM escape artifacts.
-        for (var candidate = Math.Max(0, sourceIndex); candidate <= maxStart; candidate++)
+        for (int candidate = Math.Max(0, sourceIndex); candidate <= maxStart; candidate++)
         {
-            var matches = true;
-            for (var offset = 0; offset < matchLines.Length; offset++)
+            bool matches = true;
+            for (int offset = 0; offset < matchLines.Length; offset++)
             {
                 if (!LinesMatchFuzzy(existingLines[candidate + offset], matchLines[offset]))
                 {
@@ -311,7 +311,7 @@ internal sealed partial class PatchService
             int anchorIdx = FindAnchorLineIndex(matchLines);
             int bestScore = 0;
             int bestCandidate = -1;
-            for (var candidate = Math.Max(0, sourceIndex); candidate <= maxStart; candidate++)
+            for (int candidate = Math.Max(0, sourceIndex); candidate <= maxStart; candidate++)
             {
                 if (!LinesMatchFuzzy(existingLines[candidate + anchorIdx], matchLines[anchorIdx]))
                     continue;
@@ -326,10 +326,10 @@ internal sealed partial class PatchService
                 return bestCandidate;
         }
 
-        var descriptor = string.IsNullOrWhiteSpace(block.Header)
+        string descriptor = string.IsNullOrWhiteSpace(block.Header)
             ? "editor patch block"
             : $"editor patch block '{block.Header}'";
-        var firstMatchLine = matchLines.Length > 0 ? Truncate(matchLines[0], 60) : "(empty)";
+        string firstMatchLine = matchLines.Length > 0 ? Truncate(matchLines[0], 60) : "(empty)";
         throw new CommandErrorException(
             InvalidArgumentsCode,
             $"Could not locate {descriptor} in {path} (searched from line {sourceIndex + 1}). " +
@@ -357,8 +357,8 @@ internal sealed partial class PatchService
         }
 
         // Pass 2: normalize backslash escapes and trim trailing whitespace.
-        var normalActual = NormalizeLine(actual);
-        var normalExpected = NormalizeLine(expected);
+        string normalActual = NormalizeLine(actual);
+        string normalExpected = NormalizeLine(expected);
         if (string.Equals(normalActual, normalExpected, StringComparison.Ordinal))
         {
             return true;
@@ -431,12 +431,12 @@ internal sealed partial class PatchService
         }
 
         // Strip one level of backslash-escaping (\\\" -> \", \\\\\\\\ -> \\\\, \\\\n -> \\n, etc.)
-        var sb = new System.Text.StringBuilder(line.Length);
-        for (var i = 0; i < line.Length; i++)
+        System.Text.StringBuilder sb = new System.Text.StringBuilder(line.Length);
+        for (int i = 0; i < line.Length; i++)
         {
             if (line[i] == '\\' && i + 1 < line.Length)
             {
-                var next = line[i + 1];
+                char next = line[i + 1];
                 if (next == '"' || next == '\\' || next == 'n' || next == 'r' || next == 't')
                 {
                     sb.Append(next);
@@ -465,9 +465,9 @@ internal sealed partial class PatchService
         if (!LinesMatchFuzzy(existingLines[index], expected))
         {
             const int ContextRadius = 3;
-            var start = Math.Max(0, index - ContextRadius);
-            var end = Math.Min(existingLines.Count - 1, index + ContextRadius);
-            var context = string.Join("\n", Enumerable.Range(start, end - start + 1)
+            int start = Math.Max(0, index - ContextRadius);
+            int end = Math.Min(existingLines.Count - 1, index + ContextRadius);
+            string context = string.Join("\n", Enumerable.Range(start, end - start + 1)
                 .Select(i => $"  {i + 1,4}: {(i == index ? ">>>" : "   ")} {existingLines[i]}"));
 
             throw new CommandErrorException(

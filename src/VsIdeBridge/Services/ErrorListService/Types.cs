@@ -57,19 +57,19 @@ internal sealed partial class ErrorListService
 
         public IReadOnlyList<JObject> GetRows()
         {
-            var rows = new List<JObject>();
+            List<JObject> rows = new List<JObject>();
 
-            foreach (var entry in _entries)
+            foreach (ITableEntry entry in _entries)
             {
                 rows.Add(CreateRowFromTableEntry(entry));
             }
 
-            foreach (var snapshot in _snapshots)
+            foreach (ITableEntriesSnapshot snapshot in _snapshots)
             {
                 AddSnapshotRows(rows, snapshot);
             }
 
-            foreach (var factory in _factories)
+            foreach (ITableEntriesSnapshotFactory factory in _factories)
             {
                 AddSnapshotRows(rows, factory.GetCurrentSnapshot());
             }
@@ -91,7 +91,7 @@ internal sealed partial class ErrorListService
 
         public void RemoveEntries(IReadOnlyList<ITableEntry> oldEntries)
         {
-            foreach (var entry in oldEntries)
+            foreach (ITableEntry entry in oldEntries)
             {
                 _entries.Remove(entry);
             }
@@ -170,7 +170,7 @@ internal sealed partial class ErrorListService
 
         private static void AddSnapshotRows(List<JObject> rows, ITableEntriesSnapshot snapshot)
         {
-            for (var index = 0; index < snapshot.Count; index++)
+            for (int index = 0; index < snapshot.Count; index++)
             {
                 rows.Add(CreateRowFromTableSnapshot(snapshot, index));
             }
@@ -244,7 +244,7 @@ internal sealed partial class ErrorListService
 
         public void UpdateRows(IReadOnlyList<JObject> rows)
         {
-            var entries = rows.Select(BestPracticeTableEntry.FromRow).ToArray();
+            BestPracticeTableEntry[] entries = rows.Select(BestPracticeTableEntry.FromRow).ToArray();
             _current = new BestPracticeTableEntriesSnapshot(entries, _current.VersionNumber + 1);
         }
 
@@ -271,7 +271,7 @@ internal sealed partial class ErrorListService
                 return -1;
             }
 
-            return typedSnapshot._entryIndexes.TryGetValue(_entries[currentIndex].StableKey, out var newIndex)
+            return typedSnapshot._entryIndexes.TryGetValue(_entries[currentIndex].StableKey, out int newIndex)
                 ? newIndex
                 : -1;
         }
@@ -292,7 +292,7 @@ internal sealed partial class ErrorListService
                 return false;
             }
 
-            var entry = _entries[index];
+            BestPracticeTableEntry entry = _entries[index];
             switch (keyName)
             {
                 case StandardTableKeyNames.ErrorSeverity:
@@ -332,6 +332,18 @@ internal sealed partial class ErrorListService
                 case StandardTableKeyNames.HelpLink:
                     content = entry.HelpUri;
                     return true;
+                case GuidanceKey:
+                    content = entry.Guidance;
+                    return true;
+                case SuggestedActionKey:
+                    content = entry.SuggestedAction;
+                    return true;
+                case LlmFixPromptKey:
+                    content = entry.LlmFixPrompt;
+                    return true;
+                case AuthorityKey:
+                    content = entry.Authority;
+                    return true;
                 case StandardTableKeyNames.FullText:
                     content = string.IsNullOrWhiteSpace(entry.Code) ? entry.Message : $"{entry.Code}: {entry.Message}";
                     return true;
@@ -346,7 +358,7 @@ internal sealed partial class ErrorListService
         }
     }
 
-    private sealed class BestPracticeTableEntry(string severity, string code, string message, string file, int line, int column, string project, string tool, string helpUri)
+    private sealed class BestPracticeTableEntry(string severity, string code, string message, string file, int line, int column, string project, string tool, string helpUri, string guidance, string suggestedAction, string llmFixPrompt, string authority)
     {
         public string Severity { get; } = severity;
 
@@ -366,6 +378,14 @@ internal sealed partial class ErrorListService
 
         public string HelpUri { get; } = helpUri;
 
+        public string Guidance { get; } = guidance;
+
+        public string SuggestedAction { get; } = suggestedAction;
+
+        public string LlmFixPrompt { get; } = llmFixPrompt;
+
+        public string Authority { get; } = authority;
+
         public string StableKey => string.Join("|", Severity, Code, File, Line.ToString(CultureInfo.InvariantCulture), Column.ToString(CultureInfo.InvariantCulture), Message);
 
         public static BestPracticeTableEntry FromRow(JObject row)
@@ -379,7 +399,11 @@ internal sealed partial class ErrorListService
                 Math.Max(1, GetNullableRowInt(row, ColumnKey) ?? 1),
                 GetRowString(row, ProjectKey),
                 string.IsNullOrEmpty(GetRowString(row, ToolKey)) ? BestPracticeCategory : GetRowString(row, ToolKey),
-                GetRowString(row, HelpUriKey));
+                GetRowString(row, HelpUriKey),
+                GetRowString(row, GuidanceKey),
+                GetRowString(row, SuggestedActionKey),
+                GetRowString(row, LlmFixPromptKey),
+                GetRowString(row, AuthorityKey));
         }
     }
 }

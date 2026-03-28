@@ -34,12 +34,22 @@ internal sealed partial class DocumentService
         int clampedEnd = Math.Max(clampedStart, endLine);
         int actualStart = Math.Min(clampedStart, Math.Max(1, lines.Count));
         int actualEnd = Math.Min(clampedEnd, Math.Max(1, lines.Count));
+        bool revealedInEditor = false;
+        string? revealNote = null;
 
         if (revealInEditor)
         {
             int requestedRevealLine = Math.Max(1, revealLine ?? actualStart);
             int actualRevealLine = Math.Min(requestedRevealLine, Math.Max(1, lines.Count));
-            _ = await OpenDocumentAsync(dte, resolvedPath, actualRevealLine, 1, allowDiskFallback: false).ConfigureAwait(true);
+            try
+            {
+                _ = await OpenDocumentAsync(dte, resolvedPath, actualRevealLine, 1, allowDiskFallback: false).ConfigureAwait(true);
+                revealedInEditor = true;
+            }
+            catch (NotImplementedException ex) when (IsProjectSystemDocumentOpenFailure(ex, resolvedPath))
+            {
+                revealNote = "Reveal skipped because Visual Studio treats the file as a project-system artifact instead of an editor document.";
+            }
         }
 
         (string sliceText, JArray sliceLines) = BuildDocumentSliceContent(lines, actualStart, actualEnd, includeLineNumbers);
@@ -52,9 +62,20 @@ internal sealed partial class DocumentService
             ["actualStartLine"] = actualStart,
             ["actualEndLine"] = actualEnd,
             ["lineCount"] = lines.Count,
+            ["revealedInEditor"] = revealedInEditor,
+            ["revealNote"] = revealNote,
             ["text"] = sliceText,
             ["lines"] = sliceLines,
         };
+    }
+
+    private static bool IsProjectSystemDocumentOpenFailure(NotImplementedException exception, string path)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        string message = exception.Message ?? string.Empty;
+        return message.IndexOf("already open as a project or a solution", StringComparison.OrdinalIgnoreCase) >= 0
+            || message.IndexOf(path, StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     public async Task<JObject> GoToDefinitionAsync(
@@ -182,7 +203,31 @@ internal sealed partial class DocumentService
                     .ConfigureAwait(true);
                 results.Add(slice);
             }
-            catch (Exception ex)
+            catch (CommandErrorException ex)
+            {
+                results.Add(new JObject
+                {
+                    [ResolvedPathProperty] = file ?? string.Empty,
+                    ["error"] = ex.Message,
+                });
+            }
+            catch (IOException ex)
+            {
+                results.Add(new JObject
+                {
+                    [ResolvedPathProperty] = file ?? string.Empty,
+                    ["error"] = ex.Message,
+                });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                results.Add(new JObject
+                {
+                    [ResolvedPathProperty] = file ?? string.Empty,
+                    ["error"] = ex.Message,
+                });
+            }
+            catch (InvalidOperationException ex)
             {
                 results.Add(new JObject
                 {
@@ -261,7 +306,15 @@ internal sealed partial class DocumentService
         {
             await PositionTextSelectionAsync(dte, filePath, null, line, column, selectWord: false).ConfigureAwait(true);
         }
-        catch (Exception ex)
+        catch (CommandErrorException ex)
+        {
+            System.Diagnostics.Debug.WriteLine(ex);
+        }
+        catch (COMException ex)
+        {
+            System.Diagnostics.Debug.WriteLine(ex);
+        }
+        catch (InvalidOperationException ex)
         {
             System.Diagnostics.Debug.WriteLine(ex);
         }
@@ -309,6 +362,8 @@ internal sealed partial class DocumentService
     // cmdidGotoDefn             = 935   (from stdidcmd.h)
     private static async Task PostGoToDefinitionCommandAsync()
     {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
         try
         {
             Guid goToDefnGuid = new Guid("{5efc7975-14bc-11cf-9b2b-00aa00573819}");

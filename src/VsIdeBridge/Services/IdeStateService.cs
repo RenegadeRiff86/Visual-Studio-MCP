@@ -19,10 +19,10 @@ internal sealed class IdeStateService(BridgeInstanceService bridgeInstanceServic
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        var solutionPath = dte.Solution?.IsOpen == true ? PathNormalization.NormalizeFilePath(dte.Solution.FullName) : string.Empty;
-        var activeDocument = dte.ActiveDocument;
-        var activeDocumentPath = activeDocument?.FullName;
-        var ideState = new JObject
+        string solutionPath = dte.Solution?.IsOpen == true ? PathNormalization.NormalizeFilePath(dte.Solution.FullName) : string.Empty;
+        Document? activeDocument = dte.ActiveDocument;
+        string? activeDocumentPath = activeDocument?.FullName;
+        JObject ideState = new JObject
         {
             ["solutionPath"] = solutionPath,
             ["solutionName"] = dte.Solution?.IsOpen == true ? Path.GetFileName(dte.Solution.FullName) : string.Empty,
@@ -46,7 +46,7 @@ internal sealed class IdeStateService(BridgeInstanceService bridgeInstanceServic
     private static void ApplyTextSelectionInfo(JObject ideState, Document? activeDocument)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        if (!TryGetActiveTextSelection(activeDocument, out var selection))
+        if (!TryGetActiveTextSelection(activeDocument, out TextSelection selection))
             return;
         ideState["caretLine"] = selection.ActivePoint.Line;
         ideState["caretColumn"] = selection.ActivePoint.DisplayColumn;
@@ -59,7 +59,7 @@ internal sealed class IdeStateService(BridgeInstanceService bridgeInstanceServic
     private static void ApplyActiveConfiguration(JObject ideState, DTE2 dte)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var activeConfig = dte.Solution?.SolutionBuild?.ActiveConfiguration;
+        SolutionConfiguration? activeConfig = dte.Solution?.SolutionBuild?.ActiveConfiguration;
         if (activeConfig is null)
             return;
         ideState["activeConfiguration"] = activeConfig.Name ?? string.Empty;
@@ -70,10 +70,10 @@ internal sealed class IdeStateService(BridgeInstanceService bridgeInstanceServic
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var items = new JArray();
+        JArray items = new JArray();
         foreach (Document document in dte.Documents)
         {
-            var fullName = document.FullName;
+            string fullName = document.FullName;
             if (!string.IsNullOrWhiteSpace(fullName))
                 items.Add(PathNormalization.NormalizeFilePath(fullName));
         }
@@ -99,7 +99,7 @@ internal sealed class IdeStateService(BridgeInstanceService bridgeInstanceServic
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var startupProjects = dte.Solution?.SolutionBuild?.StartupProjects;
+        object? startupProjects = dte.Solution?.SolutionBuild?.StartupProjects;
         return startupProjects switch
         {
             string s when !string.IsNullOrWhiteSpace(s) => new JArray(s),

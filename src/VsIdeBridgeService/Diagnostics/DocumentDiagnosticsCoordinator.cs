@@ -4,6 +4,9 @@ namespace VsIdeBridgeService.Diagnostics;
 
 internal sealed class DocumentDiagnosticsCoordinator
 {
+    private static readonly TimeSpan RefreshDebounceInterval = TimeSpan.FromSeconds(2);
+    private const string DefaultWarningCacheMax = "50";
+
     private readonly BridgeConnection _bridge;
     private readonly object _gate = new();
 
@@ -20,13 +23,40 @@ internal sealed class DocumentDiagnosticsCoordinator
 
     public DocumentDiagnosticsCoordinator(BridgeConnection bridge) => _bridge = bridge;
 
-    public JsonObject QueueRefreshAndGetSnapshot(string reason)
+    public JsonObject QueueRefreshAndGetSnapshot(string reason, bool clearCached = false)
     {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
         lock (_gate)
         {
+            if (clearCached)
+            {
+                _lastErrors = null;
+                _lastWarnings = null;
+                _lastError = null;
+                _status = "idle";
+            }
+
+            if (_refreshTask is not null && !_refreshTask.IsCompleted)
+            {
+                if (clearCached)
+                {
+                    _refreshRequested = true;
+                    _reason = reason;
+                    _lastQueuedUtc = now;
+                }
+
+                return CreateSnapshotLocked().ToJson();
+            }
+
+            if (!clearCached && _lastCompletedUtc is not null && now - _lastCompletedUtc < RefreshDebounceInterval)
+            {
+                return CreateSnapshotLocked().ToJson();
+            }
+
             _refreshRequested = true;
             _reason = reason;
-            _lastQueuedUtc = DateTimeOffset.UtcNow;
+            _lastQueuedUtc = now;
 
             if (_refreshTask is null || _refreshTask.IsCompleted)
             {
@@ -42,7 +72,7 @@ internal sealed class DocumentDiagnosticsCoordinator
     {
         lock (_gate)
         {
-            if (!CanServeCachedDiagnostics(args) || _lastErrors is null)
+            if (!CanServeCachedDiagnostics(args) || _lastErrors is null || !HasUsableCachedDiagnosticsLocked())
             {
                 response = [];
                 return false;
@@ -57,7 +87,7 @@ internal sealed class DocumentDiagnosticsCoordinator
     {
         lock (_gate)
         {
-            if (!CanServeCachedDiagnostics(args) || _lastWarnings is null)
+            if (!CanServeCachedDiagnostics(args) || _lastWarnings is null || !HasUsableCachedDiagnosticsLocked())
             {
                 response = [];
                 return false;
@@ -96,7 +126,7 @@ internal sealed class DocumentDiagnosticsCoordinator
                 JsonObject warnings = await _bridge.SendAsync(
                     null,
                     "warnings",
-                    "--quick true --wait-for-intellisense false")
+                    $"--quick true --wait-for-intellisense false --max {DefaultWarningCacheMax}")
                     .ConfigureAwait(false);
 
                 lock (_gate)
@@ -134,6 +164,12 @@ internal sealed class DocumentDiagnosticsCoordinator
             && args["path"] is null
             && args["text"] is null
             && args["group_by"] is null;
+    }
+
+    private bool HasUsableCachedDiagnosticsLocked()
+    {
+        return string.Equals(_status, "completed", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(_reason, "startup", StringComparison.OrdinalIgnoreCase);
     }
 
     private DocumentDiagnosticsSnapshot CreateSnapshotLocked()

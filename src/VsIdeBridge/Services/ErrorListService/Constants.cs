@@ -1,4 +1,5 @@
 ﻿using Microsoft.VisualStudio.Shell.TableManager;
+using static VsIdeBridge.Diagnostics.ErrorListConstants;
 
 namespace VsIdeBridge.Services;
 
@@ -20,5 +21,9 @@ internal sealed partial class ErrorListService
         StandardTableKeyNames.HelpKeyword,
         StandardTableKeyNames.HelpLink,
         StandardTableKeyNames.FullText,
+        GuidanceKey,
+        SuggestedActionKey,
+        LlmFixPromptKey,
+        AuthorityKey,
     ];
 }

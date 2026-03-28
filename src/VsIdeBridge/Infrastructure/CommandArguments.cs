@@ -12,7 +12,7 @@ internal sealed class CommandArguments(Dictionary<string, List<string>> values)
 
     public string? GetString(string name, string? defaultValue = null)
     {
-        return _values.TryGetValue(name, out var values) && values.Count > 0
+        return _values.TryGetValue(name, out List<string>? values) && values.Count > 0
             ? values[values.Count - 1]
             : defaultValue;
     }
@@ -24,7 +24,7 @@ internal sealed class CommandArguments(Dictionary<string, List<string>> values)
 
     public string GetRequiredString(string name)
     {
-        var value = GetString(name);
+        string? value = GetString(name);
         if (string.IsNullOrWhiteSpace(value))
         {
             throw new CommandErrorException(InvalidArgumentsCode, $"Missing required argument --{name}.");
@@ -35,13 +35,13 @@ internal sealed class CommandArguments(Dictionary<string, List<string>> values)
 
     public int GetInt32(string name, int defaultValue)
     {
-        var raw = GetString(name);
+        string? raw = GetString(name);
         if (string.IsNullOrWhiteSpace(raw))
         {
             return defaultValue;
         }
 
-        if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+        if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value))
         {
             throw new CommandErrorException(InvalidArgumentsCode, $"Argument --{name} must be an integer.");
         }
@@ -51,13 +51,13 @@ internal sealed class CommandArguments(Dictionary<string, List<string>> values)
 
     public int? GetNullableInt32(string name)
     {
-        var raw = GetString(name);
+        string? raw = GetString(name);
         if (string.IsNullOrWhiteSpace(raw))
         {
             return null;
         }
 
-        if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+        if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value))
         {
             throw new CommandErrorException(InvalidArgumentsCode, $"Argument --{name} must be an integer.");
         }
@@ -67,13 +67,13 @@ internal sealed class CommandArguments(Dictionary<string, List<string>> values)
 
     public bool GetBoolean(string name, bool defaultValue)
     {
-        var raw = GetString(name);
+        string? raw = GetString(name);
         if (string.IsNullOrWhiteSpace(raw))
         {
             return defaultValue;
         }
 
-        if (bool.TryParse(raw, out var value))
+        if (bool.TryParse(raw, out bool value))
         {
             return value;
         }
@@ -83,7 +83,7 @@ internal sealed class CommandArguments(Dictionary<string, List<string>> values)
 
     public string GetEnum(string name, string defaultValue, params string[] allowedValues)
     {
-        var value = GetString(name, defaultValue) ?? defaultValue;
+        string value = GetString(name, defaultValue) ?? defaultValue;
         if (!allowedValues.Contains(value, StringComparer.OrdinalIgnoreCase))
         {
             throw new CommandErrorException(InvalidArgumentsCode, $"Argument --{name} must be one of: {string.Join(", ", allowedValues)}.");

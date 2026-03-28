@@ -6,6 +6,12 @@ namespace VsIdeBridgeService;
 internal static partial class ToolCatalog
 {
     private static IEnumerable<ToolEntry> ProjectTools()
+        =>
+        ProjectQueryTools()
+            .Concat(ProjectManagementTools())
+            .Concat(ProjectPythonTools());
+
+    private static IEnumerable<ToolEntry> ProjectQueryTools()
     {
         yield return BridgeTool("list_projects",
             "List all projects in the open solution. Call before using build with project= to discover exact project names.",
@@ -68,7 +74,10 @@ internal static partial class ToolCatalog
                 (Configuration, OptionalString(a, Configuration)),
                 ("target-framework", OptionalString(a, "target_framework"))),
             Project);
+    }
 
+    private static IEnumerable<ToolEntry> ProjectManagementTools()
+    {
         yield return BridgeTool("add_project",
             "Add an existing or new project to the solution.",
             ObjectSchema(
@@ -85,6 +94,17 @@ internal static partial class ToolCatalog
             ObjectSchema(Req(Project, "Project name or path to remove.")),
             "remove-project",
             a => Build((Project, OptionalString(a, Project))),
+            Project);
+
+        yield return BridgeTool("rename_project",
+            "Rename a project within the solution. This updates the project name shown by Visual Studio, but does not rename folders or the project file on disk.",
+            ObjectSchema(
+                Req(Project, "Project name or path to rename."),
+                Req("new_name", "New project name to show in the solution.")),
+            "rename-project",
+            a => Build(
+                (Project, OptionalString(a, Project)),
+                ("new-name", OptionalString(a, "new_name"))),
             Project);
 
         yield return BridgeTool("create_project",
@@ -116,7 +136,7 @@ internal static partial class ToolCatalog
             ObjectSchema(
                 Req(Project, ProjectDesc),
                 Req(FileArg, "Absolute path to the FileArg.")),
-            "add-FileArg-to-project",
+            "add-file-to-project",
             a => Build(
                 (Project, OptionalString(a, Project)),
                 (FileArg, OptionalString(a, FileArg))),
@@ -127,12 +147,15 @@ internal static partial class ToolCatalog
             ObjectSchema(
                 Req(Project, ProjectDesc),
                 Req(FileArg, "FileArg path to remove.")),
-            "remove-FileArg-from-project",
+            "remove-file-from-project",
             a => Build(
                 (Project, OptionalString(a, Project)),
                 (FileArg, OptionalString(a, FileArg))),
             Project);
+    }
 
+    private static IEnumerable<ToolEntry> ProjectPythonTools()
+    {
         yield return BridgeTool("python_set_project_env",
             "Set the active Python interpreter for the active Python project in Visual Studio.",
             ObjectSchema(

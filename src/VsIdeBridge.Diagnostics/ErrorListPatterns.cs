@@ -29,7 +29,7 @@ internal static class ErrorListPatterns
         @"//.*?$|/\*.*?\*/",
         RegexOptions.Compiled | RegexOptions.Multiline);
     public static readonly Regex CSharpMethodSignaturePattern = new(
-        @"^[ \t]*(?:(?:public|private|protected|internal|static|virtual|override|abstract|sealed|async|new|partial|readonly)\s+)*(?!return\b|if\b|else\b|while\b|for\b|foreach\b|switch\b|catch\b|using\b|lock\b|yield\b)[\w<>\[\],\s\?]+\s+(\w+)\s*(?:<[^>]+>)?\s*\(",
+        @"^[ \t]*(?:(?:public|private|protected|internal|static|virtual|override|abstract|sealed|async|new|partial|readonly)\s+)*(?!return\b|if\b|else\b|while\b|for\b|foreach\b|switch\b|catch\b|using\b|lock\b|yield\b|class\b|struct\b|interface\b|enum\b|record\b|namespace\b|delegate\b)[\w<>\[\],\?]+\s+(\w+)\s*(?:<[^>]+>)?\s*\(",
         RegexOptions.Compiled | RegexOptions.Multiline);
     public static readonly Regex PythonDefPattern = new(@"^[ \t]*def\s+(\w+)\s*\(", RegexOptions.Compiled | RegexOptions.Multiline);
     public static readonly Regex CppFunctionPattern = new(
@@ -40,6 +40,36 @@ internal static class ErrorListPatterns
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
     public static readonly Regex SingleLetterVarPattern = new(
         @"(?:(?:var|int|string|bool|double|float|long|short|byte|char|object|decimal)\s+(?<name>[a-zA-Z])\s*[=;,)])",
+        RegexOptions.Compiled);
+    public static readonly Regex ImplicitVarPattern = new(
+        @"(?<!\.)\bvar\s+(?<name>@?[A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;|,)",
+        RegexOptions.Compiled);
+    public static readonly Regex BroadCatchPattern = new(
+        @"catch\s*\(\s*(?:System\.)?Exception(?:\s+[A-Za-z_][A-Za-z0-9_]*)?\s*\)",
+        RegexOptions.Compiled);
+    public static readonly Regex FrameworkTypePattern = new(
+        @"\bSystem\.(?<type>String|Int16|Int32|Int64|UInt16|UInt32|UInt64|Boolean|Object|Decimal|Double|Single|Byte|SByte|Char)\b",
+        RegexOptions.Compiled);
+    public static readonly Regex VbOptionStrictOnPattern = new(
+        @"(?im)^\s*Option\s+Strict\s+On\b",
+        RegexOptions.Compiled);
+    public static readonly Regex VbOptionStrictOffPattern = new(
+        @"(?im)^\s*Option\s+Strict\s+Off\b",
+        RegexOptions.Compiled);
+    public static readonly Regex VbLineContinuationPattern = new(
+        @"(?m)_\s*(?:'.*)?$",
+        RegexOptions.Compiled);
+    public static readonly Regex FSharpMutablePattern = new(
+        @"\bmutable\b",
+        RegexOptions.Compiled);
+    public static readonly Regex FSharpBlockCommentPattern = new(
+        @"\(\*.*?\*\)",
+        RegexOptions.Compiled | RegexOptions.Singleline);
+    public static readonly Regex PythonNoneComparisonPattern = new(
+        @"(?:==|!=)\s*None\b|\bNone\s*(?:==|!=)",
+        RegexOptions.Compiled);
+    public static readonly Regex PowerShellAliasPattern = new(
+        @"(?im)(?:^|[|;]\s*)(?<alias>ls|dir|gc|cat|echo|sleep|cp|mv|rm|del|%|\?)\b",
         RegexOptions.Compiled);
     public static readonly Regex PythonPoorNamingPattern = new(
         @"^[ \t]*(?<name>tmp|temp|data|val|res|ret|result|process|handle|flag|stuff|thing)\s*=",

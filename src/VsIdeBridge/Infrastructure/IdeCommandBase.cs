@@ -28,8 +28,8 @@ internal abstract class IdeCommandBase
         Package = package;
         Runtime = runtime;
 
-        var menuCommandId = new CommandID(CommandRegistrar.CommandSet, commandId);
-        var menuCommand = new OleMenuCommand(Execute, menuCommandId);
+        CommandID menuCommandId = new CommandID(CommandRegistrar.CommandSet, commandId);
+        OleMenuCommand menuCommand = new OleMenuCommand(Execute, menuCommandId);
         if (acceptsParameters)
         {
             menuCommand.ParametersDescription = "$";
@@ -57,24 +57,24 @@ internal abstract class IdeCommandBase
 
     private async Task ExecuteInternalAsync(EventArgs e)
     {
-        var startedAt = DateTimeOffset.UtcNow;
-        var rawArguments = (e as OleMenuCmdEventArgs)?.InValue as string;
-        var outputPath = string.Empty;
+        DateTimeOffset startedAt = DateTimeOffset.UtcNow;
+        string? rawArguments = (e as OleMenuCmdEventArgs)?.InValue as string;
+        string outputPath = string.Empty;
         string? requestId = null;
 
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(Package.DisposalToken);
-        var dte = await Package.GetServiceAsync(typeof(SDTE)).ConfigureAwait(true) as DTE2;
+        DTE2? dte = await Package.GetServiceAsync(typeof(SDTE)).ConfigureAwait(true) as DTE2;
         Assumes.Present(dte);
 
-        var context = new IdeCommandContext(Package, dte, Runtime.Logger, Runtime, Package.DisposalToken);
+        IdeCommandContext context = new IdeCommandContext(Package, dte, Runtime.Logger, Runtime, Package.DisposalToken);
 
         try
         {
-            var args = CommandArgumentParser.Parse(rawArguments);
+            CommandArguments args = CommandArgumentParser.Parse(rawArguments);
             outputPath = ResolveOutputPath(args);
             requestId = args.GetString("request-id");
-            var commandResult = await ExecuteAsync(context, args).ConfigureAwait(true);
-            var envelope = new CommandEnvelope
+            CommandExecutionResult commandResult = await ExecuteAsync(context, args).ConfigureAwait(true);
+            CommandEnvelope envelope = new CommandEnvelope
             {
                 SchemaVersion = JsonSchemaVersioning.CurrentSchemaVersion,
                 Command = CanonicalName,
@@ -103,13 +103,13 @@ internal abstract class IdeCommandBase
 
     private string ResolveOutputPath(CommandArguments args)
     {
-        var explicitPath = args.GetString("out");
+        string? explicitPath = args.GetString("out");
         if (!string.IsNullOrWhiteSpace(explicitPath))
         {
             return explicitPath!;
         }
 
-        var fileName = CanonicalName.Replace("Tools.", string.Empty)
+        string fileName = CanonicalName.Replace("Tools.", string.Empty)
             .Replace('.', '-')
             .ToLowerInvariant() + ".json";
         return Path.Combine(Path.GetTempPath(), "vs-ide-bridge", fileName);
@@ -117,8 +117,8 @@ internal abstract class IdeCommandBase
 
     private async Task HandleCommandErrorAsync(IdeCommandContext context, CommandErrorException ex, string? requestId, string outputPath, DateTimeOffset startedAt)
     {
-        var failureData = await Runtime.FailureContextService.CaptureAsync(context).ConfigureAwait(true);
-        var envelope = new CommandEnvelope
+        Newtonsoft.Json.Linq.JToken? failureData = await Runtime.FailureContextService.CaptureAsync(context).ConfigureAwait(true);
+        CommandEnvelope envelope = new CommandEnvelope
         {
             SchemaVersion = JsonSchemaVersioning.CurrentSchemaVersion,
             Command = CanonicalName,
@@ -139,8 +139,8 @@ internal abstract class IdeCommandBase
 
     private async Task HandleUnexpectedExceptionAsync(IdeCommandContext context, Exception ex, string? requestId, string outputPath, DateTimeOffset startedAt)
     {
-        var failureData = await Runtime.FailureContextService.CaptureAsync(context).ConfigureAwait(true);
-        var envelope = new CommandEnvelope
+        Newtonsoft.Json.Linq.JToken? failureData = await Runtime.FailureContextService.CaptureAsync(context).ConfigureAwait(true);
+        CommandEnvelope envelope = new CommandEnvelope
         {
             SchemaVersion = JsonSchemaVersioning.CurrentSchemaVersion,
             Command = CanonicalName,

@@ -21,10 +21,10 @@ internal sealed partial class PatchService
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var isNewFile = patch.OldPath == DevNullPath;
-        var isDelete = patch.NewPath == DevNullPath;
-        var sourceRelativePath = isNewFile ? patch.NewPath : patch.OldPath;
-        var targetRelativePath = isDelete ? patch.OldPath : patch.NewPath;
+        bool isNewFile = patch.OldPath == DevNullPath;
+        bool isDelete = patch.NewPath == DevNullPath;
+        string sourceRelativePath = isNewFile ? patch.NewPath : patch.OldPath;
+        string targetRelativePath = isDelete ? patch.OldPath : patch.NewPath;
         if (string.IsNullOrWhiteSpace(sourceRelativePath) || sourceRelativePath == DevNullPath)
         {
             throw new CommandErrorException(InvalidArgumentsCode, "Patch entry did not contain a usable source path.");
@@ -35,8 +35,8 @@ internal sealed partial class PatchService
             throw new CommandErrorException(InvalidArgumentsCode, "Patch entry did not contain a usable target path.");
         }
 
-        var sourcePath = ResolvePatchPath(dte, baseDirectory, sourceRelativePath, allowCreate: isNewFile);
-        var targetPath = isDelete
+        string sourcePath = ResolvePatchPath(dte, baseDirectory, sourceRelativePath, allowCreate: isNewFile);
+        string targetPath = isDelete
             ? sourcePath
             : ResolvePatchPath(dte, baseDirectory, targetRelativePath, allowCreate: true);
 
@@ -57,23 +57,23 @@ internal sealed partial class PatchService
             return PathNormalization.NormalizeFilePath(relativeOrAbsolutePath);
         }
 
-        var solutionDirectory = dte.Solution?.IsOpen == true
+        string solutionDirectory = dte.Solution?.IsOpen == true
             ? Path.GetDirectoryName(dte.Solution.FullName) ?? baseDirectory
             : baseDirectory;
 
-        var searchRoots = new List<string>();
+        List<string> searchRoots = new List<string>();
         AddDistinctPath(searchRoots, baseDirectory);
 
-        var current = solutionDirectory;
-        for (var depth = 0; depth < 6 && !string.IsNullOrWhiteSpace(current); depth++)
+        string current = solutionDirectory;
+        for (int depth = 0; depth < 6 && !string.IsNullOrWhiteSpace(current); depth++)
         {
             AddDistinctPath(searchRoots, current);
             current = Path.GetDirectoryName(current);
         }
 
-        foreach (var root in searchRoots)
+        foreach (string root in searchRoots)
         {
-            var candidate = PathNormalization.NormalizeFilePath(Path.Combine(root, relativeOrAbsolutePath));
+            string candidate = PathNormalization.NormalizeFilePath(Path.Combine(root, relativeOrAbsolutePath));
             if (File.Exists(candidate))
             {
                 return candidate;
@@ -81,7 +81,7 @@ internal sealed partial class PatchService
 
             if (allowCreate)
             {
-                var candidateDirectory = Path.GetDirectoryName(candidate);
+                string candidateDirectory = Path.GetDirectoryName(candidate);
                 if (!string.IsNullOrWhiteSpace(candidateDirectory) && Directory.Exists(candidateDirectory))
                 {
                     return candidate;
@@ -92,20 +92,20 @@ internal sealed partial class PatchService
         // Filesystem walk did not find the file. Search open VS documents as a fallback.
         // This handles bare filenames (e.g. "connect.cpp") and relative paths from projects
         // whose source tree is not under the solution directory.
-        var normalizedTarget = relativeOrAbsolutePath.Replace('/', Path.DirectorySeparatorChar);
-        var targetFileName = System.IO.Path.GetFileName(normalizedTarget);
+        string normalizedTarget = relativeOrAbsolutePath.Replace('/', Path.DirectorySeparatorChar);
+        string targetFileName = System.IO.Path.GetFileName(normalizedTarget);
         string? filenameMatch = null;
 
         foreach (Document document in dte.Documents)
         {
-            var docPath = document.FullName;
+            string docPath = document.FullName;
             if (string.IsNullOrWhiteSpace(docPath))
             {
                 continue;
             }
 
             // Prefer a document whose full path ends with the relative path from the patch.
-            var normalizedDocPath = docPath.Replace('/', Path.DirectorySeparatorChar);
+            string normalizedDocPath = docPath.Replace('/', Path.DirectorySeparatorChar);
             if (File.Exists(docPath) &&
                 (normalizedDocPath.EndsWith(Path.DirectorySeparatorChar + normalizedTarget, StringComparison.OrdinalIgnoreCase) ||
                 normalizedDocPath.EndsWith(normalizedTarget, StringComparison.OrdinalIgnoreCase))
@@ -133,7 +133,7 @@ internal sealed partial class PatchService
 
     private static void AddDistinctPath(List<string> paths, string? value)
     {
-        var normalizedValue = value;
+        string? normalizedValue = value;
         if (string.IsNullOrWhiteSpace(normalizedValue))
         {
             return;
@@ -148,7 +148,7 @@ internal sealed partial class PatchService
     public string ResolveFilePath(DTE2 dte, string filePathOrRelative)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        var baseDir = ResolveBaseDirectory(dte, null);
+        string baseDir = ResolveBaseDirectory(dte, null);
         return ResolvePatchPath(dte, baseDir, filePathOrRelative, allowCreate: true);
     }
 
@@ -163,7 +163,7 @@ internal sealed partial class PatchService
 
         if (dte.Solution?.IsOpen == true)
         {
-            var solutionDirectory = Path.GetDirectoryName(dte.Solution.FullName);
+            string? solutionDirectory = Path.GetDirectoryName(dte.Solution.FullName);
             if (!string.IsNullOrWhiteSpace(solutionDirectory))
             {
                 return PathNormalization.NormalizeFilePath(solutionDirectory);
@@ -195,7 +195,7 @@ internal sealed partial class PatchService
 
                     if (doc.Object("TextDocument") is TextDocument textDoc)
                     {
-                        var start = textDoc.StartPoint.CreateEditPoint();
+                        EditPoint start = textDoc.StartPoint.CreateEditPoint();
                         return start.GetText(textDoc.EndPoint);
                     }
                 }
@@ -217,7 +217,7 @@ internal sealed partial class PatchService
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var normalizedPath = PathNormalization.NormalizeFilePath(path);
+        string normalizedPath = PathNormalization.NormalizeFilePath(path);
         return File.Exists(normalizedPath)
             || TryFindOpenDocumentByPath(dte, normalizedPath) is not null;
     }
@@ -226,14 +226,14 @@ internal sealed partial class PatchService
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var activeDocument = dte.ActiveDocument;
+        Document activeDocument = dte.ActiveDocument;
         if (activeDocument is null || string.IsNullOrWhiteSpace(activeDocument.FullName))
         {
             return null;
         }
 
-        var line = 1;
-        var column = 1;
+        int line = 1;
+        int column = 1;
         try
         {
             if (activeDocument.Object("TextDocument") is TextDocument textDocument)
@@ -242,7 +242,7 @@ internal sealed partial class PatchService
                 column = Math.Max(1, textDocument.Selection.ActivePoint.DisplayColumn);
             }
         }
-        catch (Exception ex)
+        catch (COMException ex)
         {
             System.Diagnostics.Debug.WriteLine(ex);
         }

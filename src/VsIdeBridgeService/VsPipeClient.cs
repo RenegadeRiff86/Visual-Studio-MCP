@@ -18,10 +18,10 @@ internal sealed class VsPipeClient : IAsyncDisposable
     private static readonly string LockDirectory =
         Path.Combine(Path.GetTempPath(), "vs-ide-bridge", "locks");
 
-    public VsPipeClient(string pipeName, int timeoutMs)
+    public VsPipeClient(string pipeName, int timeoutMs, int gateTimeoutMs)
     {
         _timeoutMs = Math.Max(1_000, timeoutMs);
-        _gate = AcquireGate(pipeName, _timeoutMs);
+        _gate = AcquireGate(pipeName, Math.Max(250, gateTimeoutMs));
 
         _pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
         using CancellationTokenSource cts = new(_timeoutMs);
@@ -63,12 +63,12 @@ internal sealed class VsPipeClient : IAsyncDisposable
         return ValueTask.CompletedTask;
     }
 
-    private static FileStream AcquireGate(string pipeName, int timeoutMs)
+    private static FileStream AcquireGate(string pipeName, int gateTimeoutMs)
     {
         Directory.CreateDirectory(LockDirectory);
-        string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(pipeName ?? string.Empty)));
+        string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(pipeName)));
         string lockFile = Path.Combine(LockDirectory, $"{hash}.lock");
-        DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        DateTime deadline = DateTime.UtcNow.AddMilliseconds(gateTimeoutMs);
 
         while (DateTime.UtcNow <= deadline)
         {
@@ -78,13 +78,16 @@ internal sealed class VsPipeClient : IAsyncDisposable
             }
             catch (IOException)
             {
-                Thread.Sleep(100);
+                Thread.Sleep(25);
             }
         }
 
-        throw new BridgeException($"Bridge pipe '{pipeName}' is busy. Avoid parallel calls and retry.");
+        throw new BridgeBusyException(pipeName, gateTimeoutMs);
     }
 }
 
+internal sealed class BridgeBusyException(string pipeName, int gateTimeoutMs)
+    : BridgeException($"Bridge pipe '{pipeName}' is busy with another request. Try again soon or avoid overlapping bridge calls. Waited {gateTimeoutMs} ms for exclusive access.");
+
 // Thrown for logical bridge errors (not I/O or timeout) so callers can distinguish error types.
-internal sealed class BridgeException(string message) : Exception(message);
+internal class BridgeException(string message) : Exception(message);

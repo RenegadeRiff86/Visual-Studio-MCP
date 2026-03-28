@@ -1,29 +1,32 @@
 .vs/
-output/
-src/IdeBridgeJsonProbe/bin/
-src/IdeBridgeJsonProbe/obj/
-src/VsIdeBridge/bin/
-src/VsIdeBridge/obj/
-src/VsIdeBridgeCli/bin/
-src/VsIdeBridgeCli/obj/
-tests/**/bin/
-tests/**/obj/
-src/VsIdeBridgeInstaller/bin/
-src/VsIdeBridgeInstaller/obj/
-src/VsIdeBridgeService/bin/
-src/VsIdeBridgeService/obj/
-.claude/
-.continue/
 .idea/
 .vscode/
-outputcatalog-live.json
-C*/
+.claude/
+.continue/
+
+# Build outputs
+output/
+installer/output/
+src/**/bin/
+src/**/obj/
+tests/**/bin/
+tests/**/obj/
+
+# Visual Studio and test runner state
+*.suo
+*.user
+*.userosscache
+*.VC.db
+TestResults/
 
 # Local bridge/build scratch files
 .dotnet/
 .dotnet-*/
-installer/output/
+outputcatalog-live.json
 *.log
 *.binlog
 *.tmp
 Temp.txt
+
+# Local SDK research scratch
+codex/sdk-cache/

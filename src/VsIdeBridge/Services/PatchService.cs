@@ -165,39 +165,9 @@ internal sealed partial class PatchService
                 if (!requestedContentChange && !paths.IsMove && !paths.IsNewFile)
                 {
                     alreadySatisfied = IsCurrentContentAlreadyPatched(paths.TargetPath, requestedTargetContent, filePatch);
-                    if (!alreadySatisfied && result.MutationLineCount > 0 && result.MatchedLineCount == 0)
-                    {
-                        throw new CommandErrorException(
-                            InvalidArgumentsCode,
-                            $"Patch produced no content change for {paths.TargetPath} â€” {result.MutationLineCount} mutation line(s) but 0 matched context lines. " +
-                            "The patch content does not match the file. Fix: call read_file to check the actual content before retrying.",
-                            new
-                            {
-                                path = paths.TargetPath,
-                                hunkCount = filePatch.Hunks.Count + filePatch.SearchBlocks.Count,
-                                result.MutationLineCount,
-                                result.MatchedLineCount,
-                            });
-                    }
-
+                    ThrowIfPatchProducedNoContentChange(paths.TargetPath, filePatch, result, alreadySatisfied);
                     filesToFocus.Add((paths.TargetPath, result.ChangedRanges));
-
-                    appliedFiles.Add(new JObject
-                    {
-                        ["path"] = paths.TargetPath,
-                        ["status"] = "already-satisfied",
-                        ["firstChangedLine"] = result.FirstChangedLine,
-                        ["hunkCount"] = filePatch.Hunks.Count + filePatch.SearchBlocks.Count,
-                        ["changedRanges"] = CreateChangedRangesArray(result.ChangedRanges),
-                        ["matchedLineCount"] = result.MatchedLineCount,
-                        ["mutationLineCount"] = result.MutationLineCount,
-                        ["editorBacked"] = false,
-                        ["verified"] = true,
-                        ["contentChanged"] = false,
-                        ["requestedContentChange"] = false,
-                        ["alreadySatisfied"] = alreadySatisfied,
-                        ["saved"] = true,
-                    });
+                    appliedFiles.Add(CreateAlreadySatisfiedFileItem(paths.TargetPath, filePatch, result, alreadySatisfied));
                     continue;
                 }
 
@@ -293,6 +263,46 @@ internal sealed partial class PatchService
             ["saveChangedFiles"] = saveChangedFiles,
             ["visibleEdits"] = true,
             ["items"] = appliedFiles,
+        };
+    }
+
+    private static void ThrowIfPatchProducedNoContentChange(string targetPath, FilePatch filePatch, ApplyFilePatchResult result, bool alreadySatisfied)
+    {
+        if (alreadySatisfied || result.MutationLineCount <= 0 || result.MatchedLineCount != 0)
+        {
+            return;
+        }
+
+        throw new CommandErrorException(
+            InvalidArgumentsCode,
+            $"Patch produced no content change for {targetPath} â€” {result.MutationLineCount} mutation line(s) but 0 matched context lines. " +
+            "The patch content does not match the file. Fix: call read_file to check the actual content before retrying.",
+            new
+            {
+                path = targetPath,
+                hunkCount = filePatch.Hunks.Count + filePatch.SearchBlocks.Count,
+                result.MutationLineCount,
+                result.MatchedLineCount,
+            });
+    }
+
+    private static JObject CreateAlreadySatisfiedFileItem(string targetPath, FilePatch filePatch, ApplyFilePatchResult result, bool alreadySatisfied)
+    {
+        return new JObject
+        {
+            ["path"] = targetPath,
+            ["status"] = "already-satisfied",
+            ["firstChangedLine"] = result.FirstChangedLine,
+            ["hunkCount"] = filePatch.Hunks.Count + filePatch.SearchBlocks.Count,
+            ["changedRanges"] = CreateChangedRangesArray(result.ChangedRanges),
+            ["matchedLineCount"] = result.MatchedLineCount,
+            ["mutationLineCount"] = result.MutationLineCount,
+            ["editorBacked"] = false,
+            ["verified"] = true,
+            ["contentChanged"] = false,
+            ["requestedContentChange"] = false,
+            ["alreadySatisfied"] = alreadySatisfied,
+            ["saved"] = true,
         };
     }
 }

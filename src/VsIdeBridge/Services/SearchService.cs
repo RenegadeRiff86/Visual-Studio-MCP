@@ -20,7 +20,7 @@ internal sealed partial class SearchService
     private const string InterfaceKind = "interface";
     private const string PathFilterPropertyName = "pathFilter";
 
-    private sealed class SearchHit
+    private sealed record SearchHit
     {
         public string Path { get; set; } = string.Empty;
 
@@ -39,7 +39,7 @@ internal sealed partial class SearchService
         public List<string> SourceQueries { get; set; } = [];
     }
 
-    private sealed class CodeModelHit
+    private sealed record CodeModelHit
     {
         public string Path { get; set; } = string.Empty;
 

@@ -24,7 +24,7 @@ internal sealed partial class ErrorListService
 {
     private static JObject CreateBestPracticeRow(string code, string message, string file, int line, string symbol, string helpUri = "")
     {
-        var row = new JObject
+        JObject row = new JObject
         {
             [SeverityKey] = WarningSeverity,
             [CodeKey] = code,
@@ -75,7 +75,7 @@ internal sealed partial class ErrorListService
         _bestPracticeProvider.Tasks.Clear();
         foreach (var row in rows)
         {
-            var task = new ErrorTask
+            ErrorTask task = new ErrorTask
             {
                 Category = TaskCategory.BuildCompile,
                 ErrorCategory = MapTaskErrorCategory(GetRowString(row, SeverityKey)),
@@ -101,8 +101,8 @@ internal sealed partial class ErrorListService
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var serviceProvider = (System.IServiceProvider)_package;
-        var componentModel = serviceProvider.GetService(typeof(SComponentModel)) as IComponentModel;
+        System.IServiceProvider serviceProvider = (System.IServiceProvider)_package;
+        IComponentModel? componentModel = serviceProvider.GetService(typeof(SComponentModel)) as IComponentModel;
         return componentModel?.DefaultExportProvider.GetExportedValueOrDefault<ITableManagerProvider>();
     }
 
@@ -115,7 +115,7 @@ internal sealed partial class ErrorListService
         {
             TryGetErrorListWindow(dte)?.Activate();
         }
-        catch (Exception ex)
+        catch (COMException ex)
         {
             LogNonCriticalException(ex);
         }
@@ -130,14 +130,14 @@ internal sealed partial class ErrorListService
             return true;
         }
 
-        var tableManagerProvider = GetTableManagerProvider();
+        ITableManagerProvider? tableManagerProvider = GetTableManagerProvider();
         if (tableManagerProvider is null)
         {
             return false;
         }
 
-        var tableSource = new BestPracticeTableDataSource();
-        var tableManager = tableManagerProvider.GetTableManager(StandardTables.ErrorsTable);
+        BestPracticeTableDataSource tableSource = new BestPracticeTableDataSource();
+        ITableManager tableManager = tableManagerProvider.GetTableManager(StandardTables.ErrorsTable);
         if (!tableManager.AddSource(tableSource, BestPracticeTableColumns))
         {
             return false;
@@ -161,7 +161,7 @@ internal sealed partial class ErrorListService
                 selection.MoveToLineAndOffset(task.Line + 1, Math.Max(1, task.Column + 1), Extend: false);
             }
         }
-        catch (Exception ex)
+        catch (COMException ex)
         {
             LogNonCriticalException(ex);
         }
@@ -201,8 +201,8 @@ internal sealed partial class ErrorListService
 
     private static int GetLineNumber(string content, int index)
     {
-        var line = 1;
-        for (var i = 0; i < index && i < content.Length; i++)
+        int line = 1;
+        for (int i = 0; i < index && i < content.Length; i++)
         {
             if (content[i] == '\n')
             {
@@ -215,8 +215,8 @@ internal sealed partial class ErrorListService
 
     private static string GetLineAt(string content, int index)
     {
-        var start = index > 0 ? content.LastIndexOf('\n', index - 1) + 1 : 0;
-        var end = content.IndexOf('\n', index);
+        int start = index > 0 ? content.LastIndexOf('\n', index - 1) + 1 : 0;
+        int end = content.IndexOf('\n', index);
         return end < 0 ? content.Substring(start) : content.Substring(start, end - start);
     }
 
@@ -235,13 +235,13 @@ internal sealed partial class ErrorListService
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
         EnsureErrorListWindow(context.Dte);
 
-        var timeout = timeoutMilliseconds > 0 ? timeoutMilliseconds : DefaultWaitTimeoutMilliseconds;
-        var deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeout);
-        var lastRows = Array.Empty<JObject>();
+        int timeout = timeoutMilliseconds > 0 ? timeoutMilliseconds : DefaultWaitTimeoutMilliseconds;
+        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeout);
+        JObject[] lastRows = Array.Empty<JObject>();
         int? lastCount = null;
-        var stableSamples = 0;
+        int stableSamples = 0;
         // When IntelliSense has already confirmed ready, one stable read is sufficient.
-        var requiredStableSamples = intellisenseReady ? 1 : StableSampleCount;
+        int requiredStableSamples = intellisenseReady ? 1 : StableSampleCount;
 
         while (DateTimeOffset.UtcNow < deadline)
         {
@@ -291,7 +291,7 @@ internal sealed partial class ErrorListService
 
         TryReadTableRows(out var tableRows);
 
-        var window = TryGetErrorListWindow(dte);
+        Window? window = TryGetErrorListWindow(dte);
         if (window?.Object is not ErrorList errorList)
         {
             if (tableRows.Count > 0)
@@ -299,17 +299,17 @@ internal sealed partial class ErrorListService
             throw new InvalidOperationException("Error List window is not available.");
         }
 
-        var items = errorList.ErrorItems;
-        var dteRows = new List<JObject>(items.Count);
-        for (var i = 1; i <= items.Count; i++)
+        ErrorItems items = errorList.ErrorItems;
+        List<JObject> dteRows = new List<JObject>(items.Count);
+        for (int i = 1; i <= items.Count; i++)
         {
-            var errorItem = items.Item(i);
-            var severity = MapSeverity(errorItem.ErrorLevel);
-            var description = errorItem.Description ?? string.Empty;
-            var project = errorItem.Project ?? string.Empty;
-            var file = errorItem.FileName ?? string.Empty;
-            var line = errorItem.Line;
-            var column = errorItem.Column;
+            ErrorItem errorItem = items.Item(i);
+            string severity = MapSeverity(errorItem.ErrorLevel);
+            string description = errorItem.Description ?? string.Empty;
+            string project = errorItem.Project ?? string.Empty;
+            string file = errorItem.FileName ?? string.Empty;
+            int line = errorItem.Line;
+            int column = errorItem.Column;
             NormalizeBuildOutputLocation(ref file, ref line, ref column);
             string code = InferCode(description);
             dteRows.Add(new JObject
@@ -340,20 +340,20 @@ internal sealed partial class ErrorListService
         ThreadHelper.ThrowIfNotOnUIThread();
 
         rows = [];
-        var tableManagerProvider = GetTableManagerProvider();
+        ITableManagerProvider? tableManagerProvider = GetTableManagerProvider();
         if (tableManagerProvider is null)
         {
             return false;
         }
 
-        var tableManager = tableManagerProvider.GetTableManager(StandardTables.ErrorsTable);
+        ITableManager tableManager = tableManagerProvider.GetTableManager(StandardTables.ErrorsTable);
         if (tableManager.Sources.Count == 0)
         {
             return false;
         }
 
-        using var collector = new ErrorTableCollector();
-        var subscriptions = new List<IDisposable>();
+        using ErrorTableCollector collector = new ErrorTableCollector();
+        List<IDisposable> subscriptions = new List<IDisposable>();
         try
         {
             foreach (var source in tableManager.Sources)
@@ -387,13 +387,13 @@ internal sealed partial class ErrorListService
 
     private static JObject CreateRowFromTableValueReader(TableValueReader tryGetValue)
     {
-        var message = GetTableString(tryGetValue, StandardTableKeyNames.Text, StandardTableKeyNames.FullText);
-        var project = GetTableString(tryGetValue, StandardTableKeyNames.ProjectName);
-        var file = GetTableString(tryGetValue, StandardTableKeyNames.Path, StandardTableKeyNames.DocumentName);
-        var line = GetTableCoordinate(tryGetValue, StandardTableKeyNames.Line);
-        var column = GetTableCoordinate(tryGetValue, StandardTableKeyNames.Column);
+        string message = GetTableString(tryGetValue, StandardTableKeyNames.Text, StandardTableKeyNames.FullText);
+        string project = GetTableString(tryGetValue, StandardTableKeyNames.ProjectName);
+        string file = GetTableString(tryGetValue, StandardTableKeyNames.Path, StandardTableKeyNames.DocumentName);
+        int line = GetTableCoordinate(tryGetValue, StandardTableKeyNames.Line);
+        int column = GetTableCoordinate(tryGetValue, StandardTableKeyNames.Column);
         NormalizeBuildOutputLocation(ref file, ref line, ref column);
-        var code = GetTableString(tryGetValue, StandardTableKeyNames.ErrorCode, StandardTableKeyNames.ErrorCodeToolTip);
+        string code = GetTableString(tryGetValue, StandardTableKeyNames.ErrorCode, StandardTableKeyNames.ErrorCodeToolTip);
         if (string.IsNullOrWhiteSpace(code))
         {
             code = InferCode(message);
@@ -408,6 +408,10 @@ internal sealed partial class ErrorListService
             [ProjectKey] = project,
             [FileKey] = file,
             [LineKey] = line,
+            [GuidanceKey] = GetTableString(tryGetValue, GuidanceKey),
+            [SuggestedActionKey] = GetTableString(tryGetValue, SuggestedActionKey),
+            [LlmFixPromptKey] = GetTableString(tryGetValue, LlmFixPromptKey),
+            [AuthorityKey] = GetTableString(tryGetValue, AuthorityKey),
         };
     }
 
@@ -417,7 +421,7 @@ internal sealed partial class ErrorListService
         {
             if (tryGetValue(keyName, out var content) && content is not null)
             {
-                var value = content.ToString();
+                string value = content.ToString();
                 if (!string.IsNullOrWhiteSpace(value))
                 {
                     return value;

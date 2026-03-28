@@ -44,19 +44,8 @@ internal static partial class SetVersionTool
             ["file_count"] = updatedFiles.Count,
         };
 
-        return Task.FromResult<JsonNode>(new JsonObject
-        {
-            ["content"] = new JsonArray
-            {
-                new JsonObject
-                {
-                    ["type"] = "text",
-                    ["text"] = payload.ToJsonString(),
-                },
-            },
-            ["isError"] = false,
-            ["structuredContent"] = payload,
-        });
+        string successText = $"Updated {updatedFiles.Count} version file(s) to {version}.";
+        return Task.FromResult(ToolResultFormatter.StructuredToolResult(payload, args, successText: successText));
     }
 
     private static void UpdateFile(string filePath, Func<string, string> transform, string resultPath, JsonArray updatedFiles)

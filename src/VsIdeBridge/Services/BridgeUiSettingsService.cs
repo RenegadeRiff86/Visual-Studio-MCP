@@ -26,7 +26,7 @@ internal sealed class BridgeUiSettingsService
     {
         try
         {
-            var settingsManager = new ShellSettingsManager(serviceProvider);
+            ShellSettingsManager settingsManager = new ShellSettingsManager(serviceProvider);
             _store = settingsManager.GetWritableSettingsStore(SettingsScope.UserSettings);
             if (!_store.CollectionExists(CollectionPath))
             {

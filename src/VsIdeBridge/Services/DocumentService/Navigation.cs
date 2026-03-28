@@ -394,7 +394,7 @@ internal sealed partial class DocumentService
             selection.MoveToLineAndOffset(1, 1, false);
             TryShowActivePoint(selection);
         }
-        catch (Exception)
+        catch (COMException)
         {
             // Give up on navigation; the file is still open.
         }
@@ -408,7 +408,7 @@ internal sealed partial class DocumentService
         {
             selection.ActivePoint.TryToShow(vsPaneShowHow.vsPaneShowCentered);
         }
-        catch (Exception)
+        catch (COMException)
         {
             // Some editor surfaces may not support viewport repositioning.
         }

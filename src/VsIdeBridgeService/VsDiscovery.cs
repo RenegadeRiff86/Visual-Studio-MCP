@@ -1,4 +1,5 @@
 using System.IO.MemoryMappedFiles;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -32,9 +33,10 @@ internal static class VsDiscovery
         if (mode == DiscoveryMode.JsonOnly) return jsonInstances;
 
         List<BridgeInstance> memoryInstances = ListMemory();
-        return mode == DiscoveryMode.MemoryFirst
+        IReadOnlyList<BridgeInstance> merged = mode == DiscoveryMode.MemoryFirst
             ? Merge(memoryInstances, jsonInstances, preferPrimary: true)
             : Merge(memoryInstances, jsonInstances, preferPrimary: false);
+        return FilterLiveInstances(merged);
     }
 
     public static async Task<BridgeInstance> SelectAsync(BridgeInstanceSelector selector, DiscoveryMode mode = DiscoveryMode.MemoryFirst)
@@ -189,7 +191,19 @@ internal static class VsDiscovery
             string json = await File.ReadAllTextAsync(path).ConfigureAwait(false);
             JsonObject? obj = JsonNode.Parse(json) as JsonObject;
             if (obj is null) return null;
-            return ParseInstanceFromObject(obj, path);
+            BridgeInstance? instance = ParseInstanceFromObject(obj, path);
+            if (instance is null)
+            {
+                return null;
+            }
+
+            if (!IsLiveInstance(instance))
+            {
+                TryDeleteStaleDiscoveryFile(path);
+                return null;
+            }
+
+            return instance;
         }
         catch
         {
@@ -244,12 +258,34 @@ internal static class VsDiscovery
             ProcessId = obj["pid"]?.GetValue<int>() ?? 0,
             SolutionPath = obj["solutionPath"]?.GetValue<string>() ?? string.Empty,
             SolutionName = Path.GetFileName(obj["solutionPath"]?.GetValue<string>() ?? string.Empty),
+            Label = GetInstanceLabel(obj),
             Source = source,
             StartedAtUtc = obj["startedAtUtc"]?.GetValue<string>(),
             DiscoveryFile = source,
             LastWriteTimeUtc = DateTime.TryParse(
                 obj["lastWriteTimeUtc"]?.GetValue<string>(), out DateTime dt) ? dt : DateTime.MinValue,
         };
+    }
+
+    private static string GetInstanceLabel(JsonObject obj)
+    {
+        string? explicitLabel = obj["label"]?.GetValue<string>();
+        if (!string.IsNullOrWhiteSpace(explicitLabel))
+        {
+            return explicitLabel;
+        }
+
+        string solutionPath = obj["solutionPath"]?.GetValue<string>() ?? string.Empty;
+        string pipeName = obj["pipeName"]?.GetValue<string>() ?? string.Empty;
+        int processId = obj["pid"]?.GetValue<int>() ?? 0;
+        string solutionBaseName = string.IsNullOrWhiteSpace(solutionPath)
+            ? string.Empty
+            : Path.GetFileNameWithoutExtension(solutionPath);
+        string name = string.IsNullOrWhiteSpace(solutionBaseName)
+            ? (string.IsNullOrWhiteSpace(pipeName) ? "Visual Studio" : pipeName)
+            : solutionBaseName;
+
+        return processId > 0 ? $"{name} ({processId})" : name;
     }
 
     // ── Merge logic ────────────────────────────────────────────────────────────
@@ -279,5 +315,63 @@ internal static class VsDiscovery
         }
 
         return result;
+    }
+
+    private static IReadOnlyList<BridgeInstance> FilterLiveInstances(IReadOnlyList<BridgeInstance> instances)
+    {
+        if (instances.Count == 0)
+        {
+            return instances;
+        }
+
+        List<BridgeInstance> liveInstances = [];
+        foreach (BridgeInstance instance in instances)
+        {
+            if (IsLiveInstance(instance))
+            {
+                liveInstances.Add(instance);
+                continue;
+            }
+
+            if (instance.DiscoveryFile.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            {
+                TryDeleteStaleDiscoveryFile(instance.DiscoveryFile);
+            }
+        }
+
+        return liveInstances;
+    }
+
+    private static bool IsLiveInstance(BridgeInstance instance)
+    {
+        if (instance.ProcessId <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            using Process process = Process.GetProcessById(instance.ProcessId);
+            return !process.HasExited;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void TryDeleteStaleDiscoveryFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup only.
+        }
     }
 }

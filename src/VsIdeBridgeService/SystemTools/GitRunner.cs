@@ -71,19 +71,8 @@ internal static class GitRunner
             ["stderr"] = stderr,
         };
 
-        return new JsonObject
-        {
-            ["content"] = new JsonArray
-            {
-                new JsonObject
-                {
-                    ["type"] = "text",
-                    ["text"] = payload.ToJsonString(),
-                },
-            },
-            ["isError"] = !success,
-            ["structuredContent"] = payload,
-        };
+        string successText = $"Git command completed with exit code {process.ExitCode}.";
+        return ToolResultFormatter.StructuredToolResult(payload, isError: !success, successText: successText);
     }
 
     /// <summary>Network operations (push/pull/fetch/merge) get a longer timeout.</summary>

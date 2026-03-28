@@ -17,10 +17,10 @@ internal sealed class OutputPaneLogger(AsyncPackage package)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
 
-        var dte = await _package.GetServiceAsync(typeof(SDTE)).ConfigureAwait(true) as DTE2;
+        DTE2? dte = await _package.GetServiceAsync(typeof(SDTE)).ConfigureAwait(true) as DTE2;
         if (dte is not null)
         {
-            var pane = GetOrCreatePane(dte);
+            EnvDTE.OutputWindowPane pane = GetOrCreatePane(dte);
             pane.OutputString($"{message}{Environment.NewLine}");
             if (activatePane)
             {
@@ -38,10 +38,10 @@ internal sealed class OutputPaneLogger(AsyncPackage package)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var panes = dte.ToolWindows.OutputWindow.OutputWindowPanes;
-        for (var i = 1; i <= panes.Count; i++)
+        EnvDTE.OutputWindowPanes panes = dte.ToolWindows.OutputWindow.OutputWindowPanes;
+        for (int i = 1; i <= panes.Count; i++)
         {
-            var pane = panes.Item(i);
+            EnvDTE.OutputWindowPane pane = panes.Item(i);
             if (string.Equals(pane.Name, PaneName, StringComparison.OrdinalIgnoreCase))
             {
                 return pane;

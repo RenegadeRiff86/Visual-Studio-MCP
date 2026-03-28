@@ -88,22 +88,22 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
 
         if (!quickSnapshot)
         {
-            var bestPracticeRows = await RefreshBestPracticeDiagnosticsAsync(context, rows).ConfigureAwait(true);
+            IReadOnlyList<JObject> bestPracticeRows = await RefreshBestPracticeDiagnosticsAsync(context, rows).ConfigureAwait(true);
             if (bestPracticeRows.Count > 0)
             {
                 rows = MergeRows(rows, bestPracticeRows);
             }
         }
 
-        var filteredRows = ApplyQuery(rows, query).ToArray();
-        var severityCounts = CreateSeverityCounts();
-        foreach (var row in filteredRows)
+        JObject[] filteredRows = ApplyQuery(rows, query).ToArray();
+        Dictionary<string, int> severityCounts = CreateSeverityCounts();
+        foreach (JObject row in filteredRows)
         {
             severityCounts[(string)row[SeverityKey]!]++;
         }
 
-        var totalSeverityCounts = CreateSeverityCounts();
-        foreach (var row in rows)
+        Dictionary<string, int> totalSeverityCounts = CreateSeverityCounts();
+        foreach (JObject row in rows)
         {
             totalSeverityCounts[(string)row[SeverityKey]!]++;
         }
@@ -174,8 +174,8 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var files = new List<string>();
+        HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        List<string> files = new List<string>();
 
         // First add files from error rows (if any).
         foreach (var path in rows
@@ -208,7 +208,49 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
             }
         }
 
+        foreach (string path in EnumerateRepoBestPracticeFiles(dte))
+        {
+            if (files.Count >= MaxBestPracticeFiles)
+            {
+                break;
+            }
+
+            if (seen.Add(path))
+            {
+                files.Add(path);
+            }
+        }
+
         return files;
+    }
+
+    private static IEnumerable<string> EnumerateRepoBestPracticeFiles(DTE2 dte)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        string solutionFullName = dte.Solution?.FullName ?? string.Empty;
+        string? solutionRoot = string.IsNullOrWhiteSpace(solutionFullName)
+            ? null
+            : Path.GetDirectoryName(solutionFullName);
+
+        if (string.IsNullOrWhiteSpace(solutionRoot))
+        {
+            yield break;
+        }
+
+        string scriptsDirectory = Path.Combine(solutionRoot, "scripts");
+        if (!Directory.Exists(scriptsDirectory))
+        {
+            yield break;
+        }
+
+        foreach (string path in Directory.EnumerateFiles(scriptsDirectory, "*", SearchOption.TopDirectoryOnly))
+        {
+            if (IsBestPracticeCandidateFile(path))
+            {
+                yield return path;
+            }
+        }
     }
 
     private static bool IsBestPracticeCandidateFile(string path)
@@ -218,7 +260,7 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
             return false;
         }
 
-        var fullPath = Path.GetFullPath(path);
+        string fullPath = Path.GetFullPath(path);
         foreach (var fragment in IgnoredBestPracticePathFragments)
         {
             if (fullPath.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) >= 0)
@@ -227,7 +269,7 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
             }
         }
 
-        var fileName = Path.GetFileName(fullPath);
+        string fileName = Path.GetFileName(fullPath);
         if (fileName.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase) ||
             fileName.EndsWith(".g.i.cs", StringComparison.OrdinalIgnoreCase) ||
             fileName.EndsWith(".designer.cs", StringComparison.OrdinalIgnoreCase))
@@ -235,7 +277,7 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
             return false;
         }
 
-        var extension = Path.GetExtension(fullPath);
+        string extension = Path.GetExtension(fullPath);
         return !string.IsNullOrWhiteSpace(extension) && BestPracticeCodeExtensions.Contains(extension);
     }
 

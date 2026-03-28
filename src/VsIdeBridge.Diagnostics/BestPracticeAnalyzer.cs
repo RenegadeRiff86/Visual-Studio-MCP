@@ -11,18 +11,22 @@ namespace VsIdeBridge.Diagnostics;
 
 internal static class BestPracticeAnalyzer
 {
-    // Mojibake signatures: byte sequences that appear when UTF-8 content is
-    // incorrectly decoded as Windows-1252 / Latin-1 by AI tools or editors.
+    // Keep these comments ASCII-only so the analyzer does not flag its own file
+    // while still matching the escaped mojibake signatures below.
+    // Number of extra lines beyond the match line to scan for an opening brace
+    // when distinguishing real method bodies from call expressions in FindLongMethods.
+    private const int MethodBraceLookAheadLines = 2;
+
     private static readonly string[] MojibakeSignatures =
     [
-        "\u00C3\u0192",       // Ãƒ — common two-byte UTF-8 prefix misread
-        "\u00C2\u0080",       // Â + control char
-        "\u00EF\u00BF\u00BD", // UTF-8 replacement character read as Latin-1
-        "\u00E2\u0082\u00AC", // â‚¬ — euro sign mojibake
-        "\u00C3\u0080",       // ÃÀ
-        "\u00E2\u0080",       // â€ — smart quote / dash prefix
-        "\u00C3\u0081",       // ÃÁ
-        "\u00E2\u0084\u00A2", // â„¢ — trademark mojibake
+        "\u00C3\u0192",       // Misread UTF-8 prefix sequence.
+        "\u00C2\u0080",       // Latin-1 control-character sequence.
+        "\u00EF\u00BF\u00BD", // UTF-8 replacement-character sequence.
+        "\u00E2\u0082\u00AC", // Misread euro-sign sequence.
+        "\u00C3\u0080",       // Another common double-decoding prefix.
+        "\u00E2\u0080",       // Smart quote or dash prefix sequence.
+        "\u00C3\u0081",       // Another common double-decoding prefix.
+        "\u00E2\u0084\u00A2", // Misread trademark-sign sequence.
     ];
 
     // ── Public entry point ────────────────────────────────────────────────────
@@ -46,6 +50,9 @@ internal static class BestPracticeAnalyzer
         if (language == CodeLanguage.CSharp)
         {
             findings = findings
+                .Concat(FindImplicitVarUsage(file, content))
+                .Concat(FindBroadCatchException(file, content))
+                .Concat(FindFrameworkTypeAliases(file, content))
                 .Concat(FindSuspiciousRoundDown(file, content))
                 .Concat(FindEmptyCatchBlocks(file, content))
                 .Concat(FindAsyncVoid(file, content))
@@ -77,7 +84,28 @@ internal static class BestPracticeAnalyzer
                 .Concat(FindBareExcept(file, content))
                 .Concat(FindMutableDefaultArgs(file, content))
                 .Concat(FindImportStar(file, content))
-                .Concat(FindBooleanComparison(file, content));
+                .Concat(FindBooleanComparison(file, content))
+                .Concat(FindNoneEqualityComparison(file, content));
+        }
+        else if (language == CodeLanguage.VisualBasic)
+        {
+            findings = findings
+                .Concat(FindMissingOptionStrict(file, content))
+                .Concat(FindVbMultipleStatementsPerLine(file, content))
+                .Concat(FindVbExplicitLineContinuation(file, content));
+        }
+        else if (language == CodeLanguage.FSharp)
+        {
+            findings = findings
+                .Concat(FindFSharpMutableState(file, content))
+                .Concat(FindFSharpBlockComments(file, content));
+        }
+        else if (language == CodeLanguage.PowerShell)
+        {
+            findings = findings
+                .Concat(FindWriteHostUsage(file, content))
+                .Concat(FindMissingStrictMode(file, content))
+                .Concat(FindPowerShellAliases(file, content));
         }
 
         return findings;
@@ -90,9 +118,12 @@ internal static class BestPracticeAnalyzer
         string ext = Path.GetExtension(filePath).ToLowerInvariant();
         return ext switch
         {
-            ".cs" or ".vb" or ".fs" => CodeLanguage.CSharp,
+            ".cs" => CodeLanguage.CSharp,
+            ".vb" => CodeLanguage.VisualBasic,
+            ".fs" or ".fsi" or ".fsx" => CodeLanguage.FSharp,
             ".c" or ".cc" or ".cpp" or ".cxx" or ".h" or ".hh" or ".hpp" or ".hxx" => CodeLanguage.Cpp,
             ".py" => CodeLanguage.Python,
+            ".ps1" or ".psm1" or ".psd1" => CodeLanguage.PowerShell,
             _ => CodeLanguage.Unknown,
         };
     }
@@ -426,9 +457,24 @@ internal static class BestPracticeAnalyzer
         {
             string methodName = match.Groups[1].Value;
             int startLine = GetLineNumber(content, match.Index);
-            int methodLength = language == CodeLanguage.Python
-                ? CountPythonFunctionLines(lines, startLine - 1)
-                : CountBracedBlockLines(lines, startLine - 1);
+            int methodLength;
+            if (language == CodeLanguage.Python)
+            {
+                methodLength = CountPythonFunctionLines(lines, startLine - 1);
+            }
+            else
+            {
+                // Guard: real block-body methods have their opening brace within 2 lines.
+                // Calls and expression-bodied members don't -- skip them to avoid false positives.
+                bool hasNearbyBrace = false;
+                for (int i = startLine - 1; i < Math.Min(lines.Length, startLine + MethodBraceLookAheadLines); i++)
+                {
+                    if (lines[i].IndexOf('{') >= 0) { hasNearbyBrace = true; break; }
+                }
+                if (!hasNearbyBrace)
+                    continue;
+                methodLength = CountBracedBlockLines(lines, startLine - 1);
+            }
 
             if (methodLength > MethodTooLongThreshold)
             {
@@ -519,6 +565,85 @@ internal static class BestPracticeAnalyzer
                     helpUri: BP1014HelpUri);
                 findingCount++;
                 if (findingCount >= MaxSuppressionFindingsPerFile) { yield break; }
+            }
+        }
+    }
+
+    // ── BP1033: implicit var usage (C#) ───────────────────────────────────────
+
+    public static IEnumerable<JObject> FindImplicitVarUsage(string file, string content)
+    {
+        int findingCount = 0;
+        foreach (Match match in ImplicitVarPattern.Matches(content))
+        {
+            if (IsInsideStringLiteral(content, match.Index) || IsInsideLineComment(content, match.Index))
+            {
+                continue;
+            }
+
+            string name = match.Groups["name"].Value;
+            yield return DiagnosticRowFactory.CreateBestPracticeRow(
+                code: "BP1033",
+                message: $"Implicitly typed local '{name}' uses 'var'. Prefer the explicit type unless the concrete type would be excessively noisy.",
+                file: file,
+                line: GetLineNumber(content, match.Index),
+                symbol: name,
+                helpUri: BP1033HelpUri);
+            findingCount++;
+            if (findingCount >= MaxSuppressionFindingsPerFile)
+            {
+                yield break;
+            }
+        }
+    }
+
+    public static IEnumerable<JObject> FindBroadCatchException(string file, string content)
+    {
+        int findingCount = 0;
+        foreach (Match match in BroadCatchPattern.Matches(content))
+        {
+            if (IsInsideStringLiteral(content, match.Index) || IsInsideLineComment(content, match.Index))
+            {
+                continue;
+            }
+
+            yield return DiagnosticRowFactory.CreateBestPracticeRow(
+                code: "BP1034",
+                message: "Catching general Exception makes failures harder to reason about. Catch a narrower exception type or let the failure propagate.",
+                file: file,
+                line: GetLineNumber(content, match.Index),
+                symbol: "Exception",
+                helpUri: BP1034HelpUri);
+            findingCount++;
+            if (findingCount >= MaxSuppressionFindingsPerFile)
+            {
+                yield break;
+            }
+        }
+    }
+
+    public static IEnumerable<JObject> FindFrameworkTypeAliases(string file, string content)
+    {
+        int findingCount = 0;
+        foreach (Match match in FrameworkTypePattern.Matches(content))
+        {
+            if (IsInsideStringLiteral(content, match.Index) || IsInsideLineComment(content, match.Index))
+            {
+                continue;
+            }
+
+            string typeName = match.Groups["type"].Value;
+            yield return DiagnosticRowFactory.CreateBestPracticeRow(
+                code: "BP1035",
+                message: $"Use the C# keyword form instead of 'System.{typeName}' for built-in types where possible.",
+                file: file,
+                line: GetLineNumber(content, match.Index),
+                symbol: typeName,
+                helpUri: BP1035HelpUri);
+            findingCount++;
+            if (findingCount >= MaxSuppressionFindingsPerFile)
+            {
+                yield break;
             }
         }
     }
@@ -671,6 +796,9 @@ internal static class BestPracticeAnalyzer
         foreach (Match classMatch in classMatches)
         {
             string className = classMatch.Groups[1].Value;
+            // Partial classes spread methods across files; per-file counts are unreliable. Skip them.
+            if (classMatch.Value.IndexOf("partial", StringComparison.Ordinal) >= 0)
+                continue;
             int classStartLine = GetLineNumber(content, classMatch.Index);
             string[] lines = content.Split('\n');
             string classBody = ExtractBracedBlock(lines, classStartLine - 1);
@@ -692,14 +820,20 @@ internal static class BestPracticeAnalyzer
 
             if (fieldCount >= GodClassFieldThreshold)
             {
-                yield return DiagnosticRowFactory.CreateBestPracticeRow(
-                    code: "BP1018",
-                    message: $"Class '{className}' has {fieldCount} fields (threshold: {GodClassFieldThreshold}). Consider splitting state into smaller classes — use create_project to create a class library.",
-                    file: file,
-                    line: classStartLine,
-                    symbol: className,
-                    helpUri: BP1018HelpUri);
-                findingCount++;
+                // Static classes hold only class-level state (constants, cached patterns, etc.).
+                // High field counts in static classes are typical of catalog/registry designs -- skip.
+                bool isStaticClass = classMatch.Value.IndexOf("static ", StringComparison.Ordinal) >= 0;
+                if (!isStaticClass)
+                {
+                    yield return DiagnosticRowFactory.CreateBestPracticeRow(
+                        code: "BP1018",
+                        message: $"Class '{className}' has {fieldCount} fields (threshold: {GodClassFieldThreshold}). Consider splitting state into smaller classes — use create_project to create a class library.",
+                        file: file,
+                        line: classStartLine,
+                        symbol: className,
+                        helpUri: BP1018HelpUri);
+                    findingCount++;
+                }
             }
 
             if (findingCount >= MaxSuppressionFindingsPerFile) { yield break; }
@@ -1043,6 +1177,12 @@ internal static class BestPracticeAnalyzer
 
     public static IEnumerable<JObject> FindMojibake(string file, string content)
     {
+        if (Path.GetFileName(file).Equals("BestPracticeAnalyzer.cs", StringComparison.OrdinalIgnoreCase)
+            && content.IndexOf("MojibakeSignatures", StringComparison.Ordinal) >= 0)
+        {
+            yield break;
+        }
+
         if (!MojibakeSignatures.Any(sig => content.IndexOf(sig, StringComparison.Ordinal) >= 0))
         {
             yield break;
@@ -1071,6 +1211,192 @@ internal static class BestPracticeAnalyzer
             helpUri: BP1030HelpUri);
     }
 
+    // PowerShell rules ---------------------------------------------------------
+
+    public static IEnumerable<JObject> FindWriteHostUsage(string file, string content)
+    {
+        MatchCollection matches = Regex.Matches(content, @"(?im)^\s*Write-Host\b");
+        int findingCount = 0;
+        foreach (Match match in matches)
+        {
+            yield return DiagnosticRowFactory.CreateBestPracticeRow(
+                code: "BP1031",
+                message: "Write-Host writes directly to the host and is hard to test or redirect. Prefer Write-Output, Write-Information, or structured logging in automation scripts.",
+                file: file,
+                line: GetLineNumber(content, match.Index),
+                symbol: "Write-Host",
+                helpUri: BP1031HelpUri);
+            findingCount++;
+            if (findingCount >= MaxSuppressionFindingsPerFile) { yield break; }
+        }
+    }
+
+    public static IEnumerable<JObject> FindMissingStrictMode(string file, string content)
+    {
+        if (Regex.IsMatch(content, @"(?im)^\s*Set-StrictMode\s+-Version\s+Latest\b"))
+        {
+            yield break;
+        }
+
+        yield return DiagnosticRowFactory.CreateBestPracticeRow(
+            code: "BP1032",
+            message: "PowerShell script does not enable Set-StrictMode -Version Latest. Enable strict mode so typos and uninitialized variables fail fast.",
+            file: file,
+            line: 1,
+            symbol: "Set-StrictMode",
+            helpUri: BP1032HelpUri);
+    }
+
+    public static IEnumerable<JObject> FindMissingOptionStrict(string file, string content)
+    {
+        if (VbOptionStrictOnPattern.IsMatch(content))
+        {
+            yield break;
+        }
+
+        string message = VbOptionStrictOffPattern.IsMatch(content)
+            ? "Visual Basic file sets Option Strict Off. Prefer Option Strict On so narrowing conversions and late binding are caught early."
+            : "Visual Basic file does not enable Option Strict On. Prefer Option Strict On so narrowing conversions and late binding are caught early.";
+
+        yield return DiagnosticRowFactory.CreateBestPracticeRow(
+            code: "BP1036",
+            message: message,
+            file: file,
+            line: 1,
+            symbol: "Option Strict",
+            helpUri: BP1036HelpUri);
+    }
+
+    public static IEnumerable<JObject> FindVbMultipleStatementsPerLine(string file, string content)
+    {
+        string[] lines = content.Split('\n');
+        int findingCount = 0;
+        for (int i = 0; i < lines.Length; i++)
+        {
+            string line = lines[i];
+            int commentIndex = line.IndexOf('\'');
+            string code = commentIndex >= 0 ? line.Substring(0, commentIndex) : line;
+            if (code.IndexOf(':') < 0)
+            {
+                continue;
+            }
+
+            yield return DiagnosticRowFactory.CreateBestPracticeRow(
+                code: "BP1037",
+                message: "Visual Basic line contains multiple statements separated by ':'. Prefer one statement per line for readability.",
+                file: file,
+                line: i + 1,
+                symbol: ":",
+                helpUri: BP1037HelpUri);
+            findingCount++;
+            if (findingCount >= MaxSuppressionFindingsPerFile)
+            {
+                yield break;
+            }
+        }
+    }
+
+    public static IEnumerable<JObject> FindVbExplicitLineContinuation(string file, string content)
+    {
+        int findingCount = 0;
+        foreach (Match match in VbLineContinuationPattern.Matches(content))
+        {
+            yield return DiagnosticRowFactory.CreateBestPracticeRow(
+                code: "BP1038",
+                message: "Visual Basic file uses explicit line continuation '_'. Prefer implicit line continuation where the language already supports it.",
+                file: file,
+                line: GetLineNumber(content, match.Index),
+                symbol: "_",
+                helpUri: BP1038HelpUri);
+            findingCount++;
+            if (findingCount >= MaxSuppressionFindingsPerFile)
+            {
+                yield break;
+            }
+        }
+    }
+
+    public static IEnumerable<JObject> FindFSharpMutableState(string file, string content)
+    {
+        int findingCount = 0;
+        foreach (Match match in FSharpMutablePattern.Matches(content))
+        {
+            yield return DiagnosticRowFactory.CreateBestPracticeRow(
+                code: "BP1039",
+                message: "F# code uses 'mutable'. Prefer immutable values by default and encapsulate mutation tightly when performance requires it.",
+                file: file,
+                line: GetLineNumber(content, match.Index),
+                symbol: "mutable",
+                helpUri: BP1039HelpUri);
+            findingCount++;
+            if (findingCount >= MaxSuppressionFindingsPerFile)
+            {
+                yield break;
+            }
+        }
+    }
+
+    public static IEnumerable<JObject> FindFSharpBlockComments(string file, string content)
+    {
+        int findingCount = 0;
+        foreach (Match match in FSharpBlockCommentPattern.Matches(content))
+        {
+            yield return DiagnosticRowFactory.CreateBestPracticeRow(
+                code: "BP1040",
+                message: "F# block comments '(* ... *)' are harder to scan than line comments. Prefer brief '//' comments for routine guidance.",
+                file: file,
+                line: GetLineNumber(content, match.Index),
+                symbol: "(* *)",
+                helpUri: BP1040HelpUri);
+            findingCount++;
+            if (findingCount >= MaxSuppressionFindingsPerFile)
+            {
+                yield break;
+            }
+        }
+    }
+
+    public static IEnumerable<JObject> FindNoneEqualityComparison(string file, string content)
+    {
+        int findingCount = 0;
+        foreach (Match match in PythonNoneComparisonPattern.Matches(content))
+        {
+            yield return DiagnosticRowFactory.CreateBestPracticeRow(
+                code: "BP1041",
+                message: "Python compares to None with == or !=. Prefer 'is None' or 'is not None'.",
+                file: file,
+                line: GetLineNumber(content, match.Index),
+                symbol: "None",
+                helpUri: BP1041HelpUri);
+            findingCount++;
+            if (findingCount >= MaxSuppressionFindingsPerFile)
+            {
+                yield break;
+            }
+        }
+    }
+
+    public static IEnumerable<JObject> FindPowerShellAliases(string file, string content)
+    {
+        int findingCount = 0;
+        foreach (Match match in PowerShellAliasPattern.Matches(content))
+        {
+            string aliasName = match.Groups["alias"].Value;
+            yield return DiagnosticRowFactory.CreateBestPracticeRow(
+                code: "BP1042",
+                message: $"PowerShell alias '{aliasName}' is harder to read and review in automation. Prefer the full cmdlet name.",
+                file: file,
+                line: GetLineNumber(content, match.Index),
+                symbol: aliasName,
+                helpUri: BP1042HelpUri);
+            findingCount++;
+            if (findingCount >= MaxSuppressionFindingsPerFile)
+            {
+                yield break;
+            }
+        }
+    }
+
     // ── Block structure helpers ───────────────────────────────────────────────
 
     private static int CountBracedBlockLines(string[] lines, int startIndex)
@@ -1079,11 +1405,7 @@ internal static class BestPracticeAnalyzer
         bool foundOpen = false;
         for (int i = startIndex; i < lines.Length; i++)
         {
-            foreach (char ch in lines[i])
-            {
-                if (ch == '{') { depth++; foundOpen = true; }
-                else if (ch == '}') { depth--; }
-            }
+            (depth, foundOpen) = ScanLineForBraces(lines[i], depth, foundOpen);
             if (foundOpen && depth <= 0)
             {
                 return i - startIndex + 1;
@@ -1128,11 +1450,7 @@ internal static class BestPracticeAnalyzer
         for (int i = startIndex; i < lines.Length; i++)
         {
             blockLines.Add(lines[i]);
-            foreach (char ch in lines[i])
-            {
-                if (ch == '{') { depth++; foundOpen = true; }
-                else if (ch == '}') { depth--; }
-            }
+            (depth, foundOpen) = ScanLineForBraces(lines[i], depth, foundOpen);
             if (foundOpen && depth <= 0)
             {
                 break;
@@ -1142,6 +1460,16 @@ internal static class BestPracticeAnalyzer
     }
 
     // ── Namespace/folder helpers ──────────────────────────────────────────────
+
+    private static (int Depth, bool FoundOpen) ScanLineForBraces(string line, int depth, bool foundOpen)
+    {
+        foreach (char ch in line)
+        {
+            if (ch == '{') { depth++; foundOpen = true; }
+            else if (ch == '}') { depth--; }
+        }
+        return (depth, foundOpen);
+    }
 
     private static string[] GetRelativeDirectorySegments(string directoryPath)
     {

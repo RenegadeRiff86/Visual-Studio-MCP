@@ -43,6 +43,7 @@ Name: "startservice"; Description: "Start service after install"; Check: WizardI
 Source: "..\..\src\VsIdeBridgeService\bin\{#Configuration}\net8.0-windows\VsIdeBridgeService.exe"; DestDir: "{app}\cli"; DestName: "vs-ide-bridge.exe"; Flags: ignoreversion restartreplace uninsrestartdelete; BeforeInstall: KillCliProcesses
 Source: "..\..\src\VsIdeBridgeService\bin\{#Configuration}\net8.0-windows\*"; DestDir: "{app}\cli"; Flags: recursesubdirs createallsubdirs ignoreversion restartreplace uninsrestartdelete; Excludes: "VsIdeBridgeService.exe"
 Source: "..\..\src\VsIdeBridgeService\bin\{#Configuration}\net8.0-windows\*"; DestDir: "{app}\service"; Flags: recursesubdirs createallsubdirs ignoreversion restartreplace uninsrestartdelete
+Source: "..\..\src\VsIdeBridgeLauncher\bin\{#Configuration}\*"; DestDir: "{app}\service"; Flags: recursesubdirs createallsubdirs ignoreversion restartreplace uninsrestartdelete
 Source: "..\..\src\VsIdeBridge\bin\{#Configuration}\net472\VsIdeBridge.vsix"; DestDir: "{app}\vsix"; Flags: ignoreversion
 Source: "..\..\src\VsIdeBridgeInstaller\bin\{#Configuration}\net8.0-windows\python-runtime\*"; DestDir: "{app}\python\managed-runtime"; Flags: recursesubdirs createallsubdirs ignoreversion uninsrestartdelete; Check: ShouldInstallManagedPython
 

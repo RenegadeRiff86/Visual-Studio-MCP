@@ -43,14 +43,9 @@ internal static class GlobTool
             ["files"] = new JsonArray(files.Select(f => JsonValue.Create(f)).ToArray<JsonNode?>()),
         };
 
-        return Task.FromResult<JsonNode>(new JsonObject
-        {
-            ["content"] = new JsonArray
-            {
-                new JsonObject { ["type"] = "text", ["text"] = payload.ToJsonString() },
-            },
-            ["isError"] = false,
-            ["structuredContent"] = payload,
-        });
+        string successText = truncated
+            ? $"Found {files.Count} file(s) for pattern '{pattern}' before reaching the max limit of {max}."
+            : $"Found {files.Count} file(s) for pattern '{pattern}'.";
+        return Task.FromResult(ToolResultFormatter.StructuredToolResult(payload, args, successText: successText));
     }
 }

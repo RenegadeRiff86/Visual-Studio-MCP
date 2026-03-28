@@ -2,6 +2,7 @@ using EnvDTE;
 using EnvDTE80;
 using Microsoft.VisualStudio.Shell;
 using Newtonsoft.Json.Linq;
+using System;
 using System.Linq;
 using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
@@ -24,8 +25,8 @@ internal sealed class BreakpointService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        var normalizedPath = PathNormalization.NormalizeFilePath(filePath);
-        var existing = FindBreakpoint(dte, normalizedPath, line);
+        string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
+        Breakpoint? existing = FindBreakpoint(dte, normalizedPath, line);
         existing?.Delete();
 
         dte.Debugger.Breakpoints.Add(
@@ -38,7 +39,21 @@ internal sealed class BreakpointService
             HitCountType: MapHitCountType(hitType));
 
         existing = FindBreakpoint(dte, normalizedPath, line)
-            ?? throw new CommandErrorException("internal_error", "Breakpoint was created but could not be resolved afterward.");
+            ?? FindNearestBreakpoint(dte, normalizedPath, line);
+
+        if (existing is null)
+        {
+            return CreatePendingBreakpointResult(
+                normalizedPath,
+                line,
+                column,
+                condition,
+                conditionType,
+                hitCount,
+                hitType,
+                traceMessage,
+                continueExecution);
+        }
 
         existing.Enabled = true;
         if (existing is Breakpoint2 advancedBreakpoint)
@@ -47,13 +62,13 @@ internal sealed class BreakpointService
             advancedBreakpoint.BreakWhenHit = !continueExecution;
         }
 
-        return SerializeBreakpoint(existing);
+        return SerializeBreakpoint(existing, normalizedPath, line);
     }
 
     public async Task<JObject> ListBreakpointsAsync(DTE2 dte)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        var items = new JArray(dte.Debugger.Breakpoints.Cast<Breakpoint>().Select(SerializeBreakpoint));
+        JArray items = new JArray(dte.Debugger.Breakpoints.Cast<Breakpoint>().Select(breakpoint => SerializeBreakpoint(breakpoint)));
         return new JObject
         {
             ["count"] = items.Count,
@@ -65,11 +80,11 @@ internal sealed class BreakpointService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        var normalizedPath = PathNormalization.NormalizeFilePath(filePath);
-        var matches = dte.Debugger.Breakpoints
+        string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
+        Breakpoint[] matches = dte.Debugger.Breakpoints
             .Cast<Breakpoint>()
             .Where(breakpoint => MatchesBreakpointLocation(breakpoint, normalizedPath, line))
-            .ToList();
+            .ToArray();
 
         foreach (var breakpoint in matches)
         {
@@ -78,7 +93,7 @@ internal sealed class BreakpointService
 
         return new JObject
         {
-            ["removedCount"] = matches.Count,
+            ["removedCount"] = matches.Length,
             ["remainingCount"] = dte.Debugger.Breakpoints.Count,
             ["file"] = normalizedPath,
             ["line"] = line,
@@ -89,7 +104,7 @@ internal sealed class BreakpointService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        var count = dte.Debugger.Breakpoints.Count;
+        int count = dte.Debugger.Breakpoints.Count;
         foreach (Breakpoint breakpoint in dte.Debugger.Breakpoints.Cast<Breakpoint>().ToList())
         {
             breakpoint.Delete();
@@ -106,27 +121,27 @@ internal sealed class BreakpointService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        var normalizedPath = PathNormalization.NormalizeFilePath(filePath);
-        var bp = FindBreakpoint(dte, normalizedPath, line) ?? throw new CommandErrorException("not_found", $"No breakpoint found at {normalizedPath}:{line}");
+        string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
+        Breakpoint bp = FindBreakpoint(dte, normalizedPath, line) ?? throw new CommandErrorException("not_found", $"No breakpoint found at {normalizedPath}:{line}");
         bp.Enabled = true;
-        return SerializeBreakpoint(bp);
+        return SerializeBreakpoint(bp, normalizedPath, line);
     }
 
     public async Task<JObject> DisableBreakpointAsync(DTE2 dte, string filePath, int line)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        var normalizedPath = PathNormalization.NormalizeFilePath(filePath);
-        var bp = FindBreakpoint(dte, normalizedPath, line) ?? throw new CommandErrorException("not_found", $"No breakpoint found at {normalizedPath}:{line}");
+        string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
+        Breakpoint bp = FindBreakpoint(dte, normalizedPath, line) ?? throw new CommandErrorException("not_found", $"No breakpoint found at {normalizedPath}:{line}");
         bp.Enabled = false;
-        return SerializeBreakpoint(bp);
+        return SerializeBreakpoint(bp, normalizedPath, line);
     }
 
     public async Task<JObject> EnableAllBreakpointsAsync(DTE2 dte)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        var count = 0;
+        int count = 0;
         foreach (Breakpoint bp in dte.Debugger.Breakpoints)
         {
             bp.Enabled = true;
@@ -144,7 +159,7 @@ internal sealed class BreakpointService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        var count = 0;
+        int count = 0;
         foreach (Breakpoint bp in dte.Debugger.Breakpoints)
         {
             bp.Enabled = false;
@@ -166,37 +181,68 @@ internal sealed class BreakpointService
             .FirstOrDefault(breakpoint => MatchesBreakpointLocation(breakpoint, normalizedPath, line));
     }
 
+    private static Breakpoint? FindNearestBreakpoint(DTE2 dte, string normalizedPath, int requestedLine)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        Breakpoint? nearest = null;
+        int nearestDistance = int.MaxValue;
+
+        foreach (Breakpoint breakpoint in dte.Debugger.Breakpoints)
+        {
+            if (!PathNormalization.AreEquivalent(breakpoint.File, normalizedPath))
+            {
+                continue;
+            }
+
+            int distance = Math.Abs(breakpoint.FileLine - requestedLine);
+            if (distance >= nearestDistance)
+            {
+                continue;
+            }
+
+            nearest = breakpoint;
+            nearestDistance = distance;
+        }
+
+        return nearest;
+    }
+
     private static bool MatchesBreakpointLocation(Breakpoint breakpoint, string normalizedPath, int line)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var file = breakpoint.File;
-        var fileLine = breakpoint.FileLine;
+        string file = breakpoint.File;
+        int fileLine = breakpoint.FileLine;
         return PathNormalization.AreEquivalent(file, normalizedPath) && fileLine == line;
     }
 
-    private static JObject SerializeBreakpoint(Breakpoint breakpoint)
+    private static JObject SerializeBreakpoint(Breakpoint breakpoint, string? requestedPath = null, int? requestedLine = null)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var file = breakpoint.File ?? string.Empty;
-        var line = breakpoint.FileLine;
-        var column = breakpoint.FileColumn;
-        var function = breakpoint.FunctionName ?? string.Empty;
-        var enabled = breakpoint.Enabled;
-        var condition = breakpoint.Condition ?? string.Empty;
-        var conditionType = breakpoint.ConditionType.ToString();
-        var hitCountTarget = breakpoint.HitCountTarget;
-        var hitCountType = breakpoint.HitCountType.ToString();
-        var name = breakpoint.Name ?? string.Empty;
-        var advancedBreakpoint = breakpoint as Breakpoint2;
-        var traceMessage = advancedBreakpoint?.Message;
-        var breakWhenHit = advancedBreakpoint?.BreakWhenHit ?? true;
+        string file = breakpoint.File ?? string.Empty;
+        int line = breakpoint.FileLine;
+        int column = breakpoint.FileColumn;
+        string function = breakpoint.FunctionName ?? string.Empty;
+        bool enabled = breakpoint.Enabled;
+        string condition = breakpoint.Condition ?? string.Empty;
+        string conditionType = breakpoint.ConditionType.ToString();
+        int hitCountTarget = breakpoint.HitCountTarget;
+        string hitCountType = breakpoint.HitCountType.ToString();
+        string name = breakpoint.Name ?? string.Empty;
+        Breakpoint2? advancedBreakpoint = breakpoint as Breakpoint2;
+        string? traceMessage = advancedBreakpoint?.Message;
+        bool breakWhenHit = advancedBreakpoint?.BreakWhenHit ?? true;
         return new JObject
         {
             ["file"] = file,
             ["line"] = line,
             ["column"] = column,
+            ["status"] = "bound",
+            ["resolved"] = requestedPath is null || requestedLine is null
+                ? true
+                : MatchesBreakpointLocation(breakpoint, requestedPath, requestedLine.Value),
             ["function"] = function,
             ["enabled"] = enabled,
             ["condition"] = condition,
@@ -206,6 +252,36 @@ internal sealed class BreakpointService
             ["name"] = name,
             ["traceMessage"] = string.IsNullOrWhiteSpace(traceMessage) ? JValue.CreateNull() : traceMessage,
             ["breakWhenHit"] = breakWhenHit,
+        };
+    }
+
+    private static JObject CreatePendingBreakpointResult(
+        string normalizedPath,
+        int line,
+        int column,
+        string? condition,
+        string conditionType,
+        int hitCount,
+        string hitType,
+        string? traceMessage,
+        bool continueExecution)
+    {
+        return new JObject
+        {
+            ["file"] = normalizedPath,
+            ["line"] = line,
+            ["column"] = column,
+            ["status"] = "pending",
+            ["resolved"] = false,
+            ["function"] = string.Empty,
+            ["enabled"] = true,
+            ["condition"] = condition ?? string.Empty,
+            ["conditionType"] = conditionType,
+            ["hitCountTarget"] = hitCount,
+            ["hitCountType"] = hitType,
+            ["name"] = string.Empty,
+            ["traceMessage"] = string.IsNullOrWhiteSpace(traceMessage) ? JValue.CreateNull() : traceMessage,
+            ["breakWhenHit"] = !continueExecution,
         };
     }
 

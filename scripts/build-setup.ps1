@@ -5,6 +5,8 @@ param(
     [string]$ScriptPath = "installer\inno\vs-ide-bridge.iss"
 )
 
+Set-StrictMode -Version Latest
+
 function Normalize-ExtendedPath {
     param([string]$Path)
 
@@ -46,12 +48,12 @@ if ([string]::IsNullOrWhiteSpace($scriptRoot)) {
 # ── Optional build step ────────────────────────────────────────────────────────
 if ($Build) {
     $buildBat = [System.IO.Path]::Combine($scriptRoot, "build.bat")
-    Write-Host "Building $Configuration..." -ForegroundColor Cyan
+    Write-Information "Building $Configuration..." -InformationAction Continue
     & cmd /c "`"$buildBat`" $Configuration"
     if ($LASTEXITCODE -ne 0) {
         throw "Build failed (exit $LASTEXITCODE). Aborting installer package."
     }
-    Write-Host "Build succeeded." -ForegroundColor Green
+    Write-Information "Build succeeded." -InformationAction Continue
 }
 
 # ── Locate ISCC.exe ───────────────────────────────────────────────────────────
@@ -78,9 +80,9 @@ if (-not (Test-Path $script)) {
     throw "Inno Setup script not found: $script"
 }
 
-Write-Host "ISCC    : $iscc" -ForegroundColor Cyan
-Write-Host "Script  : $script" -ForegroundColor Cyan
-Write-Host ""
+Write-Information "ISCC    : $iscc" -InformationAction Continue
+Write-Information "Script  : $script" -InformationAction Continue
+Write-Information "" -InformationAction Continue
 
 & $iscc $script
 exit $LASTEXITCODE

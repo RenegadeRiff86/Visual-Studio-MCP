@@ -129,44 +129,74 @@ internal sealed partial class SearchService
             return;
         }
 
-        if (s_codeModelKinds.Contains(kind))
+        if (!s_codeModelKinds.Contains(kind))
         {
-            string normalizedKind = NormalizeKind(kind);
-            if (MatchesKind(kindFilter, normalizedKind))
-            {
-                string name = TryGetElementName(element);
-                string fullName = TryGetFullName(element);
-                int score = ScoreSymbolMatch(query, name, fullName, comparison, out string matchKind);
-                if (score > 0)
-                {
-                    int line = TryGetLine(element.StartPoint);
-                    int endLine = TryGetLine(element.EndPoint);
-                    string signature = TryGetSignature(element, fullName, name);
-                    string key = $"{path}|{normalizedKind}|{fullName}|{line}";
-                    if (seen.Add(key))
-                    {
-                        hits.Add(new CodeModelHit
-                        {
-                            Path = path,
-                            ProjectUniqueName = projectUniqueName,
-                            Name = name,
-                            FullName = fullName,
-                            Kind = normalizedKind,
-                            Signature = signature,
-                            Line = line,
-                            EndLine = endLine,
-                            Score = score,
-                            MatchKind = matchKind,
-                        });
-                    }
-                }
-            }
+            return;
+        }
+
+        if (!TryCreateMatchingSymbolHit(element, kind, path, projectUniqueName, query, kindFilter, comparison, out CodeModelHit? hit, out string key))
+        {
+            return;
+        }
+
+        if (hit is not null && seen.Add(key))
+        {
+            hits.Add(hit);
         }
 
         foreach (CodeElement child in EnumerateChildren(element))
         {
             CollectMatchingSymbols(child, path, projectUniqueName, query, kindFilter, comparison, hits, seen);
         }
+    }
+
+    private static bool TryCreateMatchingSymbolHit(
+        CodeElement element,
+        vsCMElement kind,
+        string path,
+        string projectUniqueName,
+        string query,
+        string kindFilter,
+        StringComparison comparison,
+        out CodeModelHit? hit,
+        out string key)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        hit = null;
+        key = string.Empty;
+
+        string normalizedKind = NormalizeKind(kind);
+        if (!MatchesKind(kindFilter, normalizedKind))
+        {
+            return false;
+        }
+
+        string name = TryGetElementName(element);
+        string fullName = TryGetFullName(element);
+        int score = ScoreSymbolMatch(query, name, fullName, comparison, out string matchKind);
+        if (score <= 0)
+        {
+            return false;
+        }
+
+        int line = TryGetLine(element.StartPoint);
+        int endLine = TryGetLine(element.EndPoint);
+        key = $"{path}|{normalizedKind}|{fullName}|{line}";
+        hit = new CodeModelHit
+        {
+            Path = path,
+            ProjectUniqueName = projectUniqueName,
+            Name = name,
+            FullName = fullName,
+            Kind = normalizedKind,
+            Signature = TryGetSignature(element, fullName, name),
+            Line = line,
+            EndLine = endLine,
+            Score = score,
+            MatchKind = matchKind,
+        };
+        return true;
     }
 
     private static IEnumerable<CodeElement> EnumerateChildren(CodeElement element)

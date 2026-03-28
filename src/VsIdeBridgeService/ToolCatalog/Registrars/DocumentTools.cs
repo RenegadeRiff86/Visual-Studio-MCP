@@ -32,13 +32,21 @@ internal static partial class ToolCatalog
     }
 
     private static IEnumerable<ToolEntry> DocumentTools()
+        =>
+        DocumentEditTools()
+            .Concat(DocumentTabTools())
+            .Concat(WindowCommandTools())
+            .Concat(FileOperationTools())
+            .Concat(SolutionSystemTools());
+
+    private static IEnumerable<ToolEntry> DocumentEditTools()
     {
         yield return new(
             ToolDefinitionCatalog.ApplyDiff(
                 ObjectSchema(
                     Req("patch", "Patch text in editor patch or unified diff format."),
                     OptBool(PostCheck,
-                        "Run wait_for_ready and errors after applying (default true)."))),
+                        "Queue a quick diagnostics refresh after applying (default false)."))),
             async (id, args, bridge) =>
             {
                 JsonObject result = await bridge.SendAsync(
@@ -47,7 +55,7 @@ internal static partial class ToolCatalog
                     BuildApplyDiffArgs(args))
                     .ConfigureAwait(false);
 
-                if (ArgBuilder.OptionalBool(args, PostCheck, true))
+                if (ArgBuilder.OptionalBool(args, PostCheck, false))
                 {
                     result["postCheck"] = RunDocumentPostCheck(bridge, "apply_diff");
                 }
@@ -60,20 +68,23 @@ internal static partial class ToolCatalog
                 ObjectSchema(
                     Req(FileArg, FileDesc),
                     Req("content", "Full UTF-8 text content to write."),
-                    OptBool(PostCheck, "Run wait_for_ready and errors after writing (default true)."))),
+                    OptBool(PostCheck, "Queue a quick diagnostics refresh after writing (default false)."))),
             async (id, args, bridge) =>
             {
-                JsonObject result = await bridge.SendAsync(id, "write-FileArg", BuildWriteFileArgs(args))
+                JsonObject result = await bridge.SendAsync(id, "write-file", BuildWriteFileArgs(args))
                     .ConfigureAwait(false);
 
-                if (ArgBuilder.OptionalBool(args, PostCheck, true))
+                if (ArgBuilder.OptionalBool(args, PostCheck, false))
                 {
                     result["postCheck"] = RunDocumentPostCheck(bridge, "write_file");
                 }
 
                 return BridgeResult(result);
             });
+    }
 
+    private static IEnumerable<ToolEntry> DocumentTabTools()
+    {
         yield return BridgeTool("open_file",
             "Open a document by absolute path, solution-relative path, or solution item name.",
             ObjectSchema(
@@ -89,7 +100,7 @@ internal static partial class ToolCatalog
         yield return BridgeTool("close_file",
             "Close one editor tab by exact FileArg path (preferred) or caption query. Use when you have the FileArg path.",
             ObjectSchema(Opt(FileArg, "FileArg path to close."), Opt(Query, "Tab caption query.")),
-            "close-FileArg",
+            "close-file",
             a => Build(
                 (FileArg, OptionalString(a, FileArg)),
                 (Query, OptionalString(a, Query))));
@@ -117,7 +128,7 @@ internal static partial class ToolCatalog
         yield return BridgeTool("reload_document",
             "Reload a document from disk — required after native Edit/Write tool changes. VS does not auto-detect external writes. Call after every .cs edit, then check errors.",
             ObjectSchema(Req(FileArg, FileDesc)),
-            "open-document",
+            "reload-document",
             a => Build((FileArg, OptionalString(a, FileArg))));
 
         yield return BridgeTool("list_documents",
@@ -133,7 +144,10 @@ internal static partial class ToolCatalog
             ObjectSchema(Req(Query, "FileArg name or tab caption fragment.")),
             "activate-document",
             a => Build((Query, OptionalString(a, Query))));
+    }
 
+    private static IEnumerable<ToolEntry> WindowCommandTools()
+    {
         yield return BridgeTool("list_windows",
             "List Visual Studio tool windows (Solution Explorer, Error List, Output, etc.).",
             ObjectSchema(Opt(Query, "Optional caption filter.")),
@@ -187,35 +201,10 @@ internal static partial class ToolCatalog
                     (Line, OptionalText(a, Line)),
                     (Column, OptionalText(a, Column)));
             });
+    }
 
-        yield return BridgeTool("open_solution",
-            "Open a specific existing .sln or .slnx file in the current Visual Studio instance.",
-            ObjectSchema(
-                Req("solution", "Absolute path to the .sln or .slnx file."),
-                OptBool("wait_for_ready", "Wait for readiness after opening (default true).")),
-            "open-solution",
-            a => Build(
-                ("solution", OptionalString(a, "solution")),
-                BoolArg("wait-for-ready", a, "wait_for_ready", true, true)));
-
-        yield return BridgeTool("create_solution",
-            "Create and open a new solution in the current Visual Studio instance.",
-            ObjectSchema(
-                Req("directory", "Absolute directory where the solution should be created."),
-                Req("name", "Solution name ('.sln' is optional.)")),
-            "create-solution",
-            a => Build(
-                ("directory", OptionalString(a, "directory")),
-                ("name", OptionalString(a, "name"))));
-
-        yield return new("vs_close",
-            "Close a Visual Studio instance by process id, or the currently bound instance.",
-            ObjectSchema(
-                OptInt("process_id", "Process ID of the VS instance to close. Defaults to bound instance."),
-                OptBool("force", "Kill the process instead of gracefully closing (default false).")),
-            "system",
-            (id, args, bridge) => VsCloseAsync(id, args, bridge));
-
+    private static IEnumerable<ToolEntry> FileOperationTools()
+    {
         yield return new("delete_file",
             "Delete a FileArg from disk and close its editor tab. " +
             "SDK-style projects auto-update when a FileArg disappears from disk. " +
@@ -252,12 +241,7 @@ internal static partial class ToolCatalog
                     ["deleted"] = true,
                     ["path"] = resolvedPath,
                 };
-                return new JsonObject
-                {
-                    ["content"] = new JsonArray { new JsonObject { ["type"] = "text", ["text"] = delPayload.ToJsonString() } },
-                    ["isError"] = false,
-                    ["structuredContent"] = delPayload,
-                };
+                return ToolResultFormatter.StructuredToolResult(delPayload, args, successText: $"Deleted file '{resolvedPath}'.");
             },
             destructive: true);
 
@@ -294,14 +278,41 @@ internal static partial class ToolCatalog
                     ["source"] = resolvedSource,
                     ["destination"] = resolvedDest,
                 };
-                return new JsonObject
-                {
-                    ["content"] = new JsonArray { new JsonObject { ["type"] = "text", ["text"] = copyPayload.ToJsonString() } },
-                    ["isError"] = false,
-                    ["structuredContent"] = copyPayload,
-                };
+                return ToolResultFormatter.StructuredToolResult(copyPayload, args,
+                    successText: $"Copied '{resolvedSource}' to '{resolvedDest}'.");
             },
             mutating: true);
+    }
+
+    private static IEnumerable<ToolEntry> SolutionSystemTools()
+    {
+        yield return BridgeTool("open_solution",
+            "Open a specific existing .sln or .slnx file in the current Visual Studio instance.",
+            ObjectSchema(
+                Req("solution", "Absolute path to the .sln or .slnx file."),
+                OptBool("wait_for_ready", "Wait for readiness after opening (default true).")),
+            "open-solution",
+            a => Build(
+                ("solution", OptionalString(a, "solution")),
+                BoolArg("wait-for-ready", a, "wait_for_ready", true, true)));
+
+        yield return BridgeTool("create_solution",
+            "Create and open a new solution in the current Visual Studio instance.",
+            ObjectSchema(
+                Req("directory", "Absolute directory where the solution should be created."),
+                Req("name", "Solution name ('.sln' is optional.)")),
+            "create-solution",
+            a => Build(
+                ("directory", OptionalString(a, "directory")),
+                ("name", OptionalString(a, "name"))));
+
+        yield return new("vs_close",
+            "Close a Visual Studio instance by process id, or the currently bound instance.",
+            ObjectSchema(
+                OptInt("process_id", "Process ID of the VS instance to close. Defaults to bound instance."),
+                OptBool("force", "Kill the process instead of gracefully closing (default false).")),
+            "system",
+            (id, args, bridge) => VsCloseAsync(id, args, bridge));
 
         yield return new("shell_exec",
             "Execute an arbitrary external process and capture stdout, stderr, and exit code. " +

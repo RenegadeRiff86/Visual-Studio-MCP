@@ -4,6 +4,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <AssemblyName>VsIdeBridgeLauncher.Tests</AssemblyName>
+    <RootNamespace>VsIdeBridgeLauncher.Tests</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,6 +23,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="..\..\src\VsIdeBridge\Services\MemoryDiscoveryStore.cs" Link="Bridge\MemoryDiscoveryStore.cs" />
+    <Compile Include="..\..\src\VsIdeBridgeLauncher\LauncherProcessSelection.cs">
+      <Link>LauncherProcessSelection.cs</Link>
+    </Compile>
   </ItemGroup>
 </Project>

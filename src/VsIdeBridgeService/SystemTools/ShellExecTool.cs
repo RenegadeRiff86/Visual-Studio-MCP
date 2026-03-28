@@ -70,19 +70,11 @@ internal static class ShellExecTool
             ["outputTruncated"] = outputTruncated,
         };
 
-        return new JsonObject
-        {
-            ["content"] = new JsonArray
-            {
-                new JsonObject
-                {
-                    ["type"] = "text",
-                    ["text"] = payload.ToJsonString(),
-                },
-            },
-            ["isError"] = process.ExitCode != 0,
-            ["structuredContent"] = payload,
-        };
+        bool success = process.ExitCode == 0;
+        string successText = outputTruncated
+            ? $"Process '{executable}' exited with code {process.ExitCode}. Output was truncated."
+            : $"Process '{executable}' exited with code {process.ExitCode}.";
+        return ToolResultFormatter.StructuredToolResult(payload, args, isError: !success, successText: successText);
     }
 
     private static string ResolveWorkingDirectory(JsonObject? args, BridgeConnection bridge)

@@ -89,7 +89,7 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
 
     public void RecordCommandCompleted(string commandName, string? requestId, bool success, double durationMs, string? errorCode)
     {
-        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         lock (_sync)
         {
             _totalCommands++;
@@ -130,17 +130,17 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
     {
         lock (_sync)
         {
-            var now = DateTimeOffset.UtcNow;
-            var probeStalled = _probeTask is { IsCompleted: false } &&
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            bool probeStalled = _probeTask is { IsCompleted: false } &&
                 _probeTimeoutRecorded &&
                 _probeStartedAtUtc != default;
-            var probeStalledForMs = probeStalled
+            double probeStalledForMs = probeStalled
                 ? Math.Max(0, (now - _probeStartedAtUtc).TotalMilliseconds)
                 : 0;
-            var timeoutWindowOpen = _lastTimeoutCommandAtUtc is not null &&
+            bool timeoutWindowOpen = _lastTimeoutCommandAtUtc is not null &&
                 (now - _lastTimeoutCommandAtUtc.Value).TotalMilliseconds <= CommandTimeoutDegradedWindowMilliseconds;
-            var degraded = _isDegraded || probeStalled || timeoutWindowOpen;
-            var degradedReason = _degradedReason;
+            bool degraded = _isDegraded || probeStalled || timeoutWindowOpen;
+            string degradedReason = _degradedReason;
             if (probeStalled)
             {
                 degradedReason = "watchdog_probe_timeout";
@@ -150,8 +150,8 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
                 degradedReason = "command_timeout_recent";
             }
 
-            var totalCompletedCommands = _successfulCommands + _failedCommands;
-            var averageCommandDurationMs = totalCompletedCommands > 0
+            long totalCompletedCommands = _successfulCommands + _failedCommands;
+            double averageCommandDurationMs = totalCompletedCommands > 0
                 ? _sumCommandDurationMs / totalCompletedCommands
                 : 0.0;
 
@@ -263,11 +263,11 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
     private async Task TickAsync(CancellationToken cancellationToken)
     {
         Task<double>? completedProbe = null;
-        var completedProbeWasTimedOut = false;
-        var shouldStartProbe = false;
-        var shouldRecordTimeout = false;
-        var timeoutElapsedMs = 0.0;
-        var now = DateTimeOffset.UtcNow;
+        bool completedProbeWasTimedOut = false;
+        bool shouldStartProbe = false;
+        bool shouldRecordTimeout = false;
+        double timeoutElapsedMs = 0.0;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
 
         lock (_sync)
         {
@@ -302,7 +302,7 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
         {
             try
             {
-                var durationMs = await completedProbe.ConfigureAwait(false);
+                double durationMs = await completedProbe.ConfigureAwait(false);
                 RecordProbeSuccess(durationMs, completedProbeWasTimedOut);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -325,10 +325,10 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
 
     private void StartProbe(CancellationToken cancellationToken)
     {
-        var startedAtUtc = DateTimeOffset.UtcNow;
-        var task = _package.JoinableTaskFactory.RunAsync(async () =>
+        DateTimeOffset startedAtUtc = DateTimeOffset.UtcNow;
+        Task<double> task = _package.JoinableTaskFactory.RunAsync(async () =>
         {
-            var stopwatch = Stopwatch.StartNew();
+            Stopwatch stopwatch = Stopwatch.StartNew();
             await _package.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
             stopwatch.Stop();
             return stopwatch.Elapsed.TotalMilliseconds;
@@ -350,7 +350,7 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
 
     private void RecordProbeTimeout(double elapsedMs)
     {
-        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         lock (_sync)
         {
             _totalProbeTimeouts++;
@@ -368,7 +368,7 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
 
     private void RecordProbeFailure(string message)
     {
-        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         lock (_sync)
         {
             _totalProbeFailures++;
@@ -387,7 +387,7 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
 
     private void RecordProbeSuccess(double durationMs, bool recoveredFromTimeout)
     {
-        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         lock (_sync)
         {
             _lastProbeCompletedAtUtc = now;
@@ -400,7 +400,7 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
             _lastProbeError = string.Empty;
             _consecutiveUnhealthyProbes = 0;
 
-            var timeoutWindowOpen = _lastTimeoutCommandAtUtc is not null &&
+            bool timeoutWindowOpen = _lastTimeoutCommandAtUtc is not null &&
                 (now - _lastTimeoutCommandAtUtc.Value).TotalMilliseconds <= CommandTimeoutDegradedWindowMilliseconds;
             if (!timeoutWindowOpen)
             {

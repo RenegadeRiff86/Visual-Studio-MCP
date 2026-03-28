@@ -10,9 +10,16 @@ internal static partial class ToolCatalog
     private const int DefaultDiffContext = 3;
 
     private static IEnumerable<ToolEntry> GitTools()
-    {
-        // ── Read-only / inspection ────────────────────────────────────────────
+        =>
+        GitStatusAndHistoryTools()
+            .Concat(GitDiffAndMetaTools())
+            .Concat(GitStagingCommitTools())
+            .Concat(GitBranchTools())
+            .Concat(GitNetworkTools())
+            .Concat(GitStashTools());
 
+    private static IEnumerable<ToolEntry> GitStatusAndHistoryTools()
+    {
         yield return new("git_status",
             "Show working-tree status (porcelain v1 + branch). Use this before committing " +
             "to see modified, staged, and untracked files.",
@@ -30,7 +37,7 @@ internal static partial class ToolCatalog
             async (id, _, bridge) =>
             {
                 string repo = ServiceToolPaths.ResolveSolutionDirectory(bridge);
-                return await GitRunner.RunAsync(id, repo, "branch --show-current")
+                return await GitSdkReader.GetCurrentBranchAsync(id, repo)
                     .ConfigureAwait(false);
             });
 
@@ -40,7 +47,7 @@ internal static partial class ToolCatalog
             async (id, _, bridge) =>
             {
                 string repo = ServiceToolPaths.ResolveSolutionDirectory(bridge);
-                return await GitRunner.RunAsync(id, repo, "branch --all --verbose --no-abbrev")
+                return await GitSdkReader.GetBranchListAsync(id, repo)
                     .ConfigureAwait(false);
             });
 
@@ -52,9 +59,7 @@ internal static partial class ToolCatalog
             {
                 string repo = ServiceToolPaths.ResolveSolutionDirectory(bridge);
                 int max = args?["max_count"]?.GetValue<int?>() ?? 20;
-                string gitArgs = $"log --max-count={max} --date=iso-strict " +
-                                 "--pretty=format:\"%H %ad %s\" --no-walk=unsorted --date-order";
-                return await GitRunner.RunAsync(id, repo, gitArgs).ConfigureAwait(false);
+                return await GitSdkReader.GetLogAsync(id, repo, max).ConfigureAwait(false);
             });
 
         yield return new("git_show",
@@ -68,7 +73,10 @@ internal static partial class ToolCatalog
                 return await GitRunner.RunAsync(id, repo, $"show --no-color {EscapeArg(rev)}")
                     .ConfigureAwait(false);
             });
+    }
 
+    private static IEnumerable<ToolEntry> GitDiffAndMetaTools()
+    {
         yield return new("git_diff_unstaged",
             "Show unstaged changes in the working tree (not yet git-added).",
             ObjectSchema(OptInt("context", "Lines of context around each hunk (default 3).")),
@@ -99,7 +107,7 @@ internal static partial class ToolCatalog
             async (id, _, bridge) =>
             {
                 string repo = ServiceToolPaths.ResolveSolutionDirectory(bridge);
-                return await GitRunner.RunAsync(id, repo, "remote --verbose").ConfigureAwait(false);
+                return await GitSdkReader.GetRemoteListAsync(id, repo).ConfigureAwait(false);
             });
 
         yield return new("git_tag_list",
@@ -120,9 +128,10 @@ internal static partial class ToolCatalog
                 string repo = ServiceToolPaths.ResolveSolutionDirectory(bridge);
                 return await GitRunner.RunAsync(id, repo, "stash list").ConfigureAwait(false);
             });
+    }
 
-        // ── Staging ───────────────────────────────────────────────────────────
-
+    private static IEnumerable<ToolEntry> GitStagingCommitTools()
+    {
         yield return new("git_add",
             "Stage files for the next commit. Pass an array of paths relative to the repo root, " +
             "or [\".\" ] to stage everything.",
@@ -165,8 +174,6 @@ internal static partial class ToolCatalog
                     .ConfigureAwait(false);
             });
 
-        // ── Committing ────────────────────────────────────────────────────────
-
         yield return new("git_commit",
             "Create a commit with a message. Stage files with git_add first.",
             ObjectSchema(Req(Message, "Commit message.")),
@@ -197,9 +204,10 @@ internal static partial class ToolCatalog
                 return await GitRunner.RunAsync(id, repo, $"commit --amend {msgArg}".TrimEnd())
                     .ConfigureAwait(false);
             });
+    }
 
-        // ── Branch management ─────────────────────────────────────────────────
-
+    private static IEnumerable<ToolEntry> GitBranchTools()
+    {
         yield return new("git_checkout",
             "Switch to an existing branch, tag, or commit.",
             ObjectSchema(Req("target", "Branch name, tag, or commit SHA to check out.")),
@@ -227,9 +235,10 @@ internal static partial class ToolCatalog
                 return await GitRunner.RunAsync(id, repo, $"checkout -b {EscapeArg(name)}{startArg}")
                     .ConfigureAwait(false);
             });
+    }
 
-        // ── Remote operations (network, longer timeout) ────────────────────────
-
+    private static IEnumerable<ToolEntry> GitNetworkTools()
+    {
         yield return new("git_fetch",
             "Fetch from a remote without merging. Defaults to all remotes.",
             ObjectSchema(
@@ -318,9 +327,10 @@ internal static partial class ToolCatalog
                     $"merge {flags} {EscapeArg(source)}".TrimEnd())
                     .ConfigureAwait(false);
             });
+    }
 
-        // ── Stash ─────────────────────────────────────────────────────────────
-
+    private static IEnumerable<ToolEntry> GitStashTools()
+    {
         yield return new("git_stash_push",
             "Stash current working-tree and index changes.",
             ObjectSchema(

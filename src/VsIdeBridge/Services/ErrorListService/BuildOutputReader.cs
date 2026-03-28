@@ -88,7 +88,7 @@ internal sealed partial class ErrorListService
         {
             dte.ExecuteCommand("View.ErrorList", string.Empty);
         }
-        catch (Exception ex)
+        catch (COMException ex)
         {
             LogNonCriticalException(ex);
         }
@@ -102,7 +102,7 @@ internal sealed partial class ErrorListService
         {
             dte.ExecuteCommand("View.Output", string.Empty);
         }
-        catch (Exception ex)
+        catch (COMException ex)
         {
             LogNonCriticalException(ex);
         }
@@ -111,7 +111,7 @@ internal sealed partial class ErrorListService
         {
             pane.Activate();
         }
-        catch (Exception ex)
+        catch (COMException ex)
         {
             LogNonCriticalException(ex);
         }
@@ -205,7 +205,19 @@ internal sealed partial class ErrorListService
         {
             return PathNormalization.NormalizeFilePath(value);
         }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        catch (ArgumentException)
+        {
+            // Build output can include non-path tokens in the file column; keep the raw value
+            // so diagnostics still flow without failing the entire error-list request.
+            return value;
+        }
+        catch (NotSupportedException)
+        {
+            // Build output can include non-path tokens in the file column; keep the raw value
+            // so diagnostics still flow without failing the entire error-list request.
+            return value;
+        }
+        catch (PathTooLongException)
         {
             // Build output can include non-path tokens in the file column; keep the raw value
             // so diagnostics still flow without failing the entire error-list request.

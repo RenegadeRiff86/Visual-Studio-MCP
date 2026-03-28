@@ -2,12 +2,17 @@
 
 Purpose: define where code belongs so service-first cleanup has a stable target instead of growing from one-off fixes.
 
-## Current Cleanup Snapshot
+- For product runtime guidance, read [README.md](README.md).
+- For LLM workflow rules, read [AGENTS.md](AGENTS.md).
+- For current runtime gaps, read [BUGS.md](BUGS.md).
+- For the remaining cleanup queue, read [ROADMAP.md](ROADMAP.md).
 
-- `VsIdeBridge.Discovery` and `VsIdeBridge.Tooling` are now real project boundaries in this clone.
-- `ToolDefinitionCatalog` has started splitting by capability inside `VsIdeBridge.Discovery`.
-- `VsIdeBridgeService/ToolCatalog.cs` has already shed most capability registrars into `src/VsIdeBridgeService/ToolCatalog/Registrars/`.
-- `ToolRegistry` recommendation logic now lives in `src/Shared/ToolRegistry/Recommendations.cs`, which makes the next structural decisions more about the remaining lookup/listing code and then the largest VS-host monoliths.
+## Current Structural Targets
+
+- keep pushing runtime behavior out of oversized host files and into focused libraries or registrar slices
+- continue shrinking the largest warning hotspots first: `SolutionProjectCommands`, `ErrorListService`, `DocumentService`, `PatchService`, `SearchService`, and `BestPracticeAnalyzer`
+- keep `VsIdeBridgeCli` limited to fallback transport and operator workflows rather than letting product behavior grow back into it
+- use this hierarchy to decide where each extracted responsibility belongs before creating new files or projects
 
 ## Top-Level Rule
 
@@ -194,7 +199,7 @@ Should not contain:
 ### 7. Tests and Probes
 
 Projects:
-- `tests/VsIdeBridgeCli.Tests/VsIdeBridgeCli.Tests.csproj`
+- `tests/VsIdeBridgeLauncher.Tests/VsIdeBridgeLauncher.Tests.csproj`
 - `src/IdeBridgeJsonProbe/IdeBridgeJsonProbe.vcxproj`
 
 Owns:

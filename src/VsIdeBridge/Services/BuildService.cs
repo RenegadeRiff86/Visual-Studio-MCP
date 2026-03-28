@@ -24,53 +24,58 @@ internal sealed class BuildService(ReadinessService readinessService)
 
     public async Task<JObject> BuildSolutionAsync(IdeCommandContext context, int timeoutMilliseconds, string? configuration, string? platform)
     {
+        (DTE2 dte, SolutionBuild solutionBuild) = await PrepareBuildAsync(context, configuration, platform).ConfigureAwait(true);
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
 
-        var dte = context.Dte;
-        if (dte.Solution?.IsOpen != true)
-        {
-            throw new CommandErrorException(SolutionNotOpenCode, NoSolutionOpen);
-        }
-
-        var solutionBuild = dte.Solution.SolutionBuild;
-        if (solutionBuild.BuildState == vsBuildState.vsBuildStateInProgress)
-        {
-            throw new CommandErrorException("build_in_progress", "A build is already in progress.");
-        }
-
-        TryActivateConfiguration(solutionBuild, configuration, platform);
-
-        var startedAt = DateTimeOffset.UtcNow;
+        DateTimeOffset startedAt = DateTimeOffset.UtcNow;
         await context.Logger.LogAsync($"IDE Bridge: build starting ({dte.Solution.FullName})", context.CancellationToken).ConfigureAwait(true);
         solutionBuild.Build(true);
 
-        var deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeoutMilliseconds <= 0 ? DefaultBuildTimeoutMilliseconds : timeoutMilliseconds);
-        while (solutionBuild.BuildState == vsBuildState.vsBuildStateInProgress)
-        {
-            if (DateTimeOffset.UtcNow >= deadline)
-            {
-                throw new CommandErrorException("timeout", "Timed out waiting for the build to finish.");
-            }
+        await WaitForBuildCompletionAsync(
+            context,
+            solutionBuild,
+            GetDeadline(timeoutMilliseconds),
+            "Timed out waiting for the build to finish.").ConfigureAwait(true);
 
-            await Task.Delay(BuildPollIntervalMilliseconds, context.CancellationToken).ConfigureAwait(false);
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
-        }
-
-        var elapsed = (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
-        var succeeded = solutionBuild.LastBuildInfo == 0;
+        double elapsed = (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
+        bool succeeded = solutionBuild.LastBuildInfo == 0;
         await context.Logger.LogAsync(
             $"IDE Bridge: build {(succeeded ? "succeeded" : "failed")} in {elapsed:0}ms",
             context.CancellationToken).ConfigureAwait(true);
 
-        return new JObject
-        {
-            [SolutionPathKey] = dte.Solution.FullName,
-            [ActiveConfigurationKey] = solutionBuild.ActiveConfiguration?.Name ?? string.Empty,
-            [ActivePlatformKey] = (solutionBuild.ActiveConfiguration as SolutionConfiguration2)?.PlatformName ?? string.Empty,
-            ["lastBuildInfo"] = solutionBuild.LastBuildInfo,
-            ["succeeded"] = solutionBuild.LastBuildInfo == 0,
-            ["elapsedMilliseconds"] = (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds,
-        };
+        return CreateBuildResult(dte, solutionBuild, startedAt, operation: "build");
+    }
+
+    public async Task<JObject> RebuildSolutionAsync(IdeCommandContext context, int timeoutMilliseconds, string? configuration, string? platform)
+    {
+        (DTE2 dte, SolutionBuild solutionBuild) = await PrepareBuildAsync(context, configuration, platform).ConfigureAwait(true);
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
+
+        DateTimeOffset startedAt = DateTimeOffset.UtcNow;
+        DateTimeOffset deadline = GetDeadline(timeoutMilliseconds);
+
+        await context.Logger.LogAsync($"IDE Bridge: rebuild starting ({dte.Solution.FullName})", context.CancellationToken).ConfigureAwait(true);
+        solutionBuild.Clean(true);
+        await WaitForBuildCompletionAsync(
+            context,
+            solutionBuild,
+            deadline,
+            "Timed out waiting for the clean step to finish.").ConfigureAwait(true);
+
+        solutionBuild.Build(true);
+        await WaitForBuildCompletionAsync(
+            context,
+            solutionBuild,
+            deadline,
+            "Timed out waiting for the rebuild to finish.").ConfigureAwait(true);
+
+        double elapsed = (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
+        bool succeeded = solutionBuild.LastBuildInfo == 0;
+        await context.Logger.LogAsync(
+            $"IDE Bridge: rebuild {(succeeded ? "succeeded" : "failed")} in {elapsed:0}ms",
+            context.CancellationToken).ConfigureAwait(true);
+
+        return CreateBuildResult(dte, solutionBuild, startedAt, operation: "rebuild");
     }
 
     public async Task<JObject> GetBuildStateAsync(DTE2 dte)
@@ -82,9 +87,9 @@ internal sealed class BuildService(ReadinessService readinessService)
             throw new CommandErrorException(SolutionNotOpenCode, NoSolutionOpen);
         }
 
-        var solutionBuild = dte.Solution.SolutionBuild;
-        var lastBuildInfoKnown = true;
-        var lastBuildInfoValue = 0;
+        SolutionBuild solutionBuild = dte.Solution.SolutionBuild;
+        bool lastBuildInfoKnown = true;
+        int lastBuildInfoValue = 0;
         string? lastBuildInfoReason = null;
 
         try
@@ -97,7 +102,7 @@ internal sealed class BuildService(ReadinessService readinessService)
             lastBuildInfoReason = ex.Message;
         }
 
-        var buildStatus = new JObject
+        JObject buildStatus = new JObject
         {
             [SolutionPathKey] = dte.Solution.FullName,
             [ActiveConfigurationKey] = solutionBuild.ActiveConfiguration?.Name ?? string.Empty,
@@ -124,10 +129,10 @@ internal sealed class BuildService(ReadinessService readinessService)
             throw new CommandErrorException(SolutionNotOpenCode, NoSolutionOpen);
         }
 
-        var solutionBuild = dte.Solution.SolutionBuild;
-        var activeConfiguration = solutionBuild.ActiveConfiguration?.Name ?? string.Empty;
-        var activePlatform = (solutionBuild.ActiveConfiguration as SolutionConfiguration2)?.PlatformName ?? string.Empty;
-        var items = new JArray();
+        SolutionBuild solutionBuild = dte.Solution.SolutionBuild;
+        string activeConfiguration = solutionBuild.ActiveConfiguration?.Name ?? string.Empty;
+        string activePlatform = (solutionBuild.ActiveConfiguration as SolutionConfiguration2)?.PlatformName ?? string.Empty;
+        JArray items = new JArray();
 
         foreach (SolutionConfiguration2 item in solutionBuild.SolutionConfigurations)
         {
@@ -159,8 +164,8 @@ internal sealed class BuildService(ReadinessService readinessService)
             throw new CommandErrorException(SolutionNotOpenCode, NoSolutionOpen);
         }
 
-        var solutionBuild = dte.Solution.SolutionBuild;
-        var activated = TryActivateConfiguration(solutionBuild, configuration, platform, requireMatch: true);
+        SolutionBuild solutionBuild = dte.Solution.SolutionBuild;
+        bool activated = TryActivateConfiguration(solutionBuild, configuration, platform, requireMatch: true);
         if (!activated)
         {
             throw new CommandErrorException(
@@ -178,54 +183,32 @@ internal sealed class BuildService(ReadinessService readinessService)
 
     public async Task<JObject> BuildProjectAsync(IdeCommandContext context, int timeoutMilliseconds, string projectName, string? configuration, string? platform)
     {
+        (DTE2 dte, SolutionBuild solutionBuild) = await PrepareBuildAsync(context, configuration, platform).ConfigureAwait(true);
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
-
-        var dte = context.Dte;
-        if (dte.Solution?.IsOpen != true)
-            throw new CommandErrorException(SolutionNotOpenCode, NoSolutionOpen);
-
-        var solutionBuild = dte.Solution.SolutionBuild;
-        if (solutionBuild.BuildState == vsBuildState.vsBuildStateInProgress)
-            throw new CommandErrorException("build_in_progress", "A build is already in progress.");
 
         string? uniqueName = FindProjectUniqueName(dte, projectName);
         if (uniqueName is null)
             throw new CommandErrorException("project_not_found", $"Project '{projectName}' was not found in the solution.");
 
-        TryActivateConfiguration(solutionBuild, configuration, platform);
-
         string activeConfig = solutionBuild.ActiveConfiguration?.Name ?? "Debug";
 
-        var startedAt = DateTimeOffset.UtcNow;
+        DateTimeOffset startedAt = DateTimeOffset.UtcNow;
         await context.Logger.LogAsync($"IDE Bridge: building project '{uniqueName}'", context.CancellationToken).ConfigureAwait(true);
         solutionBuild.BuildProject(activeConfig, uniqueName, false);
 
-        var deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeoutMilliseconds <= 0 ? DefaultBuildTimeoutMilliseconds : timeoutMilliseconds);
-        while (solutionBuild.BuildState == vsBuildState.vsBuildStateInProgress)
-        {
-            if (DateTimeOffset.UtcNow >= deadline)
-                throw new CommandErrorException("timeout", "Timed out waiting for the build to finish.");
-            await Task.Delay(BuildPollIntervalMilliseconds, context.CancellationToken).ConfigureAwait(false);
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
-        }
+        await WaitForBuildCompletionAsync(
+            context,
+            solutionBuild,
+            GetDeadline(timeoutMilliseconds),
+            "Timed out waiting for the build to finish.").ConfigureAwait(true);
 
-        var elapsed = (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
-        var succeeded = solutionBuild.LastBuildInfo == 0;
+        double elapsed = (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
+        bool succeeded = solutionBuild.LastBuildInfo == 0;
         await context.Logger.LogAsync(
             $"IDE Bridge: project build {(succeeded ? "succeeded" : "failed")} in {elapsed:0}ms",
             context.CancellationToken).ConfigureAwait(true);
 
-        return new JObject
-        {
-            ["projectName"] = projectName,
-            ["projectUniqueName"] = uniqueName,
-            [SolutionPathKey] = dte.Solution.FullName,
-            [ActiveConfigurationKey] = solutionBuild.ActiveConfiguration?.Name ?? string.Empty,
-            [ActivePlatformKey] = (solutionBuild.ActiveConfiguration as SolutionConfiguration2)?.PlatformName ?? string.Empty,
-            ["lastBuildInfo"] = solutionBuild.LastBuildInfo,
-            ["succeeded"] = succeeded,
-            ["elapsedMilliseconds"] = elapsed,
-        };
+        return CreateBuildResult(dte, solutionBuild, startedAt, operation: "build", projectName, uniqueName);
     }
 
     private static string? FindProjectUniqueName(DTE2 dte, string projectName)
@@ -244,13 +227,95 @@ internal sealed class BuildService(ReadinessService readinessService)
 
     public async Task<JObject> BuildAndCaptureErrorsAsync(IdeCommandContext context, int timeoutMilliseconds, bool waitForIntellisense)
     {
-        var build = await BuildSolutionAsync(context, timeoutMilliseconds, null, null).ConfigureAwait(true);
+        JObject build = await BuildSolutionAsync(context, timeoutMilliseconds, null, null).ConfigureAwait(true);
         if (waitForIntellisense)
         {
             build["readiness"] = await _readinessService.WaitForReadyAsync(context, timeoutMilliseconds).ConfigureAwait(true);
         }
 
         return build;
+    }
+
+    private static async Task<(DTE2 Dte, SolutionBuild SolutionBuild)> PrepareBuildAsync(IdeCommandContext context, string? configuration, string? platform)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
+
+        DTE2 dte = context.Dte;
+        if (dte.Solution?.IsOpen != true)
+        {
+            throw new CommandErrorException(SolutionNotOpenCode, NoSolutionOpen);
+        }
+
+        SolutionBuild solutionBuild = dte.Solution.SolutionBuild;
+        if (solutionBuild.BuildState == vsBuildState.vsBuildStateInProgress)
+        {
+            throw new CommandErrorException("build_in_progress", "A build is already in progress.");
+        }
+
+        TryActivateConfiguration(solutionBuild, configuration, platform);
+        return (dte, solutionBuild);
+    }
+
+    private static DateTimeOffset GetDeadline(int timeoutMilliseconds)
+    {
+        return DateTimeOffset.UtcNow.AddMilliseconds(timeoutMilliseconds <= 0 ? DefaultBuildTimeoutMilliseconds : timeoutMilliseconds);
+    }
+
+    private static async Task WaitForBuildCompletionAsync(
+        IdeCommandContext context,
+        SolutionBuild solutionBuild,
+        DateTimeOffset deadline,
+        string timeoutMessage)
+    {
+        while (true)
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
+            if (solutionBuild.BuildState != vsBuildState.vsBuildStateInProgress)
+            {
+                return;
+            }
+
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                throw new CommandErrorException("timeout", timeoutMessage);
+            }
+
+            await Task.Delay(BuildPollIntervalMilliseconds, context.CancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static JObject CreateBuildResult(
+        DTE2 dte,
+        SolutionBuild solutionBuild,
+        DateTimeOffset startedAt,
+        string operation,
+        string? projectName = null,
+        string? uniqueName = null)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        JObject result = new()
+        {
+            ["operation"] = operation,
+            [SolutionPathKey] = dte.Solution.FullName,
+            [ActiveConfigurationKey] = solutionBuild.ActiveConfiguration?.Name ?? string.Empty,
+            [ActivePlatformKey] = (solutionBuild.ActiveConfiguration as SolutionConfiguration2)?.PlatformName ?? string.Empty,
+            ["lastBuildInfo"] = solutionBuild.LastBuildInfo,
+            ["succeeded"] = solutionBuild.LastBuildInfo == 0,
+            ["elapsedMilliseconds"] = (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds,
+        };
+
+        if (!string.IsNullOrWhiteSpace(projectName))
+        {
+            result["projectName"] = projectName;
+        }
+
+        if (!string.IsNullOrWhiteSpace(uniqueName))
+        {
+            result["projectUniqueName"] = uniqueName;
+        }
+
+        return result;
     }
 
     private static bool TryActivateConfiguration(SolutionBuild solutionBuild, string? configuration, string? platform, bool requireMatch = false)

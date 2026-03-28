@@ -30,7 +30,7 @@ internal static partial class ToolCatalog
                 (Column, OptionalText(a, Column))));
 
         yield return BridgeTool("count_references",
-            "Run Find All References and return the exact count.",
+            "Run Find All References and return the exact count. This can take longer than direct read/search tools.",
             ObjectSchema(
                 Req(FileArg, FileDesc),
                 ReqInt(Line, LineDesc),
@@ -47,7 +47,7 @@ internal static partial class ToolCatalog
             Search);
 
         yield return BridgeTool("call_hierarchy",
-            "Open Call Hierarchy for the symbol at a file/line/column.",
+            "Open Call Hierarchy for the symbol at a file/line/column. This can take longer than direct read/search tools.",
             ObjectSchema(Req(FileArg, FileDesc), ReqInt(Line, LineDesc), ReqInt(Column, ColumnDesc)),
             "call-hierarchy",
             a => Build(

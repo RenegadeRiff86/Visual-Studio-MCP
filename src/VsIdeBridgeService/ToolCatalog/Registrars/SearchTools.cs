@@ -10,6 +10,12 @@ internal static partial class ToolCatalog
     private const string MatchCase = "match_case";
 
     private static IEnumerable<ToolEntry> SearchTools()
+        =>
+        FileReadTools()
+            .Concat(TextSearchTools())
+            .Concat(CodeExplorationTools());
+
+    private static IEnumerable<ToolEntry> FileReadTools()
     {
         yield return BridgeTool(ToolDefinitionCatalog.ReadFile(
             ObjectSchema(
@@ -49,7 +55,10 @@ internal static partial class ToolCatalog
                     true)))),
             "document-slices",
             a => Build(("ranges", a?["ranges"]?.ToJsonString())));
+    }
 
+    private static IEnumerable<ToolEntry> TextSearchTools()
+    {
         yield return BridgeTool(ToolDefinitionCatalog.FindFiles(
             ObjectSchema(
                 Req(Query, "File name or path fragment. Use instead of Glob/find/ls when you know the filename or a partial path. For glob patterns like **/*.cs use the glob tool instead."),
@@ -135,7 +144,10 @@ internal static partial class ToolCatalog
                 (Path, OptionalString(a, Path)),
                 (Max, OptionalText(a, Max)),
                 BoolArg("match-case", a, MatchCase, false, true)));
+    }
 
+    private static IEnumerable<ToolEntry> CodeExplorationTools()
+    {
         yield return BridgeTool("search_solutions",
             "Search for solution files (.sln/.slnx) on disk under a given root directory. " +
             "Defaults to %USERPROFILE%\\source\\repos.",
@@ -155,7 +167,7 @@ internal static partial class ToolCatalog
         yield return BridgeTool("smart_context",
             "First call for open-ended code exploration. " +
             "Collects focused context for a natural-language query — searches symbols, usages, and related definitions. " +
-            "Prefer over read_file + find_text when you don't know exactly where to look.",
+            "Prefer over read_file + find_text when you don't know exactly where to look. It is more expensive than direct read/search tools.",
             ObjectSchema(
                 Req(Query, "Natural-language description of what you are looking for."),
                 OptInt("max_contexts", "Max context blocks to return (default 3).")),

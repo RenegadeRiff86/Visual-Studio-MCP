@@ -2,8 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO;
 using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
+using Microsoft.Build.Evaluation;
+using Microsoft.Build.Execution;
+using Microsoft.Build.Exceptions;
+using Microsoft.Build.Framework;
+using Microsoft.Build.Locator;
 
 namespace VsIdeBridgeService.SystemTools;
 
@@ -11,11 +16,8 @@ internal static class BuildErrorsTool
 {
     private const int DefaultMax = 20;
     private const int BuildTimeoutMs = 120_000;
-
-    // path(line,col): error CODE: message [project.csproj]
-    private static readonly Regex ErrorLinePattern = new(
-        @"^(.*?)\((\d+),\d+\): error (\w+): (.+?) \[(.+?)\]$",
-        RegexOptions.Compiled);
+    private static readonly object RegistrationGate = new();
+    private static bool _msBuildRegistered;
 
     public static async Task<JsonNode> ExecuteAsync(JsonNode? id, JsonObject? args, BridgeConnection bridge)
     {
@@ -23,157 +25,214 @@ internal static class BuildErrorsTool
         string? projectArg = args?["project"]?.GetValue<string>();
         int max = args?["max"]?.GetValue<int?>() ?? DefaultMax;
 
-        string msBuildPath = FindMsBuild();
-        if (string.IsNullOrEmpty(msBuildPath))
-        {
-            throw new McpRequestException(id, McpErrorCodes.BridgeError,
-                "MSBuild.exe not found. Ensure Visual Studio is installed.");
-        }
+        EnsureMsBuildRegistered(id);
 
         string solutionDir = ServiceToolPaths.ResolveSolutionDirectory(bridge);
         string target = string.IsNullOrWhiteSpace(projectArg)
             ? FindSolutionFile(solutionDir)
             : ResolveProjectPath(solutionDir, projectArg);
 
-        string buildArgs = $"\"{target}\" /p:Configuration={configuration} /nologo /m /v:q";
-        ProcessStartInfo psi = new()
+        if (!File.Exists(target))
         {
-            FileName = msBuildPath,
-            Arguments = buildArgs,
-            WorkingDirectory = solutionDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
+            throw new McpRequestException(id, McpErrorCodes.InvalidParams,
+                $"Build target '{target}' was not found.");
+        }
+
+        Dictionary<string, string?> globalProperties = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Configuration"] = configuration,
         };
 
         Stopwatch sw = Stopwatch.StartNew();
-        using Process process = Process.Start(psi)
-            ?? throw new McpRequestException(id, McpErrorCodes.BridgeError, "Failed to start MSBuild.");
-
-        Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
-        Task<string> stderrTask = process.StandardError.ReadToEndAsync();
-        Task waitTask = process.WaitForExitAsync();
-        Task completed = await Task.WhenAny(waitTask, Task.Delay(BuildTimeoutMs)).ConfigureAwait(false);
-
-        if (!ReferenceEquals(completed, waitTask))
-        {
-            TryKill(process);
-            throw new McpRequestException(id, McpErrorCodes.TimeoutError,
-                $"MSBuild timed out after {BuildTimeoutMs / 1000}s.");
-        }
-
+        BuildRunResult buildRun = await RunBuildAsync(id, target, solutionDir, globalProperties)
+            .ConfigureAwait(false);
         sw.Stop();
-        string stdout = await stdoutTask.ConfigureAwait(false);
-        string stderr = await stderrTask.ConfigureAwait(false);
 
-        List<JsonObject> allErrors = ParseErrors(stdout + "\n" + stderr);
+        List<JsonObject> allErrors = buildRun.Errors;
         int totalErrors = allErrors.Count;
         bool truncated = totalErrors > max;
-        List<JsonObject> displayErrors = truncated ? allErrors.GetRange(0, max) : allErrors;
 
         JsonArray errorArray = new();
-        foreach (JsonObject err in displayErrors)
-            errorArray.Add(err);
+        foreach (JsonObject error in truncated ? allErrors.GetRange(0, max) : allErrors)
+            errorArray.Add(error);
 
         JsonObject payload = new()
         {
-            ["success"] = totalErrors == 0,
+            ["success"] = totalErrors == 0 && buildRun.ResultCode == BuildResultCode.Success,
             ["errorCount"] = totalErrors,
             ["truncated"] = truncated,
             ["errors"] = errorArray,
             ["buildDuration"] = $"{sw.Elapsed.TotalSeconds:F1}s",
             ["configuration"] = configuration,
             ["target"] = Path.GetFileName(target),
+            ["resultCode"] = buildRun.ResultCode.ToString(),
         };
 
-        return new JsonObject
-        {
-            ["content"] = new JsonArray
-            {
-                new JsonObject
-                {
-                    ["type"] = "text",
-                    ["text"] = payload.ToJsonString(),
-                },
-            },
-            ["isError"] = totalErrors > 0,
-            ["structuredContent"] = payload,
-        };
+        string successText = totalErrors == 0
+            ? $"Build succeeded with 0 errors in {sw.Elapsed.TotalSeconds:F1}s."
+            : null!;
+
+        return ToolResultFormatter.StructuredToolResult(
+            payload,
+            args,
+            isError: totalErrors > 0,
+            successText: totalErrors == 0 ? successText : null);
     }
 
-    private static List<JsonObject> ParseErrors(string output)
+    private static async Task<BuildRunResult> RunBuildAsync(
+        JsonNode? id,
+        string target,
+        string workingDirectory,
+        Dictionary<string, string?> globalProperties)
     {
-        List<JsonObject> result = new();
-        string[] lines = output.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
-        foreach (string line in lines)
+        using ProjectCollection projectCollection = new(globalProperties);
+        ErrorCaptureLogger logger = new();
+        BuildParameters parameters = new(projectCollection)
         {
-            Match m = ErrorLinePattern.Match(line.Trim());
-            if (!m.Success)
-                continue;
+            Loggers = new ILogger[] { logger },
+            MaxNodeCount = Math.Max(1, Environment.ProcessorCount),
+        };
 
-            result.Add(new JsonObject
+        string[] targets = ["Build"];
+        BuildRequestData request = new(target, globalProperties, toolsVersion: null, targetsToBuild: targets, hostServices: null);
+        BuildManager buildManager = BuildManager.DefaultBuildManager;
+
+        buildManager.BeginBuild(parameters);
+        try
+        {
+            BuildSubmission submission = buildManager.PendBuildRequest(request);
+            TaskCompletionSource<BuildResult?> completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            submission.ExecuteAsync(
+                completedSubmission => completion.TrySetResult(completedSubmission.BuildResult),
+                context: null);
+
+            Task finished = await Task.WhenAny(completion.Task, Task.Delay(BuildTimeoutMs)).ConfigureAwait(false);
+            if (!ReferenceEquals(finished, completion.Task))
             {
-                ["file"] = Path.GetFileName(m.Groups[1].Value.Trim()),
-                ["line"] = int.TryParse(m.Groups[2].Value, out int lineNum) ? lineNum : 0,
-                ["code"] = m.Groups[3].Value,
-                ["message"] = m.Groups[4].Value.Trim(),
-                ["project"] = Path.GetFileNameWithoutExtension(m.Groups[5].Value.Trim()),
-            });
+                buildManager.CancelAllSubmissions();
+                throw new McpRequestException(id, McpErrorCodes.TimeoutError,
+                    $"MSBuild timed out after {BuildTimeoutMs / 1000}s.");
+            }
+
+            BuildResult? result = await completion.Task.ConfigureAwait(false);
+            BuildResultCode resultCode = result?.OverallResult ?? BuildResultCode.Failure;
+            return new BuildRunResult(resultCode, logger.Errors);
         }
-        return result;
+        catch (McpRequestException)
+        {
+            throw;
+        }
+        catch (InvalidProjectFileException ex)
+        {
+            throw new McpRequestException(id, McpErrorCodes.BridgeError, ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new McpRequestException(id, McpErrorCodes.BridgeError, ex.Message);
+        }
+        catch (IOException ex)
+        {
+            throw new McpRequestException(id, McpErrorCodes.BridgeError, ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new McpRequestException(id, McpErrorCodes.BridgeError, ex.Message);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new McpRequestException(id, McpErrorCodes.BridgeError, ex.Message);
+        }
+        finally
+        {
+            buildManager.EndBuild();
+            projectCollection.UnloadAllProjects();
+            Environment.CurrentDirectory = workingDirectory;
+        }
     }
 
-    private static string FindMsBuild()
+    private static void EnsureMsBuildRegistered(JsonNode? id)
     {
-        const string vsWhere = @"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe";
-        if (File.Exists(vsWhere))
+        lock (RegistrationGate)
         {
+            if (_msBuildRegistered)
+                return;
+
             try
             {
-                ProcessStartInfo psi = new()
-                {
-                    FileName = vsWhere,
-                    Arguments = "-latest -requires Microsoft.Component.MSBuild -find MSBuild\\**\\Bin\\MSBuild.exe",
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                };
-                using Process p = Process.Start(psi)!;
-                string vsWhereOutput = p.StandardOutput.ReadToEnd().Trim();
-                p.WaitForExit();
-                string first = vsWhereOutput.Split('\n')[0].Trim();
-                if (File.Exists(first))
-                    return first;
-            }
-            catch { /* intentional: vswhere not available or failed — fall through to directory scan */ }
-        }
+                if (!MSBuildLocator.IsRegistered)
+                    MSBuildLocator.RegisterDefaults();
 
-        // Fallback: scan common VS install roots
-        string[] searchRoots = new[]
-        {
-            @"C:\Program Files\Microsoft Visual Studio",
-            @"C:\Program Files (x86)\Microsoft Visual Studio",
-        };
-        foreach (string root in searchRoots)
-        {
-            if (!Directory.Exists(root))
-                continue;
-            foreach (string candidate in Directory.EnumerateFiles(root, "MSBuild.exe", SearchOption.AllDirectories))
+                _msBuildRegistered = true;
+            }
+            catch (InvalidOperationException ex)
             {
-                if (candidate.Contains(@"\amd64\", StringComparison.OrdinalIgnoreCase)
-                    || candidate.Contains(@"\Bin\MSBuild.exe", StringComparison.OrdinalIgnoreCase))
-                    return candidate;
+                throw new McpRequestException(id, McpErrorCodes.BridgeError,
+                    $"Failed to initialize MSBuild APIs: {ex.Message}");
+            }
+            catch (FileNotFoundException ex)
+            {
+                throw new McpRequestException(id, McpErrorCodes.BridgeError,
+                    $"Failed to initialize MSBuild APIs: {ex.Message}");
+            }
+            catch (FileLoadException ex)
+            {
+                throw new McpRequestException(id, McpErrorCodes.BridgeError,
+                    $"Failed to initialize MSBuild APIs: {ex.Message}");
+            }
+            catch (BadImageFormatException ex)
+            {
+                throw new McpRequestException(id, McpErrorCodes.BridgeError,
+                    $"Failed to initialize MSBuild APIs: {ex.Message}");
             }
         }
+    }
 
-        return string.Empty;
+    private sealed record BuildRunResult(BuildResultCode ResultCode, List<JsonObject> Errors);
+
+    private sealed class ErrorCaptureLogger : ILogger
+    {
+        public LoggerVerbosity Verbosity { get; set; } = LoggerVerbosity.Quiet;
+
+        public string? Parameters { get; set; } = string.Empty;
+
+        public List<JsonObject> Errors { get; } = [];
+
+        public void Initialize(IEventSource eventSource)
+        {
+            eventSource.ErrorRaised += OnErrorRaised;
+        }
+
+        public void Shutdown()
+        {
+        }
+
+        private void OnErrorRaised(object sender, BuildErrorEventArgs args)
+        {
+            Errors.Add(new JsonObject
+            {
+                ["file"] = Path.GetFileName(args.File),
+                ["path"] = args.File,
+                ["line"] = args.LineNumber,
+                ["column"] = args.ColumnNumber,
+                ["code"] = args.Code,
+                ["message"] = args.Message,
+                ["project"] = Path.GetFileNameWithoutExtension(args.ProjectFile),
+                ["projectPath"] = args.ProjectFile,
+            });
+        }
     }
 
     private static string FindSolutionFile(string directory)
     {
         string[] slnFiles = Directory.GetFiles(directory, "*.sln");
-        return slnFiles.Length > 0 ? slnFiles[0] : directory;
+        if (slnFiles.Length > 0)
+            return slnFiles[0];
+
+        string[] slnxFiles = Directory.GetFiles(directory, "*.slnx");
+        if (slnxFiles.Length > 0)
+            return slnxFiles[0];
+
+        return directory;
     }
 
     private static string ResolveProjectPath(string solutionDir, string projectArg)
@@ -185,23 +244,17 @@ internal static class BuildErrorsTool
         if (File.Exists(relative))
             return relative;
 
-        // Search by project name under solution dir
-        foreach (string proj in Directory.EnumerateFiles(solutionDir, "*.csproj", SearchOption.AllDirectories))
+        string[] projectPatterns = ["*.csproj", "*.vbproj", "*.fsproj", "*.vcxproj", "*.pyproj", "*.sqlproj", "*.wapproj"];
+        foreach (string pattern in projectPatterns)
         {
-            if (Path.GetFileNameWithoutExtension(proj).Equals(projectArg, StringComparison.OrdinalIgnoreCase))
-                return proj;
+            foreach (string proj in Directory.EnumerateFiles(solutionDir, pattern, SearchOption.AllDirectories))
+            {
+                if (Path.GetFileNameWithoutExtension(proj).Equals(projectArg, StringComparison.OrdinalIgnoreCase)
+                    || Path.GetFileName(proj).Equals(projectArg, StringComparison.OrdinalIgnoreCase))
+                    return proj;
+            }
         }
 
         return relative;
-    }
-
-    private static void TryKill(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-                process.Kill(entireProcessTree: true);
-        }
-        catch { /* intentional: process may have already exited between HasExited check and Kill */ }
     }
 }

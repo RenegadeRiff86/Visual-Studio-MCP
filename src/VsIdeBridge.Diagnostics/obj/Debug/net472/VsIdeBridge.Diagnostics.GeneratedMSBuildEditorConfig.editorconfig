@@ -1,6 +1,6 @@
 is_global = true
 build_property.RootNamespace = VsIdeBridge.Diagnostics
-build_property.ProjectDir = C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Diagnostics\
+build_property.ProjectDir = C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Diagnostics\
 build_property.EnableComHosting = 
 build_property.EnableGeneratedComInterfaceComImportInterop = 
 build_property.CsWinRTUseWindowsUIXamlProjections = false

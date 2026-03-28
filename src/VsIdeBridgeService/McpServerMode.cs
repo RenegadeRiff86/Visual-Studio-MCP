@@ -16,44 +16,82 @@ internal static class McpServerMode
         Stream input = Console.OpenStandardInput();
         Stream output = Console.OpenStandardOutput();
         BridgeConnection bridge = new(args);
+        using StdioHostLease? hostLease = StdioHostLease.TryCreate();
+        ServiceControlClient? controlClient = null;
+
+        try
+        {
+            controlClient = await TryConnectControlPipeAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            McpServerLog.Write($"control pipe connect failed: {ex.Message}");
+        }
 
         McpServerLog.Write("stdio loop started");
 
-        while (true)
+        try
         {
-            McpProtocol.IncomingMessage? incoming;
-            try
+            while (true)
             {
-                incoming = await McpProtocol.ReadAsync(input).ConfigureAwait(false);
+                McpProtocol.IncomingMessage? incoming;
+                try
+                {
+                    incoming = await McpProtocol.ReadAsync(input).ConfigureAwait(false);
+                }
+                catch (McpRequestException ex)
+                {
+                    McpServerLog.Write($"read error code={ex.Code} message={ex.Message}");
+                    await McpProtocol.WriteAsync(output, McpProtocol.ErrorResponse(ex.Id, ex.Code, ex.Message),
+                        McpProtocol.WireFormat.HeaderFramed).ConfigureAwait(false);
+                    continue;
+                }
+
+                if (incoming is null)
+                {
+                    McpServerLog.Write("stdin closed; exiting stdio loop");
+                    break;
+                }
+
+                if (controlClient is not null)
+                {
+                    try
+                    {
+                        await controlClient.NotifyRequestAsync().ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        McpServerLog.Write($"control pipe request notify failed: {ex.Message}");
+                        await controlClient.DisposeAsync().ConfigureAwait(false);
+                        controlClient = null;
+                    }
+                }
+
+                McpServerLog.WriteRequest(incoming.Request, incoming.Format);
+
+                JsonObject? response = await HandleRequestAsync(incoming.Request, bridge, controlClient)
+                    .ConfigureAwait(false);
+
+                if (response is not null)
+                {
+                    McpServerLog.WriteResponse(response);
+                    await McpProtocol.WriteAsync(output, response, incoming.Format).ConfigureAwait(false);
+                }
             }
-            catch (McpRequestException ex)
+        }
+        finally
+        {
+            if (controlClient is not null)
             {
-                McpServerLog.Write($"read error code={ex.Code} message={ex.Message}");
-                await McpProtocol.WriteAsync(output, McpProtocol.ErrorResponse(ex.Id, ex.Code, ex.Message),
-                    McpProtocol.WireFormat.HeaderFramed).ConfigureAwait(false);
-                continue;
-            }
-
-            if (incoming is null)
-            {
-                McpServerLog.Write("stdin closed; exiting stdio loop");
-                break;
-            }
-
-            McpServerLog.WriteRequest(incoming.Request, incoming.Format);
-
-            JsonObject? response = await HandleRequestAsync(incoming.Request, bridge)
-                .ConfigureAwait(false);
-
-            if (response is not null)
-            {
-                McpServerLog.WriteResponse(response);
-                await McpProtocol.WriteAsync(output, response, incoming.Format).ConfigureAwait(false);
+                await controlClient.DisposeAsync().ConfigureAwait(false);
             }
         }
     }
 
-    private static async Task<JsonObject?> HandleRequestAsync(JsonObject request, BridgeConnection bridge)
+    private static async Task<JsonObject?> HandleRequestAsync(
+        JsonObject request,
+        BridgeConnection bridge,
+        ServiceControlClient? controlClient)
     {
         JsonNode? id = request["id"]?.DeepClone();
         string method = request["method"]?.GetValue<string>() ?? string.Empty;
@@ -66,11 +104,13 @@ internal static class McpServerMode
         {
             JsonNode result = method switch
             {
-                "initialize"  => InitializeResult(@params),
-                "tools/list"  => new JsonObject { ["tools"] = Registry.BuildToolsList() },
-                "tools/call"  => await DispatchToolAsync(id, @params, bridge).ConfigureAwait(false),
-                "ping"        => new JsonObject(),
-                _             => throw new McpRequestException(
+                "initialize"                => InitializeResult(@params),
+                "tools/list"                => new JsonObject { ["tools"] = Registry.BuildToolsList() },
+                "tools/call"                => await DispatchToolAsync(id, @params, bridge, controlClient).ConfigureAwait(false),
+                "resources/list"            => EmptyResourcesList(),
+                "resources/templates/list"  => EmptyResourceTemplatesList(),
+                "ping"                      => new JsonObject(),
+                _                           => throw new McpRequestException(
                     id, McpErrorCodes.MethodNotFound, $"Unsupported method: {method}"),
             };
 
@@ -99,6 +139,7 @@ internal static class McpServerMode
             ["capabilities"] = new JsonObject
             {
                 ["tools"] = new JsonObject(),
+                ["resources"] = new JsonObject(),
             },
             ["serverInfo"] = new JsonObject
             {
@@ -108,8 +149,24 @@ internal static class McpServerMode
         };
     }
 
+    private static JsonObject EmptyResourcesList()
+    {
+        return new JsonObject
+        {
+            ["resources"] = new JsonArray(),
+        };
+    }
+
+    private static JsonObject EmptyResourceTemplatesList()
+    {
+        return new JsonObject
+        {
+            ["resourceTemplates"] = new JsonArray(),
+        };
+    }
+
     private static async Task<JsonNode> DispatchToolAsync(
-        JsonNode? id, JsonObject? @params, BridgeConnection bridge)
+        JsonNode? id, JsonObject? @params, BridgeConnection bridge, ServiceControlClient? controlClient)
     {
         string toolName = @params?["name"]?.GetValue<string>() ?? string.Empty;
         JsonObject? args = @params?["arguments"] as JsonObject;
@@ -119,7 +176,32 @@ internal static class McpServerMode
 
         McpServerLog.Write($"dispatch tool={toolName}");
 
-        return await Registry.DispatchAsync(id, toolName, args, bridge).ConfigureAwait(false);
+        if (controlClient is null)
+        {
+            return await Registry.DispatchAsync(id, toolName, args, bridge).ConfigureAwait(false);
+        }
+
+        await controlClient.NotifyCommandStartAsync().ConfigureAwait(false);
+        try
+        {
+            return await Registry.DispatchAsync(id, toolName, args, bridge).ConfigureAwait(false);
+        }
+        finally
+        {
+            await controlClient.NotifyCommandEndAsync().ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<ServiceControlClient?> TryConnectControlPipeAsync()
+    {
+        try
+        {
+            return await ServiceControlClient.ConnectAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public static async Task RunHttpAsync(string[] args, CancellationToken cancellationToken = default)
@@ -241,7 +323,7 @@ internal static class McpServerMode
 
             McpServerLog.WriteRequest(request, McpProtocol.WireFormat.RawJson);
 
-            JsonObject? response = await HandleRequestAsync(request, bridge).ConfigureAwait(false);
+            JsonObject? response = await HandleRequestAsync(request, bridge, controlClient: null).ConfigureAwait(false);
 
             if (response is not null)
             {

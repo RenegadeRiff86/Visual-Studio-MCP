@@ -10,7 +10,7 @@ internal sealed class BridgeInstanceService
 {
     public BridgeInstanceService()
     {
-        var currentProcess = Process.GetCurrentProcess();
+        Process currentProcess = Process.GetCurrentProcess();
         ProcessId = currentProcess.Id;
         ProcessStartedAtUtc = currentProcess.StartTime.ToUniversalTime();
         PipeName = $"VsIdeBridge18_{ProcessId}";
@@ -27,7 +27,8 @@ internal sealed class BridgeInstanceService
 
     public object CreateDiscoveryRecord(string? solutionPath)
     {
-        var normalizedSolutionPath = NormalizeSolutionPath(solutionPath);
+        string normalizedSolutionPath = NormalizeSolutionPath(solutionPath);
+        string label = BuildInstanceLabel(normalizedSolutionPath, ProcessId, PipeName);
         return new
         {
             instanceId = InstanceId,
@@ -36,12 +37,14 @@ internal sealed class BridgeInstanceService
             pipeName = PipeName,
             solutionPath = normalizedSolutionPath,
             solutionName = GetSolutionName(normalizedSolutionPath),
+            label,
         };
     }
 
     public JObject CreateStateData(string? solutionPath)
     {
-        var normalizedSolutionPath = NormalizeSolutionPath(solutionPath);
+        string normalizedSolutionPath = NormalizeSolutionPath(solutionPath);
+        string label = BuildInstanceLabel(normalizedSolutionPath, ProcessId, PipeName);
         return new JObject
         {
             ["instanceId"] = InstanceId,
@@ -50,6 +53,7 @@ internal sealed class BridgeInstanceService
             ["pipeName"] = PipeName,
             ["solutionPath"] = normalizedSolutionPath,
             ["solutionName"] = GetSolutionName(normalizedSolutionPath),
+            ["label"] = label,
         };
     }
 
@@ -68,5 +72,18 @@ internal sealed class BridgeInstanceService
         return string.IsNullOrWhiteSpace(solutionPath)
             ? string.Empty
             : Path.GetFileName(solutionPath);
+    }
+
+    private static string BuildInstanceLabel(string solutionPath, int processId, string pipeName)
+    {
+        string solutionBaseName = string.IsNullOrWhiteSpace(solutionPath)
+            ? string.Empty
+            : Path.GetFileNameWithoutExtension(solutionPath);
+
+        string name = string.IsNullOrWhiteSpace(solutionBaseName)
+            ? (string.IsNullOrWhiteSpace(pipeName) ? "Visual Studio" : pipeName)
+            : solutionBaseName;
+
+        return $"{name} ({processId})";
     }
 }

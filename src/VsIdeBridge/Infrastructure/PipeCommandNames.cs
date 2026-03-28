@@ -14,6 +14,7 @@ internal static class PipeCommandNames
         ["Tools.IdeGetUiSettings"] = ["ui-settings"],
         ["Tools.IdeWaitForReady"] = ["ready"],
         ["Tools.IdeOpenSolution"] = ["open-solution"],
+        ["Tools.IdeLaunchVisualStudio"] = ["launch-visual-studio"],
         ["Tools.IdeCreateSolution"] = ["create-solution"],
         ["Tools.IdeCloseIde"] = ["close-ide"],
         ["Tools.IdeBatchCommands"] = ["batch"],
@@ -72,6 +73,7 @@ internal static class PipeCommandNames
         ["Tools.IdeSetBuildConfiguration"] = ["set-build-configuration"],
         ["Tools.IdeCountReferences"] = ["count-references"],
         ["Tools.IdeBuildSolution"] = ["build"],
+        ["Tools.IdeRebuildSolution"] = ["rebuild", "rebuild-solution"],
         ["Tools.IdeGetErrorList"] = ["errors"],
         ["Tools.IdeGetWarnings"] = ["warnings"],
         ["Tools.IdeBuildAndCaptureErrors"] = ["build-errors"],
@@ -85,6 +87,7 @@ internal static class PipeCommandNames
         ["Tools.IdeCreateProject"] = ["create-project"],
         ["Tools.IdeRemoveProject"] = ["remove-project"],
         ["Tools.IdeSetStartupProject"] = ["set-startup-project"],
+        ["Tools.IdeRenameProject"] = ["rename-project"],
         ["Tools.IdeAddFileToProject"] = ["add-file-to-project"],
         ["Tools.IdeRemoveFileFromProject"] = ["remove-file-from-project"],
         ["Tools.IdeSetPythonProjectEnv"] = ["set-python-project-env"],
@@ -95,7 +98,7 @@ internal static class PipeCommandNames
 
     public static string GetPrimaryName(string canonicalName)
     {
-        foreach (var alias in GetAliases(canonicalName))
+        foreach (string alias in GetAliases(canonicalName))
         {
             return alias;
         }
@@ -105,13 +108,13 @@ internal static class PipeCommandNames
 
     public static IReadOnlyList<string> GetAliases(string canonicalName)
     {
-        var aliases = new List<string>();
+        List<string> aliases = new List<string>();
         if (PreferredAliases.TryGetValue(canonicalName, out var preferred))
         {
             aliases.AddRange(preferred);
         }
 
-        var generated = ToKebabAlias(canonicalName);
+        string generated = ToKebabAlias(canonicalName);
         if (!string.IsNullOrWhiteSpace(generated) &&
             !aliases.Exists(alias => string.Equals(alias, generated, StringComparison.OrdinalIgnoreCase)))
         {
@@ -123,7 +126,7 @@ internal static class PipeCommandNames
 
     private static string ToKebabAlias(string canonicalName)
     {
-        var suffix = canonicalName;
+        string suffix = canonicalName;
         if (suffix.StartsWith("Tools.Ide", StringComparison.OrdinalIgnoreCase))
         {
             suffix = suffix.Substring("Tools.Ide".Length);
@@ -142,10 +145,10 @@ internal static class PipeCommandNames
             return string.Empty;
         }
 
-        var builder = new StringBuilder();
-        for (var i = 0; i < suffix.Length; i++)
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < suffix.Length; i++)
         {
-            var ch = suffix[i];
+            char ch = suffix[i];
             if (char.IsUpper(ch) && i > 0)
             {
                 builder.Append('-');

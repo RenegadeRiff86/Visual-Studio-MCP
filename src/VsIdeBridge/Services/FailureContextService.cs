@@ -25,7 +25,7 @@ internal sealed class FailureContextService
 
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
 
-        var failureContext = new JObject();
+        JObject failureContext = new JObject();
         JObject? state = null;
         JObject? errorList = null;
 
@@ -61,13 +61,13 @@ internal sealed class FailureContextService
             ActivityLog.LogWarning(nameof(FailureContextService), $"Failed to capture error list: {ex.Message}");
         }
 
-        var outlineCache = new Dictionary<string, JObject>(StringComparer.OrdinalIgnoreCase);
-        var symbolFiles = CollectSymbolFiles(state, errorList);
-        var symbolContext = await BuildSymbolContextAsync(context, outlineCache, symbolFiles).ConfigureAwait(true);
+        Dictionary<string, JObject> outlineCache = new Dictionary<string, JObject>(StringComparer.OrdinalIgnoreCase);
+        IReadOnlyList<string> symbolFiles = CollectSymbolFiles(state, errorList);
+        JArray symbolContext = await BuildSymbolContextAsync(context, outlineCache, symbolFiles).ConfigureAwait(true);
         if (symbolContext.Count > 0)
             failureContext["symbolContext"] = symbolContext;
 
-        var errorSymbolContext = BuildErrorSymbolContext(errorList, outlineCache);
+        JArray errorSymbolContext = BuildErrorSymbolContext(errorList, outlineCache);
         if (errorSymbolContext.Count > 0)
         {
             failureContext["errorSymbolContext"] = errorSymbolContext;
@@ -81,12 +81,12 @@ internal sealed class FailureContextService
         Dictionary<string, JObject> outlineCache,
         IReadOnlyList<string> symbolFiles)
     {
-        var symbolContext = new JArray();
-        foreach (var file in symbolFiles.Take(MaxSymbolFiles))
+        JArray symbolContext = new JArray();
+        foreach (string file in symbolFiles.Take(MaxSymbolFiles))
         {
             try
             {
-                var outline = await GetOutlineAsync(context, outlineCache, file).ConfigureAwait(true);
+                JObject outline = await GetOutlineAsync(context, outlineCache, file).ConfigureAwait(true);
                 symbolContext.Add(new JObject { ["path"] = file, ["outline"] = outline });
             }
             catch (Exception ex)
@@ -99,28 +99,28 @@ internal sealed class FailureContextService
 
     private static JArray BuildErrorSymbolContext(JObject? errorList, IReadOnlyDictionary<string, JObject> outlineCache)
     {
-        var items = new JArray();
+        JArray items = new JArray();
         if (errorList?["rows"] is not JArray rows)
         {
             return items;
         }
 
-        foreach (var row in rows.OfType<JObject>().Take(MaxErrorSymbolRows))
+        foreach (JObject row in rows.OfType<JObject>().Take(MaxErrorSymbolRows))
         {
-            var file = row["file"]?.Value<string>();
-            var line = row["line"]?.Value<int>() ?? 0;
+            string? file = row["file"]?.Value<string>();
+            int line = row["line"]?.Value<int>() ?? 0;
             if (string.IsNullOrWhiteSpace(file) || line <= 0)
             {
                 continue;
             }
 
-            var normalizedFile = PathNormalization.NormalizeFilePath(file);
-            if (!outlineCache.TryGetValue(normalizedFile, out var outline))
+            string normalizedFile = PathNormalization.NormalizeFilePath(file);
+            if (!outlineCache.TryGetValue(normalizedFile, out JObject? outline))
             {
                 continue;
             }
 
-            var relevantSymbols = SelectRelevantSymbols(outline, line);
+            JArray relevantSymbols = SelectRelevantSymbols(outline, line);
             if (relevantSymbols.Count == 0)
             {
                 continue;
@@ -148,7 +148,7 @@ internal sealed class FailureContextService
             return [];
         }
 
-        var containing = symbols
+        List<JObject> containing = symbols
             .OfType<JObject>()
             .Where(symbol => ContainsLine(symbol, line))
             .OrderBy(symbol => (symbol["endLine"]?.Value<int>() ?? int.MaxValue) - (symbol["startLine"]?.Value<int>() ?? 0))
@@ -161,7 +161,7 @@ internal sealed class FailureContextService
             return [.. containing.Select(CloneSymbol)];
         }
 
-        var nearby = symbols
+        IEnumerable<JObject> nearby = symbols
             .OfType<JObject>()
             .Select(symbol => new
             {
@@ -178,15 +178,15 @@ internal sealed class FailureContextService
 
     private static bool ContainsLine(JObject symbol, int line)
     {
-        var startLine = symbol["startLine"]?.Value<int>() ?? 0;
-        var endLine = symbol["endLine"]?.Value<int>() ?? startLine;
+        int startLine = symbol["startLine"]?.Value<int>() ?? 0;
+        int endLine = symbol["endLine"]?.Value<int>() ?? startLine;
         return startLine > 0 && line >= startLine && line <= Math.Max(startLine, endLine);
     }
 
     private static int DistanceFromLine(JObject symbol, int line)
     {
-        var startLine = symbol["startLine"]?.Value<int>() ?? int.MaxValue;
-        var endLine = symbol["endLine"]?.Value<int>() ?? startLine;
+        int startLine = symbol["startLine"]?.Value<int>() ?? int.MaxValue;
+        int endLine = symbol["endLine"]?.Value<int>() ?? startLine;
         if (line < startLine)
         {
             return startLine - line;
@@ -217,12 +217,12 @@ internal sealed class FailureContextService
         IDictionary<string, JObject> outlineCache,
         string file)
     {
-        if (outlineCache.TryGetValue(file, out var cached))
+        if (outlineCache.TryGetValue(file, out JObject? cached))
         {
             return cached;
         }
 
-        var outline = await context.Runtime.DocumentService
+        JObject outline = await context.Runtime.DocumentService
             .GetFileOutlineAsync(context.Dte, file, SymbolMaxDepth, kindFilter: null)
             .ConfigureAwait(true);
         outlineCache[file] = outline;
@@ -231,9 +231,9 @@ internal sealed class FailureContextService
 
     private static List<string> CollectSymbolFiles(JObject? state, JObject? errorList)
     {
-        var files = new List<string>();
+        List<string> files = new List<string>();
 
-        var activeDocument = state?["activeDocument"]?.Value<string>();
+        string? activeDocument = state?["activeDocument"]?.Value<string>();
         if (!string.IsNullOrWhiteSpace(activeDocument))
         {
             files.Add(PathNormalization.NormalizeFilePath(activeDocument));
@@ -241,9 +241,9 @@ internal sealed class FailureContextService
 
         if (errorList?["rows"] is JArray rows)
         {
-            foreach (var row in rows.OfType<JObject>())
+            foreach (JObject row in rows.OfType<JObject>())
             {
-                var file = row["file"]?.Value<string>();
+                string? file = row["file"]?.Value<string>();
                 if (string.IsNullOrWhiteSpace(file))
                     continue;
                 files.Add(PathNormalization.NormalizeFilePath(file));

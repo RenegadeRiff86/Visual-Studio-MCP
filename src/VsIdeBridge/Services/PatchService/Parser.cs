@@ -48,24 +48,24 @@ internal sealed partial class PatchService
             return false;
         }
 
-        var normalized = patchText.Replace("\r\n", "\n").Replace('\r', '\n').TrimStart();
+        string normalized = patchText.Replace("\r\n", "\n").Replace('\r', '\n').TrimStart();
         return normalized.StartsWith("*** Begin Patch", StringComparison.Ordinal);
     }
 
     private static List<FilePatch> ParseEditorPatch(string patchText)
     {
-        var normalized = patchText.Replace("\r\n", "\n").Replace('\r', '\n').TrimEnd('\n');
-        var lines = normalized.Split('\n');
+        string normalized = patchText.Replace("\r\n", "\n").Replace('\r', '\n').TrimEnd('\n');
+        string[] lines = normalized.Split('\n');
         if (lines.Length == 0 || !string.Equals(lines[0], "*** Begin Patch", StringComparison.Ordinal))
         {
             throw new CommandErrorException(InvalidArgumentsCode, "Editor patch is missing the *** Begin Patch header.");
         }
 
-        var patches = new List<FilePatch>();
-        var lineIndex = 1;
+        List<FilePatch> patches = new List<FilePatch>();
+        int lineIndex = 1;
         while (lineIndex < lines.Length)
         {
-            var line = lines[lineIndex];
+            string line = lines[lineIndex];
             if (string.Equals(line, "*** End of File", StringComparison.Ordinal))
             {
                 // Accept Codex-style EOF sentinels as no-op markers so apply_patch envelopes
@@ -105,12 +105,12 @@ internal sealed partial class PatchService
 
     private static FilePatch ParseEditorAddFile(string[] lines, ref int lineIndex)
     {
-        var path = ParseEditorPatchPath(lines[lineIndex], "*** Add File: ");
+        string path = ParseEditorPatchPath(lines[lineIndex], "*** Add File: ");
         lineIndex++;
-        var addedLines = new List<HunkLine>();
+        List<HunkLine> addedLines = new List<HunkLine>();
         while (lineIndex < lines.Length && !IsEditorPatchDirective(lines[lineIndex]))
         {
-            var line = lines[lineIndex];
+            string line = lines[lineIndex];
             if (line.Length == 0 || line[0] != '+')
             {
                 throw new CommandErrorException(InvalidArgumentsCode, $"Added file entries must use '+' lines only: {line}");
@@ -146,7 +146,7 @@ internal sealed partial class PatchService
 
     private static FilePatch ParseEditorDeleteFile(string[] lines, ref int lineIndex)
     {
-        var path = ParseEditorPatchPath(lines[lineIndex], "*** Delete File: ");
+        string path = ParseEditorPatchPath(lines[lineIndex], "*** Delete File: ");
         lineIndex++;
         return new FilePatch
         {
@@ -158,20 +158,20 @@ internal sealed partial class PatchService
 
     private static FilePatch ParseEditorUpdateFile(string[] lines, ref int lineIndex)
     {
-        var oldPath = ParseEditorPatchPath(lines[lineIndex], "*** Update File: ");
+        string oldPath = ParseEditorPatchPath(lines[lineIndex], "*** Update File: ");
         lineIndex++;
-        var newPath = oldPath;
+        string newPath = oldPath;
         if (lineIndex < lines.Length && lines[lineIndex].StartsWith("*** Move to: ", StringComparison.Ordinal))
         {
             newPath = ParseEditorPatchPath(lines[lineIndex], "*** Move to: ");
             lineIndex++;
         }
 
-        var blocks = new List<SearchBlock>();
+        List<SearchBlock> blocks = new List<SearchBlock>();
         SearchBlock? currentBlock = null;
         while (lineIndex < lines.Length && !IsEditorPatchDirective(lines[lineIndex]))
         {
-            var line = lines[lineIndex];
+            string line = lines[lineIndex];
             if (line == "@@" || line.StartsWith("@@ ", StringComparison.Ordinal))
             {
                 if (currentBlock?.Lines.Count > 0)
@@ -196,7 +196,7 @@ internal sealed partial class PatchService
                 continue;
             }
 
-            var prefix = line[0];
+            char prefix = line[0];
             if (prefix != ' ' && prefix != '+' && prefix != '-')
             {
                 throw new CommandErrorException(InvalidArgumentsCode, $"Unsupported editor patch line prefix '{prefix}'.");
@@ -228,7 +228,7 @@ internal sealed partial class PatchService
 
     private static string ParseEditorPatchPath(string line, string prefix)
     {
-        var path = NormalizePatchPath(line.Substring(prefix.Length));
+        string path = NormalizePatchPath(line.Substring(prefix.Length));
         if (string.IsNullOrWhiteSpace(path))
         {
             throw new CommandErrorException(InvalidArgumentsCode, $"Editor patch directive is missing a path: {line}");
@@ -239,25 +239,25 @@ internal sealed partial class PatchService
 
     private static List<FilePatch> ParseUnifiedDiff(string patchText)
     {
-        var normalized = patchText.Replace("\r\n", "\n").Replace('\r', '\n').TrimEnd('\n');
-        var lines = normalized.Split('\n');
-        var patches = new List<FilePatch>();
+        string normalized = patchText.Replace("\r\n", "\n").Replace('\r', '\n').TrimEnd('\n');
+        string[] lines = normalized.Split('\n');
+        List<FilePatch> patches = new List<FilePatch>();
         FilePatch? currentFile = null;
-        var lineIndex = 0;
+        int lineIndex = 0;
 
         while (lineIndex < lines.Length)
         {
-            var line = lines[lineIndex];
+            string line = lines[lineIndex];
             if (line.StartsWith("--- ", StringComparison.Ordinal))
             {
-                var oldPath = NormalizePatchPath(line.Substring(4));
+                string oldPath = NormalizePatchPath(line.Substring(4));
                 lineIndex++;
                 if (lineIndex >= lines.Length || !lines[lineIndex].StartsWith("+++ ", StringComparison.Ordinal))
                 {
                     throw new CommandErrorException(InvalidArgumentsCode, "Unified diff is missing a +++ header.");
                 }
 
-                var newPath = NormalizePatchPath(lines[lineIndex].Substring(4));
+                string newPath = NormalizePatchPath(lines[lineIndex].Substring(4));
                 currentFile = new FilePatch
                 {
                     OldPath = oldPath,
@@ -276,11 +276,11 @@ internal sealed partial class PatchService
                     throw new CommandErrorException(InvalidArgumentsCode, "Encountered a hunk before a file header.");
                 }
 
-                var hunk = ParseHunkHeader(line);
+                Hunk hunk = ParseHunkHeader(line);
                 lineIndex++;
                 while (lineIndex < lines.Length)
                 {
-                    var hunkLine = lines[lineIndex];
+                    string hunkLine = lines[lineIndex];
                     if (IsHunkBoundaryLine(hunkLine))
                     {
                         break;
@@ -302,7 +302,7 @@ internal sealed partial class PatchService
                         continue;
                     }
 
-                    var prefix = hunkLine[0];
+                    char prefix = hunkLine[0];
                     if (prefix != ' ' && prefix != '+' && prefix != '-')
                     {
                         throw new CommandErrorException(InvalidArgumentsCode, $"Unsupported hunk line prefix '{prefix}'.");
@@ -341,7 +341,7 @@ internal sealed partial class PatchService
 
     private static Hunk ParseHunkHeader(string line)
     {
-        var match = Regex.Match(line, @"^@@ -(?<oldStart>\d+)(,(?<oldCount>\d+))? \+(?<newStart>\d+)(,(?<newCount>\d+))? @@");
+        Match match = Regex.Match(line, @"^@@ -(?<oldStart>\d+)(,(?<oldCount>\d+))? \+(?<newStart>\d+)(,(?<newCount>\d+))? @@");
         if (!match.Success)
         {
             throw new CommandErrorException(InvalidArgumentsCode, $"Invalid unified diff hunk header: {line}");
@@ -364,7 +364,7 @@ internal sealed partial class PatchService
 
     private static string NormalizePatchPath(string value)
     {
-        var trimmed = value.Trim();
+        string trimmed = value.Trim();
         if (trimmed == DevNullPath)
         {
             return trimmed;
@@ -385,7 +385,7 @@ internal sealed partial class PatchService
 
     private static List<string> SplitLines(string text, out bool hadFinalNewline)
     {
-        var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        string normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
         hadFinalNewline = normalized.EndsWith("\n", StringComparison.Ordinal);
         if (hadFinalNewline)
         {
@@ -397,7 +397,7 @@ internal sealed partial class PatchService
 
     private static string JoinLines(IReadOnlyList<string> lines, string newline, bool includeTrailingNewline)
     {
-        var content = string.Join(newline, lines);
+        string content = string.Join(newline, lines);
         if (includeTrailingNewline)
         {
             content += newline;

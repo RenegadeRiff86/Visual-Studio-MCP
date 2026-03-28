@@ -17,15 +17,15 @@ internal static class PatchCommands
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
             string? patchText = null;
-            var patchTextBase64 = args.GetString("patch-text-base64");
+            string? patchTextBase64 = args.GetString("patch-text-base64");
             if (!string.IsNullOrWhiteSpace(patchTextBase64))
                 patchText = DecodePatchTextBase64(patchTextBase64!);
 
-            var patchFile = args.GetString("patch-file");
-            var baseDirectory = args.GetString("base-directory");
-            var openChangedFiles = args.GetBoolean("open-changed-files", defaultValue: true);
+            string? patchFile = args.GetString("patch-file");
+            string? baseDirectory = args.GetString("base-directory");
+            bool openChangedFiles = args.GetBoolean("open-changed-files", defaultValue: true);
 
-            var commandData = await context.Runtime.PatchService.ApplyUnifiedDiffAsync(
+            Newtonsoft.Json.Linq.JObject commandData = await context.Runtime.PatchService.ApplyUnifiedDiffAsync(
                 context.Dte,
                 context.Runtime.DocumentService,
                 patchFile,
@@ -62,10 +62,10 @@ internal static class PatchCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var file = args.GetString("file")
+            string file = args.GetString("file")
                 ?? throw new CommandErrorException(InvalidArguments, "Missing required --file argument.");
 
-            var contentBase64 = args.GetString("content-base64")
+            string contentBase64 = args.GetString("content-base64")
                 ?? throw new CommandErrorException(InvalidArguments, "Missing required --content-base64 argument.");
 
             string content;
@@ -79,15 +79,15 @@ internal static class PatchCommands
             }
 
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-            var resolvedPath = context.Runtime.PatchService.ResolveFilePath(context.Dte, file);
+            string resolvedPath = context.Runtime.PatchService.ResolveFilePath(context.Dte, file);
 
             // Guard: refuse to overwrite a large file with a suspiciously small snippet.
             // This catches the common mistake of passing only a code block instead of the full
             // file — write_file replaces the entire file, so a partial write destroys content.
             if (!args.GetBoolean("allow-truncation", false) && System.IO.File.Exists(resolvedPath))
             {
-                var existingLineCount = System.IO.File.ReadAllLines(resolvedPath).Length;
-                var newLineCount = content.Split('\n').Length;
+                int existingLineCount = System.IO.File.ReadAllLines(resolvedPath).Length;
+                int newLineCount = content.Split('\n').Length;
                 const int TruncationGuardMinLines = 50;
                 if (existingLineCount >= TruncationGuardMinLines && newLineCount < existingLineCount / 2)
                 {
@@ -101,7 +101,7 @@ internal static class PatchCommands
                 }
             }
 
-            var writeResult = await context.Runtime.DocumentService.WriteDocumentTextAsync(
+            Newtonsoft.Json.Linq.JObject writeResult = await context.Runtime.DocumentService.WriteDocumentTextAsync(
                 context.Dte,
                 resolvedPath,
                 content,
@@ -110,7 +110,7 @@ internal static class PatchCommands
                 saveChanges: true,
                 includeBestPracticeWarnings: args.GetBoolean("best-practice-warnings", false)).ConfigureAwait(true);
 
-            var commandData = new Newtonsoft.Json.Linq.JObject
+            Newtonsoft.Json.Linq.JObject commandData = new Newtonsoft.Json.Linq.JObject
             {
                 ["path"] = resolvedPath,
                 ["byteCount"] = Encoding.UTF8.GetByteCount(content),

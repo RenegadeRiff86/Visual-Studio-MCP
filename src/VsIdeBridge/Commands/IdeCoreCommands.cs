@@ -4,6 +4,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -18,25 +19,65 @@ internal static class IdeCoreCommands
     private const string WarningsCommandName = "warnings";
     private const string WarningsPropertyName = "warnings";
     private const string ExampleCppPath = @"C:\repo\src\foo.cpp";
-    private const string WarningsCommandExample = WarningsCommandName + " --group-by code";
-    private const string ExampleLineNumber = "42";
-    private const string ExampleLineColumnSuffix = " --line " + ExampleLineNumber + " --column 13";
+    private static readonly string WarningsCommandExample =
+        CreateExampleCommand(WarningsCommandName, ("group_by", new JValue("code")));
+
+    private static string CreateExampleCommand(string commandName, params (string Name, JToken Value)[] args)
+    {
+        if (args.Length == 0)
+            return commandName;
+
+        JObject payload = new JObject();
+        foreach ((string name, JToken value) in args)
+            payload[name] = value.DeepClone();
+
+        return commandName + " " + payload.ToString(Formatting.None);
+    }
 
     private static string CreateExampleFileCommand(string commandName)
     {
-        return commandName + " --file \"" + ExampleCppPath + "\"";
+        return CreateExampleCommand(commandName, ("file", new JValue(ExampleCppPath)));
+    }
+
+    private static (string Name, JToken Value)[] CreateExampleLocationArguments()
+    {
+        return
+        [
+            ("file", new JValue(ExampleCppPath)),
+            ("line", new JValue(42)),
+            ("column", new JValue(13)),
+        ];
+    }
+
+    private static JArray CreateExampleSlicesRanges()
+    {
+        return
+        [
+            new JObject
+            {
+                ["file"] = ExampleCppPath,
+                ["line"] = 42,
+                ["context_before"] = 8,
+                ["context_after"] = 20,
+            }
+        ];
+    }
+
+    private static string CreateExampleLocationCommand(string commandName)
+    {
+        return CreateExampleCommand(commandName, CreateExampleLocationArguments());
     }
 
     internal static async Task<CommandExecutionResult> ExecuteBatchAsync(IdeCommandContext context, JArray steps, bool stopOnError)
     {
-        var results = new JArray();
-        var successCount = 0;
-        var failureCount = 0;
-        var stoppedEarly = false;
+        JArray results = new JArray();
+        int successCount = 0;
+        int failureCount = 0;
+        bool stoppedEarly = false;
 
-        for (var i = 0; i < steps.Count; i++)
+        for (int i = 0; i < steps.Count; i++)
         {
-            var (stepResult, succeeded) = await ExecuteBatchStepAsync(context, steps[i], i).ConfigureAwait(true);
+            (JObject stepResult, bool succeeded) = await ExecuteBatchStepAsync(context, steps[i], i).ConfigureAwait(true);
             if (succeeded) successCount++; else failureCount++;
             results.Add(stepResult);
 
@@ -47,7 +88,7 @@ internal static class IdeCoreCommands
             }
         }
 
-        var commandData = new JObject
+        JObject commandData = new JObject
         {
             ["batchCount"] = steps.Count,
             ["successCount"] = successCount,
@@ -66,7 +107,7 @@ internal static class IdeCoreCommands
     {
         if (entry is not JObject step)
         {
-            var stepResult = new JObject
+            JObject stepResult = new JObject
             {
                 ["index"] = index,
                 ["id"] = JValue.CreateNull(),
@@ -80,13 +121,13 @@ internal static class IdeCoreCommands
             return (stepResult, false);
         }
 
-        var stepId = (string?)step["id"];
-        var commandName = (string?)step["command"] ?? string.Empty;
-        var commandArgs = (string?)step["args"] ?? string.Empty;
+        string? stepId = (string?)step["id"];
+        string commandName = (string?)step["command"] ?? string.Empty;
+        string commandArgs = (string?)step["args"] ?? string.Empty;
 
         if (!context.Runtime.TryGetCommand(commandName, out var cmd))
         {
-            var stepResult = new JObject
+            JObject stepResult = new JObject
             {
                 ["index"] = index,
                 ["id"] = (JToken?)stepId ?? JValue.CreateNull(),
@@ -100,11 +141,11 @@ internal static class IdeCoreCommands
             return (stepResult, false);
         }
 
-        var parsedArgs = CommandArgumentParser.Parse(commandArgs);
+        CommandArguments parsedArgs = CommandArgumentParser.Parse(commandArgs);
         try
         {
-            var commandResult = await cmd.ExecuteDirectAsync(context, parsedArgs).ConfigureAwait(true);
-            var stepResult = new JObject
+            CommandExecutionResult commandResult = await cmd.ExecuteDirectAsync(context, parsedArgs).ConfigureAwait(true);
+            JObject stepResult = new JObject
             {
                 ["index"] = index,
                 ["id"] = (JToken?)stepId ?? JValue.CreateNull(),
@@ -119,7 +160,7 @@ internal static class IdeCoreCommands
         }
         catch (CommandErrorException ex)
         {
-            var stepResult = new JObject
+            JObject stepResult = new JObject
             {
                 ["index"] = index,
                 ["id"] = (JToken?)stepId ?? JValue.CreateNull(),
@@ -134,7 +175,7 @@ internal static class IdeCoreCommands
         }
         catch (Exception ex)
         {
-            var stepResult = new JObject
+            JObject stepResult = new JObject
             {
                 ["index"] = index,
                 ["id"] = (JToken?)stepId ?? JValue.CreateNull(),
@@ -151,15 +192,15 @@ internal static class IdeCoreCommands
 
     private static Task<CommandExecutionResult> GetHelpResultAsync()
     {
-        var commandMetadata = BridgeCommandCatalog.All
+        BridgeCommandMetadata[] commandMetadata = BridgeCommandCatalog.All
             .OrderBy(item => item.PipeName, StringComparer.Ordinal)
             .ToArray();
-        var generatedAtUtc = DateTime.UtcNow.ToString("O");
-        var commandDetails = BuildCommandDetails(commandMetadata);
+        string generatedAtUtc = DateTime.UtcNow.ToString("O");
+        JArray commandDetails = BuildCommandDetails(commandMetadata);
 
-        var commands = new JArray();
-        var legacyCommands = new JArray();
-        foreach (var command in commandMetadata)
+        JArray commands = new JArray();
+        JArray legacyCommands = new JArray();
+        foreach (BridgeCommandMetadata command in commandMetadata)
         {
             commands.Add(command.PipeName);
             legacyCommands.Add(command.CanonicalName);
@@ -197,13 +238,13 @@ internal static class IdeCoreCommands
                     {
                         ["name"] = "find-symbol-definition",
                         ["summary"] = "Use symbol search before text search when you know the identifier name.",
-                        ["command"] = @"search-symbols --query ""propose_export_file_name_and_path"" --kind function"
+                        ["command"] = CreateExampleCommand("search-symbols", ("query", new JValue("propose_export_file_name_and_path")), ("kind", new JValue("function")))
                     },
                     new JObject
                     {
                         ["name"] = "inspect-symbol-at-location",
                         ["summary"] = "Use quick info to get the destination location and nearby definition context.",
-                        ["command"] = CreateExampleFileCommand("quick-info") + ExampleLineColumnSuffix
+                        ["command"] = CreateExampleLocationCommand("quick-info")
                     },
                     new JObject
                     {
@@ -215,32 +256,32 @@ internal static class IdeCoreCommands
                     {
                         ["name"] = "fetch-multiple-slices",
                         ["summary"] = "Use inline ranges JSON when you need several code windows in one round-trip.",
-                        ["command"] = @"document-slices --ranges ""[{\""file\"":\""C:\\repo\\src\\foo.cpp\"",\""line\"":42,\""contextBefore\"":8,\""contextAfter\"":20}]"""
+                        ["command"] = CreateExampleCommand("document-slices", ("ranges", CreateExampleSlicesRanges()))
                     }
                 },
-                ["example"] = @"state --out ""C:\temp\ide-state.json""",
-                ["documentSliceExample"] = CreateExampleFileCommand("document-slice") + " --start-line 120 --end-line 180 --out \"C:\\temp\\slice.json\"",
-                ["documentSlicesExample"] = @"document-slices --ranges ""[{\""file\"":\""C:\\repo\\src\\foo.cpp\"",\""line\"":42,\""contextBefore\"":8,\""contextAfter\"":20}]""",
-                ["searchSymbolsExample"] = @"search-symbols --query ""propose_export_file_name_and_path"" --kind function",
-                ["quickInfoExample"] = CreateExampleFileCommand("quick-info") + ExampleLineColumnSuffix,
-                ["findTextPathExample"] = @"find-text --query ""OnInit"" --path ""src\libslic3r""",
-                ["fileSymbolsExample"] = @"file-symbols --file ""C:\repo\src\foo.cpp"" --kind function",
-                ["smartContextExample"] = @"smart-context --query ""where is GUI_App::OnInit used"" --max-contexts 3 --out ""C:\temp\smart-context.json""",
-                ["referencesExample"] = CreateExampleFileCommand("find-references") + ExampleLineColumnSuffix + " --out \"C:\\temp\\references.json\"",
-                ["callHierarchyExample"] = CreateExampleFileCommand("call-hierarchy") + ExampleLineColumnSuffix + " --out \"C:\\temp\\call-hierarchy.json\"",
+                ["example"] = CreateExampleCommand("state", ("out", new JValue(@"C:\temp\ide-state.json"))),
+                ["documentSliceExample"] = CreateExampleCommand("document-slice", ("file", new JValue(ExampleCppPath)), ("start_line", new JValue(120)), ("end_line", new JValue(180)), ("out", new JValue(@"C:\temp\slice.json"))),
+                ["documentSlicesExample"] = CreateExampleCommand("document-slices", ("ranges", CreateExampleSlicesRanges())),
+                ["searchSymbolsExample"] = CreateExampleCommand("search-symbols", ("query", new JValue("propose_export_file_name_and_path")), ("kind", new JValue("function"))),
+                ["quickInfoExample"] = CreateExampleLocationCommand("quick-info"),
+                ["findTextPathExample"] = CreateExampleCommand("find-text", ("query", new JValue("OnInit")), ("path", new JValue("src\\libslic3r"))),
+                ["fileSymbolsExample"] = CreateExampleCommand("file-symbols", ("file", new JValue(ExampleCppPath)), ("kind", new JValue("function"))),
+                ["smartContextExample"] = CreateExampleCommand("smart-context", ("query", new JValue("where is GUI_App::OnInit used")), ("max_contexts", new JValue(3)), ("out", new JValue(@"C:\temp\smart-context.json"))),
+                ["referencesExample"] = CreateExampleCommand("find-references", [.. CreateExampleLocationArguments(), ("out", new JValue(@"C:\temp\references.json"))]),
+                ["callHierarchyExample"] = CreateExampleCommand("call-hierarchy", [.. CreateExampleLocationArguments(), ("out", new JValue(@"C:\temp\call-hierarchy.json"))]),
                 ["applyDiffFormat"] = "Use unified diff text with ---/+++ file headers and @@ hunks, or editor patch text with *** Begin Patch / *** End Patch and *** Update File / *** Add File / *** Delete File blocks.",
-                ["applyDiffExample"] = @"apply-diff --patch-file ""C:\temp\change.diff"" --out ""C:\temp\apply-diff.json""",
-                ["openSolutionExample"] = @"open-solution --solution ""C:\path\to\solution.sln"" --out ""C:\temp\open-solution.json"""
+                ["applyDiffExample"] = CreateExampleCommand("apply-diff", ("patch_file", new JValue(@"C:\temp\change.diff")), ("out", new JValue(@"C:\temp\apply-diff.json"))),
+                ["openSolutionExample"] = CreateExampleCommand("open-solution", ("solution", new JValue(@"C:\path\to\solution.sln")), ("out", new JValue(@"C:\temp\open-solution.json")))
             }));
     }
 
     private static JArray BuildCommandDetails(IEnumerable<BridgeCommandMetadata> commandMetadata)
     {
-        var details = new JArray();
-        foreach (var command in commandMetadata)
+        JArray details = new JArray();
+        foreach (BridgeCommandMetadata command in commandMetadata)
         {
-            var aliases = new JArray();
-            foreach (var alias in PipeCommandNames.GetAliases(command.CanonicalName))
+            JArray aliases = new JArray();
+            foreach (string alias in PipeCommandNames.GetAliases(command.CanonicalName))
             {
                 if (string.Equals(alias, command.PipeName, StringComparison.OrdinalIgnoreCase))
                 {
@@ -266,7 +307,7 @@ internal static class IdeCoreCommands
 
     private static async Task<CommandExecutionResult> GetSmokeTestResultAsync(IdeCommandContext context)
     {
-        var state = await context.Runtime.IdeStateService.GetStateAsync(context.Dte).ConfigureAwait(true);
+        JObject state = await context.Runtime.IdeStateService.GetStateAsync(context.Dte).ConfigureAwait(true);
         return new CommandExecutionResult(
             "Smoke test captured IDE state.",
             new JObject
@@ -297,63 +338,9 @@ internal static class IdeCoreCommands
             GetUiSettingsData(context)));
     }
 
-    private static Task<CommandExecutionResult> ToggleAllowBridgeShellExecAsync(IdeCommandContext context)
-    {
-        var enabled = !context.Runtime.UiSettings.AllowBridgeShellExec;
-        context.Runtime.UiSettings.AllowBridgeShellExec = enabled;
-        return Task.FromResult(new CommandExecutionResult(
-            enabled ? "Bridge shell exec enabled." : "Bridge shell exec disabled.",
-            GetUiSettingsData(context)));
-    }
-
-    private static Task<CommandExecutionResult> ToggleAllowBridgePythonExecutionAsync(IdeCommandContext context)
-    {
-        var enabled = !context.Runtime.UiSettings.AllowBridgePythonExecution;
-        context.Runtime.UiSettings.AllowBridgePythonExecution = enabled;
-        return Task.FromResult(new CommandExecutionResult(
-            enabled ? "Bridge Python execution enabled." : "Bridge Python execution disabled.",
-            GetUiSettingsData(context)));
-    }
-
-    private static Task<CommandExecutionResult> ToggleAllowBridgePythonUnrestrictedExecutionAsync(IdeCommandContext context)
-    {
-        var enabled = !context.Runtime.UiSettings.AllowBridgePythonUnrestrictedExecution;
-        context.Runtime.UiSettings.AllowBridgePythonUnrestrictedExecution = enabled;
-        return Task.FromResult(new CommandExecutionResult(
-            enabled ? "Bridge Python unrestricted execution enabled." : "Bridge Python unrestricted execution disabled.",
-            GetUiSettingsData(context)));
-    }
-
-    private static Task<CommandExecutionResult> ToggleAllowBridgePythonEnvironmentMutationAsync(IdeCommandContext context)
-    {
-        var enabled = !context.Runtime.UiSettings.AllowBridgePythonEnvironmentMutation;
-        context.Runtime.UiSettings.AllowBridgePythonEnvironmentMutation = enabled;
-        return Task.FromResult(new CommandExecutionResult(
-            enabled ? "Bridge Python environment mutation enabled." : "Bridge Python environment mutation disabled.",
-            GetUiSettingsData(context)));
-    }
-
-    private static Task<CommandExecutionResult> ToggleAllowBridgeBuildAsync(IdeCommandContext context)
-    {
-        var enabled = !context.Runtime.UiSettings.AllowBridgeBuild;
-        context.Runtime.UiSettings.AllowBridgeBuild = enabled;
-        return Task.FromResult(new CommandExecutionResult(
-            enabled ? "Bridge build enabled." : "Bridge build disabled.",
-            GetUiSettingsData(context)));
-    }
-
-    private static Task<CommandExecutionResult> ToggleGoToEditedPartsAsync(IdeCommandContext context)
-    {
-        var enabled = !context.Runtime.UiSettings.GoToEditedParts;
-        context.Runtime.UiSettings.GoToEditedParts = enabled;
-        return Task.FromResult(new CommandExecutionResult(
-            enabled ? "Go To Edited Parts enabled." : "Go To Edited Parts disabled.",
-            GetUiSettingsData(context)));
-    }
-
     private static async Task<CommandExecutionResult> ToggleHttpServerAsync(IdeCommandContext context)
     {
-        var enabled = !HttpServerStateManager.IsEnabled;
+        bool enabled = !HttpServerStateManager.IsEnabled;
 
         try
         {
@@ -368,7 +355,7 @@ internal static class IdeCoreCommands
 
             context.Runtime.UiSettings.HttpServerEnabled = enabled;
 
-            var statusMessage = enabled 
+            string statusMessage = enabled 
                 ? $"HTTP MCP server enabled on {HttpServerStateManager.Url}"
                 : "HTTP MCP server disabled.";
 
@@ -387,36 +374,26 @@ internal static class IdeCoreCommands
         }
     }
 
-    private static async Task<CommandExecutionResult> ToggleBestPracticeDiagnosticsAsync(IdeCommandContext context)
-    {
-        var enabled = !context.Runtime.UiSettings.BestPracticeDiagnosticsEnabled;
-        context.Runtime.UiSettings.BestPracticeDiagnosticsEnabled = enabled;
-        await context.Runtime.ErrorListService.RefreshBestPracticeDiagnosticsAsync(context).ConfigureAwait(true);
-        return new CommandExecutionResult(
-            enabled ? "Best practice diagnostics enabled." : "Best practice diagnostics disabled.",
-            GetUiSettingsData(context));
-    }
-
-    private static string? TryResolveReadmePath(IdeCommandContext context)
+    private static string? TryResolveSolutionDocPath(IdeCommandContext context, string fileName)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
         try
         {
-            var solutionPath = context.Dte.Solution?.FullName;
+            string? solutionPath = context.Dte.Solution?.FullName;
             if (string.IsNullOrWhiteSpace(solutionPath))
             {
                 return null;
             }
 
-            var solutionDirectory = Path.GetDirectoryName(solutionPath);
+            string? solutionDirectory = Path.GetDirectoryName(solutionPath);
             if (string.IsNullOrWhiteSpace(solutionDirectory))
             {
                 return null;
             }
 
-            var readmePath = Path.Combine(solutionDirectory, "README.md");
-            return File.Exists(readmePath) ? readmePath : null;
+            string documentPath = Path.Combine(solutionDirectory, fileName);
+            return File.Exists(documentPath) ? documentPath : null;
         }
         catch
         {
@@ -428,15 +405,16 @@ internal static class IdeCoreCommands
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
 
-        var readmePath = TryResolveReadmePath(context);
+        string? readmePath = TryResolveSolutionDocPath(context, "README.md");
+        string? bugsPath = TryResolveSolutionDocPath(context, "BUGS.md");
         if (!string.IsNullOrWhiteSpace(readmePath))
         {
             context.Dte.ItemOperations.OpenFile(readmePath);
         }
 
-        var message = string.IsNullOrWhiteSpace(readmePath)
-            ? "Use the Command Window with Tools.IdeHelp for the full command catalog. The README could not be resolved from the current solution."
-            : $"Opened README: {readmePath}{Environment.NewLine}{Environment.NewLine}Use the Command Window with Tools.IdeHelp for the full command catalog.";
+        string message = string.IsNullOrWhiteSpace(readmePath)
+            ? "README.md could not be resolved from the current solution. Start with the repo README for setup and usage, check BUGS.md for current runtime gaps, and use Tools.IdeHelp only when you need the raw command catalog."
+            : $"Opened README.md for the main product guide.{Environment.NewLine}{Environment.NewLine}Check BUGS.md for current runtime gaps and use Tools.IdeHelp only when you need the raw command catalog.";
 
         VsShellUtilities.ShowMessageBox(
             context.Package,
@@ -451,6 +429,7 @@ internal static class IdeCoreCommands
             new JObject
             {
                 ["readmePath"] = (JToken?)readmePath ?? JValue.CreateNull(),
+                ["bugsPath"] = (JToken?)bugsPath ?? JValue.CreateNull(),
                 ["commandWindowHelp"] = "Tools.IdeHelp",
             });
     }
@@ -465,24 +444,6 @@ internal static class IdeCoreCommands
         protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
             return ShowHelpMenuAsync(context);
-        }
-    }
-
-    internal sealed class IdeToggleAllowBridgeBuildMenuCommand : IdeCommandBase
-    {
-        public IdeToggleAllowBridgeBuildMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x010A, acceptsParameters: false)
-        {
-            MenuCommand.BeforeQueryStatus += (_, _) => MenuCommand.Checked = Runtime.UiSettings.AllowBridgeBuild;
-        }
-
-        protected override string CanonicalName => "Tools.VsIdeBridgeToggleAllowBridgeBuild";
-
-        internal override bool AllowAutomationInvocation => false;
-
-        protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
-        {
-            return ToggleAllowBridgeBuildAsync(context);
         }
     }
 
@@ -504,96 +465,6 @@ internal static class IdeCoreCommands
         }
     }
 
-    internal sealed class IdeToggleAllowBridgeShellExecMenuCommand : IdeCommandBase
-    {
-        public IdeToggleAllowBridgeShellExecMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0106, acceptsParameters: false)
-        {
-            MenuCommand.BeforeQueryStatus += (_, _) => MenuCommand.Checked = Runtime.UiSettings.AllowBridgeShellExec;
-        }
-
-        protected override string CanonicalName => "Tools.VsIdeBridgeToggleAllowBridgeShellExec";
-
-        internal override bool AllowAutomationInvocation => false;
-
-        protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
-        {
-            return ToggleAllowBridgeShellExecAsync(context);
-        }
-    }
-
-    internal sealed class IdeToggleAllowBridgePythonExecutionMenuCommand : IdeCommandBase
-    {
-        public IdeToggleAllowBridgePythonExecutionMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0107, acceptsParameters: false)
-        {
-            MenuCommand.BeforeQueryStatus += (_, _) => MenuCommand.Checked = Runtime.UiSettings.AllowBridgePythonExecution;
-        }
-
-        protected override string CanonicalName => "Tools.VsIdeBridgeToggleAllowBridgePythonExecution";
-
-        internal override bool AllowAutomationInvocation => false;
-
-        protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
-        {
-            return ToggleAllowBridgePythonExecutionAsync(context);
-        }
-    }
-
-    internal sealed class IdeToggleAllowBridgePythonEnvironmentMutationMenuCommand : IdeCommandBase
-    {
-        public IdeToggleAllowBridgePythonEnvironmentMutationMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0108, acceptsParameters: false)
-        {
-            MenuCommand.BeforeQueryStatus += (_, _) => MenuCommand.Checked = Runtime.UiSettings.AllowBridgePythonEnvironmentMutation;
-        }
-
-        protected override string CanonicalName => "Tools.VsIdeBridgeToggleAllowBridgePythonEnvironmentMutation";
-
-        internal override bool AllowAutomationInvocation => false;
-
-        protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
-        {
-            return ToggleAllowBridgePythonEnvironmentMutationAsync(context);
-        }
-    }
-
-    internal sealed class IdeToggleAllowBridgePythonUnrestrictedExecutionMenuCommand : IdeCommandBase
-    {
-        public IdeToggleAllowBridgePythonUnrestrictedExecutionMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0109, acceptsParameters: false)
-        {
-            MenuCommand.BeforeQueryStatus += (_, _) => MenuCommand.Checked = Runtime.UiSettings.AllowBridgePythonUnrestrictedExecution;
-        }
-
-        protected override string CanonicalName => "Tools.VsIdeBridgeToggleAllowBridgePythonUnrestrictedExecution";
-
-        internal override bool AllowAutomationInvocation => false;
-
-        protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
-        {
-            return ToggleAllowBridgePythonUnrestrictedExecutionAsync(context);
-        }
-    }
-
-    internal sealed class IdeToggleGoToEditedPartsMenuCommand : IdeCommandBase
-    {
-        public IdeToggleGoToEditedPartsMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0104, acceptsParameters: false)
-        {
-            MenuCommand.BeforeQueryStatus += (_, _) => MenuCommand.Checked = Runtime.UiSettings.GoToEditedParts;
-        }
-
-        protected override string CanonicalName => "Tools.VsIdeBridgeToggleGoToEditedParts";
-
-        internal override bool AllowAutomationInvocation => false;
-
-        protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
-        {
-            return ToggleGoToEditedPartsAsync(context);
-        }
-    }
-
     internal sealed class IdeRequestApprovalCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
         : IdeCommandBase(package, runtime, commandService, 0x024B)
     {
@@ -601,8 +472,8 @@ internal static class IdeCoreCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var operation = args.GetRequiredString("operation");
-            var approvalKind = operation switch
+            string operation = args.GetRequiredString("operation");
+            BridgeApprovalKind approvalKind = operation switch
             {
                 "shell_exec" => BridgeApprovalKind.ShellExec,
                 "python_exec" => BridgeApprovalKind.PythonExecution,
@@ -610,7 +481,7 @@ internal static class IdeCoreCommands
                 _ => throw new CommandErrorException("invalid_arguments", $"Unsupported approval operation: {operation}"),
             };
 
-            var commandData = await context.Runtime.BridgeApprovalService
+            JObject commandData = await context.Runtime.BridgeApprovalService
                 .RequestApprovalAsync(
                     context,
                     approvalKind,
@@ -619,24 +490,6 @@ internal static class IdeCoreCommands
                 .ConfigureAwait(true);
 
             return new CommandExecutionResult("Bridge approval granted.", commandData);
-        }
-    }
-
-    internal sealed class IdeToggleBestPracticeDiagnosticsMenuCommand : IdeCommandBase
-    {
-        public IdeToggleBestPracticeDiagnosticsMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0105, acceptsParameters: false)
-        {
-            MenuCommand.BeforeQueryStatus += (_, _) => MenuCommand.Checked = Runtime.UiSettings.BestPracticeDiagnosticsEnabled;
-        }
-
-        protected override string CanonicalName => "Tools.VsIdeBridgeToggleBestPracticeDiagnostics";
-
-        internal override bool AllowAutomationInvocation => false;
-
-        protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
-        {
-            return ToggleBestPracticeDiagnosticsAsync(context);
         }
     }
 
@@ -669,7 +522,7 @@ internal static class IdeCoreCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var state = await context.Runtime.IdeStateService.GetStateAsync(context.Dte).ConfigureAwait(true);
+            JObject state = await context.Runtime.IdeStateService.GetStateAsync(context.Dte).ConfigureAwait(true);
             return new CommandExecutionResult("IDE state captured.", state);
         }
     }
@@ -692,8 +545,8 @@ internal static class IdeCoreCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var timeout = args.GetInt32("timeout-ms", 120000);
-            var commandData = await context.Runtime.ReadinessService.WaitForReadyAsync(context, timeout).ConfigureAwait(true);
+            int timeout = args.GetInt32("timeout-ms", 120000);
+            JObject commandData = await context.Runtime.ReadinessService.WaitForReadyAsync(context, timeout).ConfigureAwait(true);
             return new CommandExecutionResult("Readiness wait completed.", commandData);
         }
     }
@@ -705,12 +558,12 @@ internal static class IdeCoreCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var solutionPath = args.GetRequiredString("solution");
+            string solutionPath = args.GetRequiredString("solution");
             if (!File.Exists(solutionPath))
             {
                 throw new CommandErrorException("file_not_found", $"Solution file not found: {solutionPath}");
             }
-            var ext = Path.GetExtension(solutionPath);
+            string ext = Path.GetExtension(solutionPath);
             if (!string.Equals(ext, ".sln", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(ext, ".slnx", StringComparison.OrdinalIgnoreCase))
             {
@@ -722,6 +575,85 @@ internal static class IdeCoreCommands
         }
     }
 
+    internal sealed class IdeLaunchVisualStudioCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+        : IdeCommandBase(package, runtime, commandService, 0x02F8)
+    {
+        protected override string CanonicalName => "Tools.IdeLaunchVisualStudio";
+
+        protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            string devenvPath = args.GetRequiredString("devenv_path");
+            string? solutionPath = args.GetString("solution");
+
+            if (!File.Exists(devenvPath))
+            {
+                throw new CommandErrorException("file_not_found", $"devenv.exe not found: {devenvPath}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(solutionPath))
+            {
+                string extension = Path.GetExtension(solutionPath);
+                if (!string.Equals(extension, ".sln", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(extension, ".slnx", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new CommandErrorException("invalid_file_type", $"File is not a solution file: {solutionPath}");
+                }
+
+                if (!File.Exists(solutionPath))
+                {
+                    throw new CommandErrorException("file_not_found", $"Solution file not found: {solutionPath}");
+                }
+            }
+
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+            ProcessStartInfo startInfo = new()
+            {
+                FileName = devenvPath,
+                UseShellExecute = true,
+                WorkingDirectory = Path.GetDirectoryName(devenvPath),
+            };
+
+            using Process? process = Process.Start(startInfo);
+            if (process is null)
+            {
+                throw new CommandErrorException("launch_failed", "Visual Studio launch failed: Process.Start returned null.");
+            }
+
+            if (solutionPath is string verifiedSolutionPath && !string.IsNullOrWhiteSpace(verifiedSolutionPath))
+            {
+                WritePendingSolutionOpenFlag(process.Id, verifiedSolutionPath);
+            }
+            else
+            {
+                WriteNoSolutionFlag(process.Id);
+            }
+
+            return new CommandExecutionResult(
+                "Visual Studio launch requested.",
+                new JObject
+                {
+                    ["pid"] = process.Id,
+                    ["devenvPath"] = devenvPath,
+                    ["solutionPath"] = (JToken?)solutionPath ?? JValue.CreateNull(),
+                });
+        }
+
+        private static void WritePendingSolutionOpenFlag(int pid, string solutionPath)
+        {
+            string flagDirectory = Path.Combine(Path.GetTempPath(), "vs-ide-bridge");
+            Directory.CreateDirectory(flagDirectory);
+            File.WriteAllText(Path.Combine(flagDirectory, $"bridge-opensolution-{pid}.flag"), solutionPath);
+        }
+
+        private static void WriteNoSolutionFlag(int pid)
+        {
+            string flagDirectory = Path.Combine(Path.GetTempPath(), "vs-ide-bridge");
+            Directory.CreateDirectory(flagDirectory);
+            File.WriteAllText(Path.Combine(flagDirectory, $"bridge-nosolution-{pid}.flag"), string.Empty);
+        }
+    }
+
     internal sealed class IdeCreateSolutionCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
         : IdeCommandBase(package, runtime, commandService, 0x023D)
     {
@@ -729,10 +661,10 @@ internal static class IdeCoreCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var directory = Path.GetFullPath(args.GetRequiredString("directory"));
-            var requestedName = args.GetRequiredString("name");
-            var solutionName = NormalizeSolutionName(requestedName);
-            var solutionPath = Path.Combine(directory, solutionName + ".sln");
+            string directory = Path.GetFullPath(args.GetRequiredString("directory"));
+            string requestedName = args.GetRequiredString("name");
+            string solutionName = NormalizeSolutionName(requestedName);
+            string solutionPath = Path.Combine(directory, solutionName + ".sln");
 
             if (File.Exists(solutionPath))
             {
@@ -757,7 +689,7 @@ internal static class IdeCoreCommands
 
         private static string NormalizeSolutionName(string requestedName)
         {
-            var trimmedName = requestedName.Trim();
+            string trimmedName = requestedName.Trim();
             if (trimmedName.EndsWith(".sln", StringComparison.OrdinalIgnoreCase) ||
                 trimmedName.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
             {
@@ -813,13 +745,13 @@ internal static class IdeCoreCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var batchFile = args.GetRequiredString("batch-file");
+            string batchFile = args.GetRequiredString("batch-file");
             if (!File.Exists(batchFile))
             {
                 throw new CommandErrorException("file_not_found", $"Batch file not found: {batchFile}");
             }
 
-            var json = File.ReadAllText(batchFile);
+            string json = File.ReadAllText(batchFile);
             JArray steps;
             try
             {
@@ -830,7 +762,7 @@ internal static class IdeCoreCommands
                 throw new CommandErrorException("invalid_json", $"Failed to parse batch file: {ex.Message}");
             }
 
-            var stopOnError = args.GetBoolean("stop-on-error", false);
+            bool stopOnError = args.GetBoolean("stop-on-error", false);
             return await ExecuteBatchAsync(context, steps, stopOnError).ConfigureAwait(true);
         }
     }

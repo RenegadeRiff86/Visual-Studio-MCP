@@ -5,6 +5,44 @@ namespace VsIdeBridgeService.SystemTools;
 
 internal static class ServiceToolPaths
 {
+    public static string ResolveInstalledCompanionPath(string fileName, string? solutionPath = null)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            throw new ArgumentException("Companion file name is required.", nameof(fileName));
+        }
+
+        string installedCandidate = Path.Combine(AppContext.BaseDirectory, fileName);
+        if (File.Exists(installedCandidate))
+        {
+            return installedCandidate;
+        }
+
+        string? solutionDirectory = TryGetSolutionDirectory(solutionPath);
+        if (string.IsNullOrWhiteSpace(solutionDirectory))
+        {
+            return installedCandidate;
+        }
+
+        string[] candidates =
+        [
+            Path.Combine(solutionDirectory, "src", "VsIdeBridgeLauncher", "bin", "Release", "net472", fileName),
+            Path.Combine(solutionDirectory, "src", "VsIdeBridgeLauncher", "bin", "Release", fileName),
+            Path.Combine(solutionDirectory, "src", "VsIdeBridgeLauncher", "bin", "Debug", "net472", fileName),
+            Path.Combine(solutionDirectory, "src", "VsIdeBridgeLauncher", "bin", "Debug", fileName),
+        ];
+
+        foreach (string candidate in candidates)
+        {
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return installedCandidate;
+    }
+
     public static string ResolveSolutionDirectory(BridgeConnection bridge)
     {
         string? solutionDirectory = TryGetSolutionDirectory(bridge.CurrentSolutionPath);

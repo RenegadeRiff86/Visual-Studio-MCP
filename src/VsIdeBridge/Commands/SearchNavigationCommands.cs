@@ -1,4 +1,5 @@
 using Microsoft.VisualStudio.Shell;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
 using System.IO;
@@ -15,6 +16,7 @@ internal static class SearchNavigationCommands
     private const string CountKey = "count";
     private const string DocumentArgument = "document";
     private const string DocumentScope = "document";
+    private const string InvalidJsonErrorCode = "invalid_json";
     private const string ProjectScope = "project";
     private const string SolutionScope = "solution";
     private const string OpenScope = "open";
@@ -30,10 +32,10 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var query = args.GetRequiredString("query");
-            var scope = args.GetEnum("scope", SolutionScope, SolutionScope, ProjectScope, DocumentScope, OpenScope);
-            var project = args.GetString("project");
-            var commandData = await context.Runtime.SearchService.FindTextAsync(
+            string query = args.GetRequiredString("query");
+            string scope = args.GetEnum("scope", SolutionScope, SolutionScope, ProjectScope, DocumentScope, OpenScope);
+            string? project = args.GetString("project");
+            JObject commandData = await context.Runtime.SearchService.FindTextAsync(
                 context,
                 query,
                 scope,
@@ -54,18 +56,18 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var queriesJson = args.GetRequiredString("queries");
+            string queriesJson = args.GetRequiredString("queries");
             JArray queriesArray;
             try
             {
                 queriesArray = JArray.Parse(queriesJson);
             }
-            catch (Exception ex)
+            catch (JsonException ex)
             {
-                throw new CommandErrorException("invalid_json", $"Failed to parse --queries JSON: {ex.Message}");
+                throw new CommandErrorException(InvalidJsonErrorCode, $"Failed to parse --queries JSON: {ex.Message}");
             }
 
-            var queries = queriesArray
+            string[] queries = queriesArray
                 .Values<string>()
                 .Where(item => !string.IsNullOrWhiteSpace(item))
                 .Select(item => item!.Trim())
@@ -75,9 +77,9 @@ internal static class SearchNavigationCommands
                 throw new CommandErrorException("invalid_arguments", "Missing required argument --queries with at least one query string.");
             }
 
-            var scope = args.GetEnum("scope", SolutionScope, SolutionScope, ProjectScope, DocumentScope, OpenScope);
-            var project = args.GetString("project");
-            var commandData = await context.Runtime.SearchService.FindTextBatchAsync(
+            string scope = args.GetEnum("scope", SolutionScope, SolutionScope, ProjectScope, DocumentScope, OpenScope);
+            string? project = args.GetString("project");
+            JObject commandData = await context.Runtime.SearchService.FindTextBatchAsync(
                 context,
                 queries,
                 scope,
@@ -99,16 +101,16 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var query = args.GetRequiredString("query");
-            var rawExtensions = args.GetString("extensions", string.Empty) ?? string.Empty;
-            var extensions = rawExtensions
+            string query = args.GetRequiredString("query");
+            string rawExtensions = args.GetString("extensions", string.Empty) ?? string.Empty;
+            string[] extensions = rawExtensions
                 .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries)
                 .Select(item => item.Trim())
                 .Where(item => !string.IsNullOrWhiteSpace(item))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
-            var commandData = await context.Runtime.SearchService.FindFilesAsync(
+            JObject commandData = await context.Runtime.SearchService.FindFilesAsync(
                 context,
                 query,
                 args.GetString("path"),
@@ -125,7 +127,7 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var commandData = await context.Runtime.DocumentService.OpenDocumentAsync(
+            JObject commandData = await context.Runtime.DocumentService.OpenDocumentAsync(
                 context.Dte,
                 args.GetRequiredString("file"),
                 args.GetInt32("line", 1),
@@ -142,7 +144,7 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var commandData = await context.Runtime.DocumentService.ListOpenDocumentsAsync(context.Dte).ConfigureAwait(true);
+            JObject commandData = await context.Runtime.DocumentService.ListOpenDocumentsAsync(context.Dte).ConfigureAwait(true);
             return new CommandExecutionResult($"Listed {commandData["count"]} open document(s).", commandData);
         }
     }
@@ -153,7 +155,7 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var commandData = await context.Runtime.DocumentService
+            JObject commandData = await context.Runtime.DocumentService
                 .ActivateOpenDocumentAsync(context.Dte, args.GetRequiredString("query"))
                 .ConfigureAwait(true);
             return new CommandExecutionResult("Document tab activated.", commandData);
@@ -166,7 +168,7 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var commandData = await context.Runtime.DocumentService
+            JObject commandData = await context.Runtime.DocumentService
                 .CloseOpenDocumentsAsync(
                     context.Dte,
                     args.GetString("query"),
@@ -183,7 +185,7 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var commandData = await context.Runtime.DocumentService.ListOpenTabsAsync(context.Dte).ConfigureAwait(true);
+            JObject commandData = await context.Runtime.DocumentService.ListOpenTabsAsync(context.Dte).ConfigureAwait(true);
             return new CommandExecutionResult($"Listed {commandData["count"]} open tab(s).", commandData);
         }
     }
@@ -194,7 +196,7 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var commandData = await context.Runtime.DocumentService
+            JObject commandData = await context.Runtime.DocumentService
                 .CloseFileAsync(
                     context.Dte,
                     args.GetString("file"),
@@ -212,7 +214,7 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var commandData = await context.Runtime.DocumentService
+            JObject commandData = await context.Runtime.DocumentService
                 .CloseAllExceptCurrentAsync(context.Dte, args.GetBoolean("save", false))
                 .ConfigureAwait(true);
 
@@ -226,12 +228,12 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var saveAll = args.GetBoolean("all", false);
-            var filePath = args.GetString("file");
-            var commandData = await context.Runtime.DocumentService
+            bool saveAll = args.GetBoolean("all", false);
+            string? filePath = args.GetString("file");
+            JObject commandData = await context.Runtime.DocumentService
                 .SaveDocumentAsync(context.Dte, filePath, saveAll)
                 .ConfigureAwait(true);
-            var count = commandData["count"]?.Value<int>() ?? 0;
+            int count = commandData["count"]?.Value<int>() ?? 0;
             return new CommandExecutionResult(saveAll ? $"Saved all {count} document(s)." : $"Saved {count} document(s).", commandData);
         }
     }
@@ -242,11 +244,11 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var filePath = args.GetRequiredString("file");
-            var commandData = await context.Runtime.DocumentService
+            string filePath = args.GetRequiredString("file");
+            JObject commandData = await context.Runtime.DocumentService
                 .ReloadDocumentAsync(filePath)
                 .ConfigureAwait(true);
-            var reloaded = commandData["reloaded"]?.Value<bool>() ?? false;
+            bool reloaded = commandData["reloaded"]?.Value<bool>() ?? false;
             return new CommandExecutionResult(reloaded ? $"Reloaded {filePath}." : $"Skipped reload for {filePath} (not open).", commandData);
         }
     }
@@ -257,7 +259,7 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var commandData = await context.Runtime.WindowService.ActivateWindowAsync(context.Dte, args.GetRequiredString("window")).ConfigureAwait(true);
+            JObject commandData = await context.Runtime.WindowService.ActivateWindowAsync(context.Dte, args.GetRequiredString("window")).ConfigureAwait(true);
             return new CommandExecutionResult("Window activated.", commandData);
         }
     }
@@ -268,7 +270,7 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var commandData = await context.Runtime.WindowService.ListWindowsAsync(context.Dte, args.GetString("query")).ConfigureAwait(true);
+            JObject commandData = await context.Runtime.WindowService.ListWindowsAsync(context.Dte, args.GetString("query")).ConfigureAwait(true);
             return new CommandExecutionResult($"Listed {commandData["count"]} window(s).", commandData);
         }
     }
@@ -279,7 +281,7 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var commandData = await context.Runtime.VsCommandService
+            JObject commandData = await context.Runtime.VsCommandService
                 .ExecutePositionedCommandAsync(
                     context.Dte,
                     context.Runtime.DocumentService,
@@ -303,7 +305,7 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var commandData = await context.Runtime.VsCommandService.ExecuteSymbolCommandAsync(
+            JObject commandData = await context.Runtime.VsCommandService.ExecuteSymbolCommandAsync(
                     context.Dte,
                     context.Runtime.DocumentService,
                     context.Runtime.WindowService,
@@ -331,7 +333,7 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var referenceCommandResult = await context.Runtime.VsCommandService.ExecuteSymbolCommandAsync(
+            JObject referenceCommandResult = await context.Runtime.VsCommandService.ExecuteSymbolCommandAsync(
                     context.Dte,
                     context.Runtime.DocumentService,
                     context.Runtime.WindowService,
@@ -346,9 +348,9 @@ internal static class SearchNavigationCommands
                     args.GetInt32("timeout-ms", 5000))
                 .ConfigureAwait(true);
 
-            var caption = referenceCommandResult["resultWindow"]?["caption"]?.ToString() ?? string.Empty;
-            var match = CountPattern.Match(caption);
-            if (match.Success && int.TryParse(match.Groups["count"].Value, out var count))
+            string caption = referenceCommandResult["resultWindow"]?["caption"]?.ToString() ?? string.Empty;
+            Match match = CountPattern.Match(caption);
+            if (match.Success && int.TryParse(match.Groups["count"].Value, out int count))
             {
                 referenceCommandResult["countKnown"] = true;
                 referenceCommandResult["count"] = count;
@@ -374,7 +376,7 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var callHierarchyResult = await context.Runtime.VsCommandService.ExecuteSymbolCommandAsync(
+            JObject callHierarchyResult = await context.Runtime.VsCommandService.ExecuteSymbolCommandAsync(
                     context.Dte,
                     context.Runtime.DocumentService,
                     context.Runtime.WindowService,
@@ -399,19 +401,19 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var requestedLine = args.GetNullableInt32("line");
-            var baseLine = requestedLine ?? 1;
-            var contextBefore = args.GetInt32("context-before", 0);
-            var contextAfter = args.GetNullableInt32("context-after");
-            var startLine = args.GetInt32("start-line", Math.Max(1, baseLine - contextBefore));
+            int? requestedLine = args.GetNullableInt32("line");
+            int baseLine = requestedLine ?? 1;
+            int contextBefore = args.GetInt32("context-before", 0);
+            int? contextAfter = args.GetNullableInt32("context-after");
+            int startLine = args.GetInt32("start-line", Math.Max(1, baseLine - contextBefore));
             // When only a file is given (no line/range params), default to 200 lines from start
-            var endLine = args.GetInt32("end-line", requestedLine.HasValue || contextAfter.HasValue
+            int endLine = args.GetInt32("end-line", requestedLine.HasValue || contextAfter.HasValue
                 ? Math.Max(startLine, baseLine + (contextAfter ?? 0))
                 : startLine + 199);
-            var revealInEditor = args.GetBoolean("reveal-in-editor", true);
-            var revealLine = requestedLine ?? (startLine + ((endLine - startLine) / 2));
+            bool revealInEditor = args.GetBoolean("reveal-in-editor", true);
+            int revealLine = requestedLine ?? (startLine + ((endLine - startLine) / 2));
 
-            var documentSlice = await context.Runtime.DocumentService.GetDocumentSliceAsync(
+            JObject documentSlice = await context.Runtime.DocumentService.GetDocumentSliceAsync(
                 context.Dte,
                 args.GetString("file"),
                 startLine,
@@ -433,7 +435,7 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var smartContextResult = await context.Runtime.SearchService.GetSmartContextForQueryAsync(
+            JObject smartContextResult = await context.Runtime.SearchService.GetSmartContextForQueryAsync(
                 context,
                 args.GetRequiredString("query"),
                 args.GetEnum("scope", SolutionScope, SolutionScope, ProjectScope, DocumentScope),
@@ -459,7 +461,7 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var definitionResult = await context.Runtime.DocumentService.GoToDefinitionAsync(
+            JObject definitionResult = await context.Runtime.DocumentService.GoToDefinitionAsync(
                     context.Dte,
                     args.GetString("file"),
                     args.GetString(DocumentArgument),
@@ -467,7 +469,7 @@ internal static class SearchNavigationCommands
                     args.GetNullableInt32("column"))
                 .ConfigureAwait(true);
 
-            var found = (bool?)definitionResult["definitionFound"] == true;
+            bool found = (bool?)definitionResult["definitionFound"] == true;
             return new CommandExecutionResult(
                 found ? "Navigated to definition." : "Go To Definition executed (location unchanged).",
                 definitionResult);
@@ -480,7 +482,7 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var implementationResult = await context.Runtime.DocumentService.GoToImplementationAsync(
+            JObject implementationResult = await context.Runtime.DocumentService.GoToImplementationAsync(
                     context.Dte,
                     args.GetString("file"),
                     args.GetString(DocumentArgument),
@@ -488,7 +490,7 @@ internal static class SearchNavigationCommands
                     args.GetNullableInt32("column"))
                 .ConfigureAwait(true);
 
-            var found = (bool?)implementationResult["implementationFound"] == true;
+            bool found = (bool?)implementationResult["implementationFound"] == true;
             return new CommandExecutionResult(
                 found ? "Navigated to implementation." : "Go To Implementation executed (location unchanged).",
                 implementationResult);
@@ -501,7 +503,7 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var fileOutline = await context.Runtime.DocumentService.GetFileOutlineAsync(
+            JObject fileOutline = await context.Runtime.DocumentService.GetFileOutlineAsync(
                     context.Dte,
                     args.GetString("file"),
                     args.GetInt32("max-depth", 3),
@@ -518,13 +520,13 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var symbolQuery = args.GetString("query") ?? args.GetString("name");
+            string? symbolQuery = args.GetString("query") ?? args.GetString("name");
             if (string.IsNullOrWhiteSpace(symbolQuery))
             {
                 throw new CommandErrorException("invalid_arguments", "Missing required argument --query.");
             }
 
-            var symbolSearchResult = await context.Runtime.SearchService.SearchSymbolsAsync(
+            JObject symbolSearchResult = await context.Runtime.SearchService.SearchSymbolsAsync(
                 context,
                 symbolQuery!,
                 args.GetEnum("kind", "all", "all", "function", "class", "struct", "enum", "namespace", "interface", "member", "type"),
@@ -544,7 +546,7 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var quickInfo = await context.Runtime.DocumentService.GetQuickInfoAsync(
+            JObject quickInfo = await context.Runtime.DocumentService.GetQuickInfoAsync(
                 context.Dte,
                 args.GetString("file"),
                 args.GetString(DocumentArgument),
@@ -552,7 +554,7 @@ internal static class SearchNavigationCommands
                 args.GetNullableInt32("column"),
                 args.GetInt32("context-lines", 10)).ConfigureAwait(true);
 
-            var found = (bool?)quickInfo["definitionFound"] == true;
+            bool found = (bool?)quickInfo["definitionFound"] == true;
             return new CommandExecutionResult(
                 found ? $"Quick info: definition found for '{quickInfo["word"]}'." : $"Quick info: no definition found for '{quickInfo["word"]}'.",
                 quickInfo);
@@ -565,13 +567,13 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var rangesJson = args.GetString("ranges");
-            var rangesFile = args.GetString("ranges-file");
-            var ranges = !string.IsNullOrWhiteSpace(rangesJson)
+            string? rangesJson = args.GetString("ranges");
+            string? rangesFile = args.GetString("ranges-file");
+            JArray ranges = !string.IsNullOrWhiteSpace(rangesJson)
                 ? ParseRangesFromJson(rangesJson!)
                 : ParseRangesFromFile(rangesFile);
 
-            var documentSlices = await context.Runtime.DocumentService.GetDocumentSlicesAsync(context.Dte, ranges).ConfigureAwait(true);
+            JObject documentSlices = await context.Runtime.DocumentService.GetDocumentSlicesAsync(context.Dte, ranges).ConfigureAwait(true);
             return new CommandExecutionResult($"Captured {documentSlices["count"]} slice(s).", documentSlices);
         }
 
@@ -581,7 +583,7 @@ internal static class SearchNavigationCommands
             {
                 return JArray.Parse(rangesJson);
             }
-            catch (Exception ex)
+            catch (JsonException ex)
             {
                 throw new CommandErrorException("invalid_json", $"Failed to parse --ranges JSON: {ex.Message}");
             }
@@ -597,7 +599,15 @@ internal static class SearchNavigationCommands
             {
                 return JArray.Parse(File.ReadAllText(rangesFile!));
             }
-            catch (Exception ex)
+            catch (IOException ex)
+            {
+                throw new CommandErrorException("invalid_json", $"Failed to parse ranges file: {ex.Message}");
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new CommandErrorException("invalid_json", $"Failed to parse ranges file: {ex.Message}");
+            }
+            catch (JsonException ex)
             {
                 throw new CommandErrorException("invalid_json", $"Failed to parse ranges file: {ex.Message}");
             }
@@ -610,7 +620,7 @@ internal static class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var fileSymbols = await context.Runtime.DocumentService.GetFileOutlineAsync(
+            JObject fileSymbols = await context.Runtime.DocumentService.GetFileOutlineAsync(
                     context.Dte,
                     args.GetString("file"),
                     args.GetInt32("max-depth", 8),

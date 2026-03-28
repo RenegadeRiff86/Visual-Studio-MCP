@@ -19,8 +19,8 @@ internal sealed class DebuggerService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        var debugger = dte.Debugger;
-        var debugState = new JObject
+        Debugger debugger = dte.Debugger;
+        JObject debugState = new JObject
         {
             ["mode"] = debugger.CurrentMode.ToString(),
             ["currentProcess"] = debugger.CurrentProcess?.Name ?? string.Empty,
@@ -36,7 +36,7 @@ internal sealed class DebuggerService
                 ["language"] = frame.Language ?? string.Empty,
             };
 
-            if (TryGetActiveSourceLocation(dte, out var filePath, out var lineNumber, out var columnNumber))
+            if (TryGetActiveSourceLocation(dte, out string filePath, out int lineNumber, out int columnNumber))
             {
                 debugState["currentStackFrame"]!["file"] = filePath;
                 debugState["currentStackFrame"]!["line"] = lineNumber;
@@ -51,8 +51,8 @@ internal sealed class DebuggerService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        var debugger = dte.Debugger;
-        var threads = GetThreadSummaries(debugger.CurrentProgram);
+        Debugger debugger = dte.Debugger;
+        JArray threads = GetThreadSummaries(debugger.CurrentProgram);
         return new JObject
         {
             ["mode"] = debugger.CurrentMode.ToString(),
@@ -65,16 +65,16 @@ internal sealed class DebuggerService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        var debugger = dte.Debugger;
+        Debugger debugger = dte.Debugger;
         if (debugger.CurrentMode != dbgDebugMode.dbgBreakMode)
         {
             throw new CommandErrorException("not_in_break_mode", "Debugger is not currently in break mode.");
         }
 
-        var frames = new JArray();
-        var targetThread = ResolveThread(debugger.CurrentProgram, threadId) ?? throw new CommandErrorException("thread_not_found", $"Thread '{threadId}' was not found in the current debug program.");
-        var limit = maxFrames <= 0 ? 100 : maxFrames;
-        var collected = 0;
+        JArray frames = new JArray();
+        Thread targetThread = ResolveThread(debugger.CurrentProgram, threadId) ?? throw new CommandErrorException("thread_not_found", $"Thread '{threadId}' was not found in the current debug program.");
+        int limit = maxFrames <= 0 ? 100 : maxFrames;
+        int collected = 0;
         foreach (StackFrame frame in targetThread.StackFrames)
         {
             if (collected >= limit)
@@ -82,7 +82,7 @@ internal sealed class DebuggerService
                 break;
             }
 
-            var frameInfo = new JObject
+            JObject frameInfo = new JObject
             {
                 ["function"] = frame.FunctionName ?? string.Empty,
                 ["language"] = frame.Language ?? string.Empty,
@@ -90,7 +90,7 @@ internal sealed class DebuggerService
 
             try
             {
-                var lineValue = frame.GetType().GetProperty("LineNumber")?.GetValue(frame);
+                object? lineValue = frame.GetType().GetProperty("LineNumber")?.GetValue(frame);
                 if (lineValue is int lineNumber)
                     frameInfo["line"] = lineNumber;
             }
@@ -101,7 +101,7 @@ internal sealed class DebuggerService
 
             try
             {
-                var fileValue = frame.GetType().GetProperty("FileName")?.GetValue(frame)?.ToString();
+                string? fileValue = frame.GetType().GetProperty("FileName")?.GetValue(frame)?.ToString();
                 if (!string.IsNullOrWhiteSpace(fileValue))
                     frameInfo["file"] = fileValue;
             }
@@ -127,15 +127,15 @@ internal sealed class DebuggerService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        var debugger = dte.Debugger;
+        Debugger debugger = dte.Debugger;
         if (debugger.CurrentMode != dbgDebugMode.dbgBreakMode || debugger.CurrentStackFrame is not StackFrame frame)
         {
             throw new CommandErrorException("not_in_break_mode", "Debugger is not currently in break mode.");
         }
 
-        var locals = new JArray();
-        var limit = maxItems <= 0 ? 200 : maxItems;
-        var count = 0;
+        JArray locals = new JArray();
+        int limit = maxItems <= 0 ? 200 : maxItems;
+        int count = 0;
 
         try
         {
@@ -169,13 +169,13 @@ internal sealed class DebuggerService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        var debugger = dte.Debugger;
-        var modules = new JArray();
-        var unsupportedReason = string.Empty;
+        Debugger debugger = dte.Debugger;
+        JArray modules = new JArray();
+        string unsupportedReason = string.Empty;
 
         foreach (Process process in debugger.DebuggedProcesses)
         {
-            var processInfo = new JObject
+            JObject processInfo = new JObject
             {
                 ["name"] = process.Name ?? string.Empty,
                 ["id"] = process.ProcessID,
@@ -184,8 +184,8 @@ internal sealed class DebuggerService
 
             try
             {
-                var modulesProperty = process.GetType().GetProperty("Modules");
-                var reason = TryPopulateProcessModules(processInfo, process, modulesProperty);
+                System.Reflection.PropertyInfo? modulesProperty = process.GetType().GetProperty("Modules");
+                string? reason = TryPopulateProcessModules(processInfo, process, modulesProperty);
                 if (!string.IsNullOrEmpty(reason))
                     unsupportedReason = reason;
             }
@@ -206,7 +206,7 @@ internal sealed class DebuggerService
 
     private static void PopulateProcessModules(JArray moduleItems, System.Collections.IEnumerable items)
     {
-        foreach (var moduleEntry in items)
+        foreach (object? moduleEntry in items)
             moduleItems.Add(CreateModuleEntry(moduleEntry));
     }
 

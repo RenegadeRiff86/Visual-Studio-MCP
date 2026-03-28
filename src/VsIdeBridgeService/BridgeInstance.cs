@@ -1,13 +1,14 @@
 namespace VsIdeBridgeService;
 
 // Describes a discovered VS IDE Bridge instance.
-internal sealed class BridgeInstance
+internal sealed record BridgeInstance
 {
     public required string InstanceId { get; init; }
     public required string PipeName { get; init; }
     public required int ProcessId { get; init; }
     public required string SolutionPath { get; init; }
     public required string SolutionName { get; init; }
+    public required string Label { get; init; }
     public required string Source { get; init; }
     public string? StartedAtUtc { get; init; }
     public required string DiscoveryFile { get; init; }

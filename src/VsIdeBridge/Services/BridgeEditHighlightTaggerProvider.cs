@@ -75,7 +75,7 @@ internal sealed class BridgeEditHighlightTaggerProvider : IViewTaggerProvider
                 yield break;
             }
 
-            var snapshot = spans[0].Snapshot;
+            ITextSnapshot snapshot = spans[0].Snapshot;
             foreach (var (span, markerType) in BridgeEditHighlightService.Instance.GetHighlights(snapshot))
             {
                 if (!spans.IntersectsWith(span))

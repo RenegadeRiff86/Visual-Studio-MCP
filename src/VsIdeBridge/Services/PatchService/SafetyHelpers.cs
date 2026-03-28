@@ -28,7 +28,7 @@ internal sealed partial class PatchService
 
     private static void EnsurePatchHasMeaningfulOperations(FilePatch patch, PatchPaths paths)
     {
-        var hunkCount = patch.Hunks.Count + patch.SearchBlocks.Count;
+        int hunkCount = patch.Hunks.Count + patch.SearchBlocks.Count;
         if (hunkCount == 0)
         {
             if (paths.IsMove || paths.IsNewFile || patch.NewPath == DevNullPath)
@@ -64,7 +64,7 @@ internal sealed partial class PatchService
     {
         try
         {
-            var reverseResult = ApplyFilePatch(path, currentContent, CreateReversePatch(patch));
+            ApplyFilePatchResult reverseResult = ApplyFilePatch(path, currentContent, CreateReversePatch(patch));
             return reverseResult.MutationLineCount > 0 && reverseResult.MatchedLineCount > 0;
         }
         catch (CommandErrorException)
@@ -140,8 +140,8 @@ internal sealed partial class PatchService
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var normalizedPath = PathNormalization.NormalizeFilePath(path);
-        var openDocument = TryFindOpenDocumentByPath(dte, normalizedPath);
+        string normalizedPath = PathNormalization.NormalizeFilePath(path);
+        Document? openDocument = TryFindOpenDocumentByPath(dte, normalizedPath);
 
         if (openDocument is null)
         {
@@ -159,8 +159,8 @@ internal sealed partial class PatchService
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var normalizedPath = PathNormalization.NormalizeFilePath(path);
-        var openDocument = TryFindOpenDocumentByPath(dte, normalizedPath);
+        string normalizedPath = PathNormalization.NormalizeFilePath(path);
+        Document? openDocument = TryFindOpenDocumentByPath(dte, normalizedPath);
 
         if (openDocument is null)
         {
@@ -182,7 +182,7 @@ internal sealed partial class PatchService
 
         foreach (Document document in dte.Documents)
         {
-            var fullName = document.FullName;
+            string fullName = document.FullName;
             if (string.IsNullOrWhiteSpace(fullName))
             {
                 continue;

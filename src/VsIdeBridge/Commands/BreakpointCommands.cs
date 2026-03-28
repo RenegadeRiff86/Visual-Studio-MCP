@@ -20,7 +20,7 @@ internal static class BreakpointCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var breakpointInfo = await context.Runtime.BreakpointService.SetBreakpointAsync(
+            Newtonsoft.Json.Linq.JObject breakpointInfo = await context.Runtime.BreakpointService.SetBreakpointAsync(
                 context.Dte,
                 args.GetRequiredString("file"),
                 args.GetInt32("line", 1),
@@ -34,7 +34,7 @@ internal static class BreakpointCommands
 
             if (args.GetBoolean("reveal", true))
             {
-                var reveal = await context.Runtime.DocumentService.PositionTextSelectionAsync(
+                Newtonsoft.Json.Linq.JObject reveal = await context.Runtime.DocumentService.PositionTextSelectionAsync(
                     context.Dte,
                     args.GetRequiredString("file"),
                     documentQuery: null,
@@ -56,7 +56,7 @@ internal static class BreakpointCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var breakpointInfo = await context.Runtime.BreakpointService.ListBreakpointsAsync(context.Dte).ConfigureAwait(true);
+            Newtonsoft.Json.Linq.JObject breakpointInfo = await context.Runtime.BreakpointService.ListBreakpointsAsync(context.Dte).ConfigureAwait(true);
             return new CommandExecutionResult(FormatBreakpointCountMessage("Enumerated", breakpointInfo["count"]), breakpointInfo);
         }
     }
@@ -67,7 +67,7 @@ internal static class BreakpointCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var breakpointInfo = await context.Runtime.BreakpointService.RemoveBreakpointAsync(
+            Newtonsoft.Json.Linq.JObject breakpointInfo = await context.Runtime.BreakpointService.RemoveBreakpointAsync(
                 context.Dte,
                 args.GetRequiredString("file"),
                 args.GetInt32("line", 1)).ConfigureAwait(true);
@@ -82,7 +82,7 @@ internal static class BreakpointCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var breakpointInfo = await context.Runtime.BreakpointService.ClearAllBreakpointsAsync(context.Dte).ConfigureAwait(true);
+            Newtonsoft.Json.Linq.JObject breakpointInfo = await context.Runtime.BreakpointService.ClearAllBreakpointsAsync(context.Dte).ConfigureAwait(true);
             return new CommandExecutionResult(FormatBreakpointCountMessage("Removed", breakpointInfo["removedCount"]), breakpointInfo);
         }
     }
@@ -93,7 +93,7 @@ internal static class BreakpointCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var breakpointInfo = await context.Runtime.BreakpointService.EnableBreakpointAsync(
+            Newtonsoft.Json.Linq.JObject breakpointInfo = await context.Runtime.BreakpointService.EnableBreakpointAsync(
                 context.Dte,
                 args.GetRequiredString("file"),
                 args.GetInt32("line", 1)).ConfigureAwait(true);
@@ -108,7 +108,7 @@ internal static class BreakpointCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var breakpointInfo = await context.Runtime.BreakpointService.DisableBreakpointAsync(
+            Newtonsoft.Json.Linq.JObject breakpointInfo = await context.Runtime.BreakpointService.DisableBreakpointAsync(
                 context.Dte,
                 args.GetRequiredString("file"),
                 args.GetInt32("line", 1)).ConfigureAwait(true);
@@ -123,7 +123,7 @@ internal static class BreakpointCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var breakpointInfo = await context.Runtime.BreakpointService.EnableAllBreakpointsAsync(context.Dte).ConfigureAwait(true);
+            Newtonsoft.Json.Linq.JObject breakpointInfo = await context.Runtime.BreakpointService.EnableAllBreakpointsAsync(context.Dte).ConfigureAwait(true);
             return new CommandExecutionResult(FormatBreakpointCountMessage("Enabled", breakpointInfo["enabledCount"]), breakpointInfo);
         }
     }
@@ -134,7 +134,7 @@ internal static class BreakpointCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            var breakpointInfo = await context.Runtime.BreakpointService.DisableAllBreakpointsAsync(context.Dte).ConfigureAwait(true);
+            Newtonsoft.Json.Linq.JObject breakpointInfo = await context.Runtime.BreakpointService.DisableAllBreakpointsAsync(context.Dte).ConfigureAwait(true);
             return new CommandExecutionResult(FormatBreakpointCountMessage("Disabled", breakpointInfo["disabledCount"]), breakpointInfo);
         }
     }

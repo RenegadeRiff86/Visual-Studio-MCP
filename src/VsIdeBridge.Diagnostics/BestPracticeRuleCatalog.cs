@@ -190,6 +190,93 @@ internal static class BestPracticeRuleCatalog
         public const string HelpUri = ErrorListConstants.BP1030HelpUri;
     }
 
+    public static class BP1031
+    {
+        public const string Code = "BP1031";
+        public const string HelpUri = ErrorListConstants.BP1031HelpUri;
+    }
+
+    public static class BP1032
+    {
+        public const string Code = "BP1032";
+        public const string HelpUri = ErrorListConstants.BP1032HelpUri;
+    }
+
+    public static class BP1033
+    {
+        public const string Code = "BP1033";
+        public const string HelpUri = ErrorListConstants.BP1033HelpUri;
+    }
+
+    public static class BP1034
+    {
+        public const string Code = "BP1034";
+        public const string HelpUri = ErrorListConstants.BP1034HelpUri;
+    }
+
+    public static class BP1035
+    {
+        public const string Code = "BP1035";
+        public const string HelpUri = ErrorListConstants.BP1035HelpUri;
+    }
+
+    public static class BP1036
+    {
+        public const string Code = "BP1036";
+        public const string HelpUri = ErrorListConstants.BP1036HelpUri;
+    }
+
+    public static class BP1037
+    {
+        public const string Code = "BP1037";
+        public const string HelpUri = ErrorListConstants.BP1037HelpUri;
+    }
+
+    public static class BP1038
+    {
+        public const string Code = "BP1038";
+        public const string HelpUri = ErrorListConstants.BP1038HelpUri;
+    }
+
+    public static class BP1039
+    {
+        public const string Code = "BP1039";
+        public const string HelpUri = ErrorListConstants.BP1039HelpUri;
+    }
+
+    public static class BP1040
+    {
+        public const string Code = "BP1040";
+        public const string HelpUri = ErrorListConstants.BP1040HelpUri;
+    }
+
+    public static class BP1041
+    {
+        public const string Code = "BP1041";
+        public const string HelpUri = ErrorListConstants.BP1041HelpUri;
+    }
+
+    public static class BP1042
+    {
+        public const string Code = "BP1042";
+        public const string HelpUri = ErrorListConstants.BP1042HelpUri;
+    }
+
+    public static string GetGuidance(string code)
+    {
+        return BestPracticeRuleMetadata.TryGetRuleText(code)?.Guidance ?? string.Empty;
+    }
+
+    public static string GetSuggestedAction(string code)
+    {
+        return BestPracticeRuleMetadata.TryGetRuleText(code)?.SuggestedAction ?? string.Empty;
+    }
+
+    public static string GetLlmFixPrompt(string code)
+    {
+        return BestPracticeRuleMetadata.TryGetRuleText(code)?.LlmFixPrompt ?? string.Empty;
+    }
+
     public static string GetHelpUri(string code)
     {
         return code switch
@@ -224,6 +311,18 @@ internal static class BestPracticeRuleCatalog
             "BP1028" => ErrorListConstants.BP1028HelpUri,
             "BP1029" => ErrorListConstants.BP1029HelpUri,
             "BP1030" => ErrorListConstants.BP1030HelpUri,
+            "BP1031" => ErrorListConstants.BP1031HelpUri,
+            "BP1032" => ErrorListConstants.BP1032HelpUri,
+            "BP1033" => ErrorListConstants.BP1033HelpUri,
+            "BP1034" => ErrorListConstants.BP1034HelpUri,
+            "BP1035" => ErrorListConstants.BP1035HelpUri,
+            "BP1036" => ErrorListConstants.BP1036HelpUri,
+            "BP1037" => ErrorListConstants.BP1037HelpUri,
+            "BP1038" => ErrorListConstants.BP1038HelpUri,
+            "BP1039" => ErrorListConstants.BP1039HelpUri,
+            "BP1040" => ErrorListConstants.BP1040HelpUri,
+            "BP1041" => ErrorListConstants.BP1041HelpUri,
+            "BP1042" => ErrorListConstants.BP1042HelpUri,
             _ => string.Empty,
         };
     }
@@ -250,6 +349,11 @@ internal static class BestPracticeRuleCatalog
         if (helpUri.IndexOf("isocpp.github.io", System.StringComparison.OrdinalIgnoreCase) >= 0)
         {
             return ErrorListConstants.CppCoreGuidelinesAuthority;
+        }
+
+        if (helpUri.IndexOf("learn.microsoft.com/en-us/powershell", System.StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return ErrorListConstants.PowerShellAuthority;
         }
 
         return ErrorListConstants.ProjectLocalAuthority;

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text.Json.Nodes;
 using static VsIdeBridgeService.ArgBuilder;
 using static VsIdeBridgeService.SchemaHelpers;
@@ -11,6 +12,46 @@ internal static partial class ToolCatalog
 {
     private static IEnumerable<ToolEntry> NugetTools()
     {
+        yield return new("scan_project_dependencies",
+            "Inspect one project's declared dependencies and current NuGet warning rows.",
+            ObjectSchema(
+                Req("project", "Project name or relative path."),
+                OptBool("include_framework", "Include framework references (default true)."),
+                OptInt("max_warnings", "Maximum NuGet warning rows to include (default 20).")),
+            "project",
+            async (id, args, bridge) =>
+            {
+                string project = RequireNugetArg(id, args, "project");
+                bool includeFramework = args?["include_framework"]?.GetValue<bool?>() ?? true;
+                int maxWarnings = args?["max_warnings"]?.GetValue<int?>() ?? 20;
+
+                JsonObject referencesResponse = await bridge.SendAsync(
+                    id,
+                    "query-project-references",
+                    Build(
+                        (Project, project),
+                        ("declared-only", "true"),
+                        ("include-framework", includeFramework ? "true" : "false")))
+                    .ConfigureAwait(false);
+
+                JsonObject warningsResponse = await bridge.SendAsync(
+                    id,
+                    "warnings",
+                    Build(
+                        (Project, project),
+                        ("code", "NU"),
+                        ("quick", "true"),
+                        (Max, maxWarnings.ToString())))
+                    .ConfigureAwait(false);
+
+                JsonObject payload = BuildDependencyScanPayload(project, includeFramework, referencesResponse, warningsResponse);
+                return ToolResultFormatter.StructuredToolResult(payload, args, successText: CreateDependencyScanSummary(payload));
+            },
+            summary: "Inspect one project's dependencies and highlight likely package issues.",
+            readOnly: true,
+            mutating: false,
+            destructive: false);
+
         yield return new("nuget_add_package",
             "Add a NuGet package to a project using 'dotnet add package'. " +
             "The project must be in the open solution.",
@@ -96,15 +137,8 @@ internal static partial class ToolCatalog
             ["stderr"] = stderr,
         };
 
-        return new JsonObject
-        {
-            ["content"] = new JsonArray
-            {
-                new JsonObject { ["type"] = "text", ["text"] = payload.ToJsonString() },
-            },
-            ["isError"] = !success,
-            ["structuredContent"] = payload,
-        };
+        string successText = $"dotnet command completed with exit code {process.ExitCode}.";
+        return ToolResultFormatter.StructuredToolResult(payload, isError: !success, successText: successText);
     }
 
     private static string? _resolvedDotnet;
@@ -151,4 +185,153 @@ internal static partial class ToolCatalog
         try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
         catch { /* already gone */ }
     }
+
+    private static JsonObject BuildDependencyScanPayload(
+        string requestedProject,
+        bool includeFramework,
+        JsonObject referencesResponse,
+        JsonObject warningsResponse)
+    {
+        JsonObject referencesData = referencesResponse["Data"] as JsonObject ?? new JsonObject();
+        JsonArray references = referencesData["references"] as JsonArray ?? new JsonArray();
+        JsonObject warningsData = warningsResponse["Data"] as JsonObject ?? new JsonObject();
+        JsonArray warningRows = warningsData["rows"] as JsonArray ?? new JsonArray();
+
+        JsonArray dependencies = new JsonArray();
+        JsonArray issues = new JsonArray();
+        int packageCount = 0;
+        int projectCount = 0;
+        int frameworkCount = 0;
+        int assemblyCount = 0;
+
+        foreach (JsonNode? node in references)
+        {
+            if (node is not JsonObject reference)
+            {
+                continue;
+            }
+
+            JsonObject normalized = NormalizeDependency(reference);
+            dependencies.Add(normalized);
+
+            switch (normalized["kind"]?.GetValue<string>())
+            {
+                case "package": packageCount++; break;
+                case "project": projectCount++; break;
+                case "framework": frameworkCount++; break;
+                case "assembly": assemblyCount++; break;
+            }
+
+            AddDependencyIssues(normalized, issues);
+        }
+
+        JsonArray nugetWarnings = new JsonArray();
+        foreach (JsonNode? node in warningRows)
+        {
+            if (node is not JsonObject warning)
+            {
+                continue;
+            }
+
+            nugetWarnings.Add(new JsonObject
+            {
+                ["code"] = warning["code"]?.DeepClone(),
+                ["message"] = warning["message"]?.DeepClone(),
+                ["file"] = warning["file"]?.DeepClone(),
+                ["line"] = warning["line"]?.DeepClone(),
+                ["project"] = warning["project"]?.DeepClone(),
+            });
+        }
+
+        return new JsonObject
+        {
+            ["success"] = true,
+            ["project"] = referencesData["project"]?.DeepClone() ?? requestedProject,
+            ["uniqueName"] = referencesData["uniqueName"]?.DeepClone(),
+            ["declaredOnly"] = referencesData["declaredOnly"]?.DeepClone() ?? true,
+            ["includeFramework"] = includeFramework,
+            ["counts"] = new JsonObject
+            {
+                ["total"] = dependencies.Count,
+                ["packages"] = packageCount,
+                ["projects"] = projectCount,
+                ["frameworks"] = frameworkCount,
+                ["assemblies"] = assemblyCount,
+                ["issues"] = issues.Count,
+                ["nugetWarnings"] = nugetWarnings.Count,
+            },
+            ["dependencies"] = dependencies,
+            ["issues"] = issues,
+            ["nugetWarnings"] = nugetWarnings,
+        };
+    }
+
+    private static JsonObject NormalizeDependency(JsonObject reference)
+    {
+        JsonObject metadata = reference["metadata"] as JsonObject ?? new JsonObject();
+        string? name = FirstNonEmpty(
+            reference["name"]?.GetValue<string>(),
+            reference["identity"]?.GetValue<string>(),
+            metadata["Include"]?.GetValue<string>(),
+            metadata["Update"]?.GetValue<string>());
+
+        string? version = FirstNonEmpty(
+            reference["version"]?.GetValue<string>(),
+            metadata["Version"]?.GetValue<string>());
+
+        return new JsonObject
+        {
+            ["name"] = name ?? string.Empty,
+            ["identity"] = reference["identity"]?.DeepClone(),
+            ["kind"] = reference["kind"]?.DeepClone(),
+            ["isOverride"] = metadata["Update"] is not null,
+            ["origin"] = reference["origin"]?.DeepClone(),
+            ["declaredItemType"] = reference["declaredItemType"]?.DeepClone(),
+            ["version"] = version,
+            ["path"] = reference["path"]?.DeepClone(),
+            ["declared"] = reference["declared"]?.DeepClone(),
+            ["metadata"] = metadata.DeepClone(),
+        };
+    }
+
+    private static void AddDependencyIssues(JsonObject dependency, JsonArray issues)
+    {
+        string kind = dependency["kind"]?.GetValue<string>() ?? string.Empty;
+        string name = dependency["name"]?.GetValue<string>() ?? string.Empty;
+        string? path = dependency["path"]?.GetValue<string>();
+        string? version = dependency["version"]?.GetValue<string>();
+        bool isOverride = dependency["isOverride"]?.GetValue<bool?>() ?? false;
+
+        if (kind == "package" && !isOverride && string.IsNullOrWhiteSpace(version))
+        {
+            issues.Add(CreateDependencyIssue(name, kind, "missing_version", "Package reference does not expose a version in project metadata."));
+        }
+
+        if ((kind == "project" || kind == "assembly") && !string.IsNullOrWhiteSpace(path) && !File.Exists(path))
+        {
+            issues.Add(CreateDependencyIssue(name, kind, "missing_path", $"Referenced file does not exist: {path}"));
+        }
+    }
+
+    private static JsonObject CreateDependencyIssue(string name, string kind, string code, string message)
+        => new JsonObject
+        {
+            ["name"] = name,
+            ["kind"] = kind,
+            ["code"] = code,
+            ["message"] = message,
+        };
+
+    private static string CreateDependencyScanSummary(JsonObject payload)
+    {
+        JsonObject counts = payload["counts"] as JsonObject ?? new JsonObject();
+        int total = counts["total"]?.GetValue<int>() ?? 0;
+        int issues = counts["issues"]?.GetValue<int>() ?? 0;
+        int warnings = counts["nugetWarnings"]?.GetValue<int>() ?? 0;
+        string project = payload["project"]?.GetValue<string>() ?? "project";
+        return $"Scanned {total} declared dependencies for '{project}'. Found {issues} dependency issue(s) and {warnings} NuGet warning row(s).";
+    }
+
+    private static string? FirstNonEmpty(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
 }

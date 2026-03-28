@@ -1,5 +1,6 @@
 using Newtonsoft.Json.Linq;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.MemoryMappedFiles;
 using System.Linq;
@@ -61,18 +62,18 @@ internal sealed class MemoryDiscoveryStore : IDisposable
 
     public void Upsert(object discoveryRecord)
     {
-        var discoveryEntry = JObject.FromObject(discoveryRecord);
+        JObject discoveryEntry = JObject.FromObject(discoveryRecord);
         discoveryEntry["updatedAtUtc"] = DateTimeOffset.UtcNow.ToString("O");
 
         ExecuteWithStore(root =>
         {
-            var items = GetItems(root);
+            JArray items = GetItems(root);
             PurgeExpired(items);
 
-            var instanceId = discoveryEntry["instanceId"]?.ToString() ?? string.Empty;
+            string instanceId = discoveryEntry["instanceId"]?.ToString() ?? string.Empty;
             if (!string.IsNullOrWhiteSpace(instanceId))
             {
-                var existing = items
+                JObject? existing = items
                     .OfType<JObject>()
                     .FirstOrDefault(candidate =>
                         string.Equals(candidate["instanceId"]?.ToString(), instanceId, StringComparison.OrdinalIgnoreCase));
@@ -94,14 +95,14 @@ internal sealed class MemoryDiscoveryStore : IDisposable
 
         ExecuteWithStore(root =>
         {
-            var items = GetItems(root);
-            var stale = items
+            JArray items = GetItems(root);
+            JObject[] stale = items
                 .OfType<JObject>()
                 .Where(candidate =>
                     string.Equals(candidate["instanceId"]?.ToString(), instanceId, StringComparison.OrdinalIgnoreCase))
                 .ToArray();
 
-            foreach (var staleRecord in stale)
+            foreach (JObject staleRecord in stale)
             {
                 staleRecord.Remove();
             }
@@ -110,7 +111,7 @@ internal sealed class MemoryDiscoveryStore : IDisposable
 
     private static JArray GetItems(JObject root)
     {
-        var items = root["items"] as JArray;
+        JArray? items = root["items"] as JArray;
         if (items is not null)
         {
             return items;
@@ -123,22 +124,22 @@ internal sealed class MemoryDiscoveryStore : IDisposable
 
     private static void PurgeExpired(JArray items)
     {
-        var cutoff = DateTimeOffset.UtcNow.Subtract(EntryTtl);
-        var staleItems = items
+        DateTimeOffset cutoff = DateTimeOffset.UtcNow.Subtract(EntryTtl);
+        JObject[] staleItems = items
             .OfType<JObject>()
             .Where(item =>
             {
-                var updatedAtUtc = item["updatedAtUtc"]?.ToString();
+                string? updatedAtUtc = item["updatedAtUtc"]?.ToString();
                 if (string.IsNullOrWhiteSpace(updatedAtUtc))
                 {
                     return true;
                 }
 
-                return !DateTimeOffset.TryParse(updatedAtUtc, out var parsed) || parsed < cutoff;
+                return !DateTimeOffset.TryParse(updatedAtUtc, out DateTimeOffset parsed) || parsed < cutoff;
             })
             .ToArray();
 
-        foreach (var stale in staleItems)
+        foreach (JObject stale in staleItems)
         {
             stale.Remove();
         }
@@ -147,7 +148,7 @@ internal sealed class MemoryDiscoveryStore : IDisposable
     private void ExecuteWithStore(Action<JObject> mutate)
     {
         Mutex? mutex = null;
-        var hasLock = false;
+        bool hasLock = false;
         try
         {
             Trace($"ExecuteWithStore start map='{_mapName}' mutex='{_mutexName}'.");
@@ -167,15 +168,15 @@ internal sealed class MemoryDiscoveryStore : IDisposable
                 return;
             }
 
-            var map = _sharedMap.Value;
+            MemoryMappedFile? map = _sharedMap.Value;
             if (map is null)
             {
                 Trace("ExecuteWithStore shared map unavailable.");
                 return;
             }
 
-            using var view = map.CreateViewStream(0, _capacityBytes, MemoryMappedFileAccess.ReadWrite);
-            var root = ReadRoot(view, _capacityBytes);
+            using MemoryMappedViewStream view = map.CreateViewStream(0, _capacityBytes, MemoryMappedFileAccess.ReadWrite);
+            JObject root = ReadRoot(view, _capacityBytes);
             mutate(root);
             WriteRoot(view, root, _capacityBytes);
             Trace("ExecuteWithStore write completed.");
@@ -229,9 +230,9 @@ internal sealed class MemoryDiscoveryStore : IDisposable
 
         try
         {
-            var directory = Path.Combine(Path.GetTempPath(), "vs-ide-bridge");
+            string directory = Path.Combine(Path.GetTempPath(), "vs-ide-bridge");
             Directory.CreateDirectory(directory);
-            var logPath = Path.Combine(directory, "memory-discovery-trace.log");
+            string logPath = Path.Combine(directory, "memory-discovery-trace.log");
             File.AppendAllText(logPath, $"[{DateTimeOffset.UtcNow:O}] {message}{Environment.NewLine}");
         }
         catch (Exception ex)
@@ -260,20 +261,20 @@ internal sealed class MemoryDiscoveryStore : IDisposable
     private static JObject ReadRoot(MemoryMappedViewStream view, int capacityBytes)
     {
         view.Position = 0;
-        var lenBuffer = new byte[LengthPrefixBytes];
-        var bytesRead = view.Read(lenBuffer, 0, lenBuffer.Length);
+        byte[] lenBuffer = new byte[LengthPrefixBytes];
+        int bytesRead = view.Read(lenBuffer, 0, lenBuffer.Length);
         if (bytesRead < lenBuffer.Length)
         {
             return new JObject { ["items"] = new JArray() };
         }
 
-        var payloadLength = BitConverter.ToInt32(lenBuffer, 0);
+        int payloadLength = BitConverter.ToInt32(lenBuffer, 0);
         if (payloadLength <= 0 || payloadLength > capacityBytes - LengthPrefixBytes)
         {
             return new JObject { ["items"] = new JArray() };
         }
 
-        var payload = new byte[payloadLength];
+        byte[] payload = new byte[payloadLength];
         bytesRead = view.Read(payload, 0, payload.Length);
         if (bytesRead != payloadLength)
         {
@@ -294,16 +295,16 @@ internal sealed class MemoryDiscoveryStore : IDisposable
     {
         root["updatedAtUtc"] = DateTimeOffset.UtcNow.ToString("O");
 
-        var payload = Utf8NoBom.GetBytes(root.ToString());
+        byte[] payload = Utf8NoBom.GetBytes(root.ToString());
         if (payload.Length > capacityBytes - LengthPrefixBytes)
         {
             // Keep dropping oldest entries until the payload fits.
-            var items = GetItems(root)
+            List<JObject> items = GetItems(root)
                 .OfType<JObject>()
                 .OrderBy(item => item["updatedAtUtc"]?.ToString(), StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            foreach (var oldestRecord in items)
+            foreach (JObject oldestRecord in items)
             {
                 oldestRecord.Remove();
                 payload = Utf8NoBom.GetBytes(root.ToString());
@@ -317,17 +318,17 @@ internal sealed class MemoryDiscoveryStore : IDisposable
         }
 
         view.Position = 0;
-        var length = BitConverter.GetBytes(payload.Length);
+        byte[] length = BitConverter.GetBytes(payload.Length);
         view.Write(length, 0, length.Length);
         view.Write(payload, 0, payload.Length);
 
-        var remaining = capacityBytes - LengthPrefixBytes - payload.Length;
+        int remaining = capacityBytes - LengthPrefixBytes - payload.Length;
         if (remaining > 0)
         {
-            var zeros = new byte[Math.Min(remaining, 4096)];
+            byte[] zeros = new byte[Math.Min(remaining, 4096)];
             while (remaining > 0)
             {
-                var chunk = Math.Min(remaining, zeros.Length);
+                int chunk = Math.Min(remaining, zeros.Length);
                 view.Write(zeros, 0, chunk);
                 remaining -= chunk;
             }

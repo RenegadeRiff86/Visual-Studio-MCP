@@ -4,6 +4,7 @@ using Microsoft.VisualStudio.Shell;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 
 namespace VsIdeBridge.Services;
@@ -29,7 +30,7 @@ internal sealed partial class DocumentService
         string resolvedPath = ResolveDocumentPath(dte, filePath);
 
         ProjectItem? projectItem = null;
-        try { projectItem = dte.Solution.FindProjectItem(resolvedPath); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
+        try { projectItem = dte.Solution.FindProjectItem(resolvedPath); } catch (COMException ex) { System.Diagnostics.Debug.WriteLine(ex); }
 
         if (projectItem is null)
         {
@@ -66,7 +67,7 @@ internal sealed partial class DocumentService
             {
                 foreach (CodeElement element in codeModel.CodeElements)
                 {
-                    try { CollectOutlineSymbols(element, symbols, 0, maxDepth, kindFilter); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
+                    try { CollectOutlineSymbols(element, symbols, 0, maxDepth, kindFilter); } catch (COMException ex) { System.Diagnostics.Debug.WriteLine(ex); }
                 }
 
                 return null;
@@ -74,7 +75,7 @@ internal sealed partial class DocumentService
 
             return "No code model available for this file type.";
         }
-        catch (Exception ex)
+        catch (COMException ex)
         {
             return $"Code model unavailable: {ex.Message}";
         }
@@ -86,13 +87,13 @@ internal sealed partial class DocumentService
         if (depth > maxDepth) return;
 
         vsCMElement kind;
-        try { kind = element.Kind; } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); return; }
+        try { kind = element.Kind; } catch (COMException ex) { System.Diagnostics.Debug.WriteLine(ex); return; }
 
         string name = string.Empty;
         int startLine = 0, endLine = 0;
-        try { name = element.Name ?? string.Empty; } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
-        try { startLine = element.StartPoint?.Line ?? 0; } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
-        try { endLine = element.EndPoint?.Line ?? 0; } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
+        try { name = element.Name ?? string.Empty; } catch (COMException ex) { System.Diagnostics.Debug.WriteLine(ex); }
+        try { startLine = element.StartPoint?.Line ?? 0; } catch (COMException ex) { System.Diagnostics.Debug.WriteLine(ex); }
+        try { endLine = element.EndPoint?.Line ?? 0; } catch (COMException ex) { System.Diagnostics.Debug.WriteLine(ex); }
 
         if (s_outlineKinds.Contains(kind))
         {
@@ -119,12 +120,12 @@ internal sealed partial class DocumentService
             else if (element is CodeStruct st) children = st.Members;
             else if (element is CodeInterface iface) children = iface.Members;
         }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
+        catch (COMException ex) { System.Diagnostics.Debug.WriteLine(ex); }
 
         if (children is null) return;
         foreach (CodeElement child in children)
         {
-            try { CollectOutlineSymbols(child, symbols, depth + 1, maxDepth, kindFilter); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
+            try { CollectOutlineSymbols(child, symbols, depth + 1, maxDepth, kindFilter); } catch (COMException ex) { System.Diagnostics.Debug.WriteLine(ex); }
         }
     }
 

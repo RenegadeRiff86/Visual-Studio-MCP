@@ -9,3 +9,15 @@ C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Discover
 C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Discovery\obj\Debug\net8.0\refint\VsIdeBridge.Discovery.dll
 C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Discovery\obj\Debug\net8.0\VsIdeBridge.Discovery.pdb
 C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Discovery\obj\Debug\net8.0\ref\VsIdeBridge.Discovery.dll
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Discovery\bin\Debug\net8.0\VsIdeBridge.Discovery.deps.json
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Discovery\bin\Debug\net8.0\VsIdeBridge.Discovery.dll
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Discovery\bin\Debug\net8.0\VsIdeBridge.Discovery.pdb
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Discovery\obj\Debug\net8.0\VsIdeBridge.Discovery.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Discovery\obj\Debug\net8.0\VsIdeBridge.Discovery.AssemblyInfoInputs.cache
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Discovery\obj\Debug\net8.0\VsIdeBridge.Discovery.AssemblyInfo.cs
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Discovery\obj\Debug\net8.0\VsIdeBridge.Discovery.csproj.CoreCompileInputs.cache
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Discovery\obj\Debug\net8.0\VsIdeBridge.Discovery.sourcelink.json
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Discovery\obj\Debug\net8.0\VsIdeBridge.Discovery.dll
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Discovery\obj\Debug\net8.0\refint\VsIdeBridge.Discovery.dll
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Discovery\obj\Debug\net8.0\VsIdeBridge.Discovery.pdb
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Discovery\obj\Debug\net8.0\ref\VsIdeBridge.Discovery.dll

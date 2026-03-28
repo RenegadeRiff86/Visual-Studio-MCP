@@ -103,7 +103,7 @@ public static partial class ToolDefinitionCatalog
             "find_references",
             "search",
             "Find references to a symbol.",
-            "Run Find All References for the symbol at file/line/column.",
+            "Run Find All References for the symbol at file/line/column. This is more expensive than direct read/search tools.",
             parameterSchema,
             bridgeCommand: "find-references",
             aliases: ["references", "find_symbol_references", "search_references"],

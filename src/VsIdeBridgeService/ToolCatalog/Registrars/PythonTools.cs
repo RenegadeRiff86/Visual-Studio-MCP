@@ -11,12 +11,13 @@ namespace VsIdeBridgeService;
 
 internal static partial class ToolCatalog
 {
-    private static IEnumerable<ToolEntry> PythonNativeTools()
+    private static IEnumerable<ToolEntry> PythonNativeTools() =>
+        PythonDiscoveryTools()
+            .Concat(PythonMutationTools())
+            .Concat(CondaTools());
+
+    private static IEnumerable<ToolEntry> PythonDiscoveryTools()
     {
-        const string PackagesArgName = "packages";
-
-        // ── Environment discovery ──────────────────────────────────────────────────────
-
         yield return new("python_list_envs",
             "Enumerate available Python interpreters: PATH entries, common venv locations under " +
             "the solution directory, and the bridge-managed Python runtime if present.",
@@ -65,8 +66,11 @@ internal static partial class ToolCatalog
                     id, python, "pip list --format=json", timeoutMs: 30_000)
                     .ConfigureAwait(false);
             });
+    }
 
-        // ── Environment mutation ───────────────────────────────────────────────────────
+    private static IEnumerable<ToolEntry> PythonMutationTools()
+    {
+        const string PackagesArgName = "packages";
 
         yield return new("python_install_package",
             "Install one or more packages into a Python environment using pip.",
@@ -115,9 +119,10 @@ internal static partial class ToolCatalog
                     id, python, $"venv \"{targetPath}\"", timeoutMs: 60_000)
                     .ConfigureAwait(false);
             });
+    }
 
-        // ── Conda ──────────────────────────────────────────────────────────────────────
-
+    private static IEnumerable<ToolEntry> CondaTools()
+    {
         yield return new("conda_install",
             "Install packages into a conda environment.",
             ObjectSchema(
@@ -227,15 +232,10 @@ internal static partial class ToolCatalog
     }
 
     private static JsonNode MakePythonResult(JsonObject payload, bool success)
-        => new JsonObject
-        {
-            ["content"] = new JsonArray
-            {
-                new JsonObject { ["type"] = "text", ["text"] = payload.ToJsonString() },
-            },
-            ["isError"] = !success,
-            ["structuredContent"] = payload,
-        };
+        => ToolResultFormatter.StructuredToolResult(
+            payload,
+            isError: !success,
+            successText: $"Python command completed with exit code {payload["exitCode"]?.GetValue<int>() ?? 0}.");
 
     private static string RequireArg(JsonNode? id, JsonObject? args, string name)
     {

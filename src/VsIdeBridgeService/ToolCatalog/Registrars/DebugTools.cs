@@ -5,7 +5,11 @@ namespace VsIdeBridgeService;
 
 internal static partial class ToolCatalog
 {
-    private static IEnumerable<ToolEntry> DebugTools()
+    private static IEnumerable<ToolEntry> DebugTools() =>
+        BreakpointTools()
+            .Concat(DebugSessionTools());
+
+    private static IEnumerable<ToolEntry> BreakpointTools()
     {
         yield return BridgeTool("set_breakpoint",
             "Set a breakpoint at file/line with optional condition and hit count.",
@@ -66,7 +70,10 @@ internal static partial class ToolCatalog
         yield return BridgeTool("disable_all_breakpoints",
             "Disable all breakpoints.",
             EmptySchema(), "disable-all-breakpoints", _ => Empty(), Debug);
+    }
 
+    private static IEnumerable<ToolEntry> DebugSessionTools()
+    {
         yield return BridgeTool("debug_threads",
             "List debugger threads for the active debug session.",
             EmptySchema(), "debug-threads", _ => Empty(), Debug);

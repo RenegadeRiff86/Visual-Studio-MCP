@@ -9,3 +9,15 @@ C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Git\obj\
 C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Git\obj\Debug\net8.0\refint\VsIdeBridge.Git.dll
 C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Git\obj\Debug\net8.0\VsIdeBridge.Git.pdb
 C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Git\obj\Debug\net8.0\ref\VsIdeBridge.Git.dll
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Git\bin\Debug\net8.0\VsIdeBridge.Git.deps.json
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Git\bin\Debug\net8.0\VsIdeBridge.Git.dll
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Git\bin\Debug\net8.0\VsIdeBridge.Git.pdb
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Git\obj\Debug\net8.0\VsIdeBridge.Git.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Git\obj\Debug\net8.0\VsIdeBridge.Git.AssemblyInfoInputs.cache
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Git\obj\Debug\net8.0\VsIdeBridge.Git.AssemblyInfo.cs
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Git\obj\Debug\net8.0\VsIdeBridge.Git.csproj.CoreCompileInputs.cache
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Git\obj\Debug\net8.0\VsIdeBridge.Git.sourcelink.json
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Git\obj\Debug\net8.0\VsIdeBridge.Git.dll
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Git\obj\Debug\net8.0\refint\VsIdeBridge.Git.dll
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Git\obj\Debug\net8.0\VsIdeBridge.Git.pdb
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Git\obj\Debug\net8.0\ref\VsIdeBridge.Git.dll

@@ -28,31 +28,31 @@ internal sealed class BridgeEditHighlightService
 
     public void ApplyHighlights(IWpfTextView view, IReadOnlyCollection<(int StartLine, int EndLine)> changedRanges, IReadOnlyCollection<int> deletedLines)
     {
-        var snapshot = view.TextSnapshot;
-        var state = new BufferHighlights
+        ITextSnapshot snapshot = view.TextSnapshot;
+        BufferHighlights state = new BufferHighlights
         {
             ExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(HighlightExpirationMinutes),
         };
 
         foreach (var (StartLine, EndLine) in changedRanges)
         {
-            var startLine = Math.Max(1, StartLine);
-            var endLine = Math.Max(startLine, EndLine);
+            int startLine = Math.Max(1, StartLine);
+            int endLine = Math.Max(startLine, EndLine);
             if (startLine > snapshot.LineCount)
             {
                 continue;
             }
 
-            var snapshotStart = snapshot.GetLineFromLineNumber(startLine - 1).Start;
-            var lastLine = snapshot.GetLineFromLineNumber(Math.Min(snapshot.LineCount, endLine) - 1);
-            var span = new SnapshotSpan(snapshotStart, lastLine.EndIncludingLineBreak);
+            SnapshotPoint snapshotStart = snapshot.GetLineFromLineNumber(startLine - 1).Start;
+            ITextSnapshotLine lastLine = snapshot.GetLineFromLineNumber(Math.Min(snapshot.LineCount, endLine) - 1);
+            SnapshotSpan span = new SnapshotSpan(snapshotStart, lastLine.EndIncludingLineBreak);
             state.AddedOrModified.Add(snapshot.CreateTrackingSpan(span, SpanTrackingMode.EdgeExclusive));
         }
 
         foreach (var lineNumber in deletedLines.Distinct().Where(value => value > 0))
         {
-            var lineIndex = Math.Min(snapshot.LineCount - 1, Math.Max(0, lineNumber - 1));
-            var line = snapshot.GetLineFromLineNumber(lineIndex);
+            int lineIndex = Math.Min(snapshot.LineCount - 1, Math.Max(0, lineNumber - 1));
+            ITextSnapshotLine line = snapshot.GetLineFromLineNumber(lineIndex);
             state.DeletedMarkers.Add(snapshot.CreateTrackingSpan(new SnapshotSpan(line.Start, 0), SpanTrackingMode.EdgeNegative));
         }
 
@@ -73,7 +73,7 @@ internal sealed class BridgeEditHighlightService
             return [];
         }
 
-        var highlightSpans = new List<(SnapshotSpan, string)>();
+        List<(SnapshotSpan Span, string MarkerType)> highlightSpans = new();
         highlightSpans.AddRange(state.AddedOrModified.Select(span => (span.GetSpan(snapshot), "VsIdeBridgeChangedLine")));
         highlightSpans.AddRange(state.DeletedMarkers.Select(span => (span.GetSpan(snapshot), "VsIdeBridgeDeletedLine")));
         return highlightSpans;

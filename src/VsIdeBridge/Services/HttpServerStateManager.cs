@@ -24,7 +24,17 @@ internal static class HttpServerStateManager
             {
                 return File.Exists(FlagFilePath);
             }
-            catch (Exception ex)
+            catch (IOException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[HttpServerStateManager] Could not read flag file: {ex.Message}");
+                return false;
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[HttpServerStateManager] Could not read flag file: {ex.Message}");
+                return false;
+            }
+            catch (NotSupportedException ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[HttpServerStateManager] Could not read flag file: {ex.Message}");
                 return false;
@@ -37,14 +47,22 @@ internal static class HttpServerStateManager
     {
         try
         {
-            var directory = Path.GetDirectoryName(FlagFilePath);
+            string? directory = Path.GetDirectoryName(FlagFilePath);
             if (directory != null)
             {
                 Directory.CreateDirectory(directory);
                 File.WriteAllText(FlagFilePath, string.Empty);
             }
         }
-        catch (Exception ex)
+        catch (IOException ex)
+        {
+            throw new InvalidOperationException($"Failed to enable HTTP server: {ex.Message}", ex);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new InvalidOperationException($"Failed to enable HTTP server: {ex.Message}", ex);
+        }
+        catch (NotSupportedException ex)
         {
             throw new InvalidOperationException($"Failed to enable HTTP server: {ex.Message}", ex);
         }
@@ -60,7 +78,15 @@ internal static class HttpServerStateManager
                 File.Delete(FlagFilePath);
             }
         }
-        catch (Exception ex)
+        catch (IOException ex)
+        {
+            throw new InvalidOperationException($"Failed to disable HTTP server: {ex.Message}", ex);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new InvalidOperationException($"Failed to disable HTTP server: {ex.Message}", ex);
+        }
+        catch (NotSupportedException ex)
         {
             throw new InvalidOperationException($"Failed to disable HTTP server: {ex.Message}", ex);
         }
