@@ -8,15 +8,17 @@ namespace VsIdeBridge.Diagnostics;
 
 internal static class BuildOutputParser
 {
+    private static readonly char[] s_newlineChars = ['\r', '\n'];
+
     public static IReadOnlyList<JObject> ParseBuildOutput(string buildOutputText)
     {
-        var diagnostics = new List<JObject>();
+        List<JObject> diagnostics = new();
 
-        var lines = buildOutputText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        string[] lines = buildOutputText.Split(s_newlineChars, StringSplitOptions.RemoveEmptyEntries);
 
         foreach (var line in lines)
         {
-            var diagnostic = TryParseMsBuildDiagnostic(line) ?? TryParseStructuredOutput(line);
+            JObject? diagnostic = TryParseMsBuildDiagnostic(line) ?? TryParseStructuredOutput(line);
             if (diagnostic != null)
             {
                 diagnostics.Add(diagnostic);
@@ -28,16 +30,16 @@ internal static class BuildOutputParser
 
     private static JObject? TryParseMsBuildDiagnostic(string line)
     {
-        var match = ErrorListPatterns.MsBuildDiagnosticPattern.Match(line);
+        Match match = ErrorListPatterns.MsBuildDiagnosticPattern().Match(line);
         if (!match.Success) return null;
 
-        var file = match.Groups["file"].Value;
-        var lineNum = int.TryParse(match.Groups["line"].Value, out var ln) ? ln : 1;
-        var column = int.TryParse(match.Groups["column"].Value, out var col) ? col : 1;
-        var severity = match.Groups["severity"].Value;
-        var code = match.Groups["code"].Value;
-        var message = match.Groups["message"].Value;
-        var project = match.Groups["project"].Value;
+        string file = match.Groups["file"].Value;
+        int lineNum = int.TryParse(match.Groups["line"].Value, out int ln) ? ln : 1;
+        int column = int.TryParse(match.Groups["column"].Value, out int col) ? col : 1;
+        string severity = match.Groups["severity"].Value;
+        string code = match.Groups["code"].Value;
+        string message = match.Groups["message"].Value;
+        string project = match.Groups["project"].Value;
 
         return new JObject
         {
@@ -55,16 +57,16 @@ internal static class BuildOutputParser
 
     private static JObject? TryParseStructuredOutput(string line)
     {
-        var match = ErrorListPatterns.StructuredOutputPattern.Match(line);
+        Match match = ErrorListPatterns.StructuredOutputPattern().Match(line);
         if (!match.Success) return null;
 
-        var project = match.Groups["project"].Value;
-        var file = match.Groups["file"].Value;
-        var lineNum = int.TryParse(match.Groups["line"].Value, out var ln) ? ln : 1;
-        var column = int.TryParse(match.Groups["column"].Value, out var col) ? col : 1;
-        var severity = match.Groups["severity"].Value;
-        var code = match.Groups["code"].Value;
-        var message = match.Groups["message"].Value;
+        string project = match.Groups["project"].Value;
+        string file = match.Groups["file"].Value;
+        int lineNum = int.TryParse(match.Groups["line"].Value, out int ln) ? ln : 1;
+        int column = int.TryParse(match.Groups["column"].Value, out int col) ? col : 1;
+        string severity = match.Groups["severity"].Value;
+        string code = match.Groups["code"].Value;
+        string message = match.Groups["message"].Value;
 
         return new JObject
         {

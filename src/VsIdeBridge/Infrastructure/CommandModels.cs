@@ -1,3 +1,4 @@
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace VsIdeBridge.Infrastructure;
@@ -10,6 +11,16 @@ internal sealed class CommandExecutionResult(string summary, JToken? data = null
 
     public JArray Warnings { get; } = warnings ?? [];
 }
+
+internal sealed record CommandTimeoutDetails(
+    [property: JsonProperty("timeoutMs")] int TimeoutMs,
+    [property: JsonProperty("durationMs")] long DurationMs,
+    [property: JsonProperty("reason")] string Reason);
+
+internal sealed record CommandTimeoutError(
+    [property: JsonProperty("code")] string Code,
+    [property: JsonProperty("message")] string Message,
+    [property: JsonProperty("details")] object? Details);
 
 internal sealed record CommandEnvelope
 {

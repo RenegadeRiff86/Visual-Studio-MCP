@@ -46,29 +46,99 @@ internal sealed partial class DocumentService
             File.WriteAllText(normalizedPath, string.Empty);
         }
 
-        Window window = dte.ItemOperations.OpenFile(normalizedPath);
-        window.Activate();
+        // Project and solution files cannot be edited via the text-editor buffer.
+        // Skip ItemOperations.OpenFile entirely: old-style .csproj opens a project
+        // designer (not a text window) and closing it can unload the project; .vcxproj
+        // and others may throw ArgumentException. Write directly to disk instead.
+        if (RequiresDiskBackedWrite(normalizedPath))
+        {
+            return BuildDiskWriteResult(normalizedPath, content, saveChanges, line, column, includeBestPracticeWarnings, dte);
+        }
 
-        Document document = window.Document ?? dte.ActiveDocument
-            ?? throw new CommandErrorException(DocumentNotFoundCode, $"Unable to activate: {normalizedPath}");
+        try
+        {
+            Window window = dte.ItemOperations.OpenFile(normalizedPath);
+            window.Activate();
 
-        (bool usedEditorBuffer, string originalContent, window) = ApplyDocumentContent(dte, window, document, normalizedPath, content, line, column);
+            Document document = window.Document ?? dte.ActiveDocument
+                ?? throw new CommandErrorException(DocumentNotFoundCode, $"Unable to activate: {normalizedPath}");
 
-        Document finalDocument = window.Document ?? document;
-        string finalContent = TryReadDocumentText(finalDocument) ?? ReadFileText(normalizedPath);
+            (bool usedEditorBuffer, string originalContent, window) = ApplyDocumentContent(dte, window, document, normalizedPath, content, line, column);
+
+            Document finalDocument = window.Document ?? document;
+            string finalContent = TryReadDocumentText(finalDocument) ?? ReadFileText(normalizedPath);
+            if (!string.Equals(finalContent, content, StringComparison.Ordinal))
+            {
+                throw new CommandErrorException("write_failed", $"Document content did not match the requested text after write: {normalizedPath}");
+            }
+
+            bool contentChanged = !string.Equals(originalContent, finalContent, StringComparison.Ordinal);
+            if (saveChanges && window.Document is not null)
+            {
+                window.Document.Save();
+            }
+
+            return BuildWriteResult(window, normalizedPath, content, usedEditorBuffer, contentChanged,
+                saveChanges, line, column, changedRanges, deletedLines, includeBestPracticeWarnings, dte);
+        }
+        catch (ArgumentException) when (RequiresDiskBackedWrite(normalizedPath))
+        {
+            return BuildDiskWriteResult(normalizedPath, content, saveChanges, line, column, includeBestPracticeWarnings, dte);
+        }
+    }
+
+    private JObject BuildDiskWriteResult(
+        string normalizedPath,
+        string content,
+        bool saveChanges,
+        int line,
+        int column,
+        bool includeBestPracticeWarnings,
+        DTE2 dte)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        string originalContent = ReadFileText(normalizedPath);
+        File.WriteAllText(normalizedPath, content);
+        string finalContent = ReadFileText(normalizedPath);
         if (!string.Equals(finalContent, content, StringComparison.Ordinal))
         {
             throw new CommandErrorException("write_failed", $"Document content did not match the requested text after write: {normalizedPath}");
         }
 
-        bool contentChanged = !string.Equals(originalContent, finalContent, StringComparison.Ordinal);
-        if (saveChanges && window.Document is not null)
-        {
-            window.Document.Save();
-        }
+        IReadOnlyList<JObject> preWriteWarnings = includeBestPracticeWarnings
+            ? ErrorListService.AnalyzeContentBeforeWrite(normalizedPath, content)
+            : [];
+        string? projectUniqueName = includeBestPracticeWarnings
+            ? SolutionFileLocator.TryFindProjectUniqueName(dte, normalizedPath)
+            : null;
 
-        return BuildWriteResult(window, normalizedPath, content, usedEditorBuffer, contentChanged,
-            saveChanges, line, column, changedRanges, deletedLines, includeBestPracticeWarnings, dte);
+        return new JObject
+        {
+            [ResolvedPathProperty] = normalizedPath,
+            ["editorBacked"] = false,
+            ["verified"] = true,
+            ["contentChanged"] = !string.Equals(originalContent, finalContent, StringComparison.Ordinal),
+            ["saved"] = saveChanges,
+            ["line"] = Math.Max(1, line),
+            ["column"] = Math.Max(1, column),
+            ["windowCaption"] = Path.GetFileName(normalizedPath),
+            ["bestPracticeWarnings"] = preWriteWarnings.Count > 0
+                ? BestPracticeWarningProjector.CreateResponseWarnings(preWriteWarnings, projectUniqueName)
+                : null,
+        };
+    }
+
+    private static bool RequiresDiskBackedWrite(string normalizedPath)
+    {
+        string extension = Path.GetExtension(normalizedPath);
+        return string.Equals(extension, ".csproj", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".vcxproj", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".vbproj", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".fsproj", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".props", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".targets", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".sln", StringComparison.OrdinalIgnoreCase);
     }
 
     private static (bool UsedEditorBuffer, string OriginalContent, Window ResultWindow) ApplyDocumentContent(
@@ -216,16 +286,43 @@ internal sealed partial class DocumentService
 
     public async Task<JObject> SaveDocumentAsync(DTE2 dte, string? filePath, bool saveAll)
     {
+        (bool saveAllResult, int count, string? path, bool? saved) = await SaveDocumentOnMainThreadAsync(dte, filePath, saveAll).ConfigureAwait(false);
+
+        return new JObject
+        {
+            ["saveAll"] = saveAllResult,
+            ["count"] = count,
+            ["path"] = path,
+            ["saved"] = saved,
+        };
+    }
+
+    public async Task<JObject> ReloadDocumentAsync(string filePath)
+    {
+        (bool reloaded, string normalizedPath, string? reason) = await ReloadDocumentOnMainThreadAsync(filePath).ConfigureAwait(false);
+        JObject result = new()
+        {
+            ["reloaded"] = reloaded,
+            ["path"] = normalizedPath,
+        };
+        if (reason is not null)
+        {
+            result["reason"] = reason;
+        }
+
+        return result;
+    }
+
+    private async Task<(bool SaveAll, int Count, string? Path, bool? Saved)> SaveDocumentOnMainThreadAsync(DTE2 dte, string? filePath, bool saveAll)
+    {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
         if (saveAll)
         {
             dte.Documents.SaveAll();
-            return new JObject
-            {
-                ["saveAll"] = true,
-                ["count"] = dte.Documents.Count,
-            };
+            int count = dte.Documents.Count;
+            await Task.Yield();
+            return (true, count, null, null);
         }
 
         if (!string.IsNullOrWhiteSpace(filePath))
@@ -233,27 +330,21 @@ internal sealed partial class DocumentService
             string normalized = PathNormalization.NormalizeFilePath(filePath);
             Document document = TryFindOpenDocumentByPath(dte, normalized) ?? throw new CommandErrorException(DocumentNotFoundCode, $"No open document matching path: {filePath}");
             document.Save();
-            return new JObject
-            {
-                ["saveAll"] = false,
-                ["count"] = 1,
-                ["path"] = TryGetDocumentFullName(document),
-                ["saved"] = TryGetDocumentSaved(document),
-            };
+            string? path = TryGetDocumentFullName(document);
+            bool? saved = TryGetDocumentSaved(document);
+            await Task.Yield();
+            return (false, 1, path, saved);
         }
 
         Document active = dte.ActiveDocument ?? throw new CommandErrorException("no_active_document", "No active document to save.");
         active.Save();
-        return new JObject
-        {
-            ["saveAll"] = false,
-            ["count"] = 1,
-            ["path"] = TryGetDocumentFullName(active),
-            ["saved"] = TryGetDocumentSaved(active),
-        };
+        string? activePath = TryGetDocumentFullName(active);
+        bool? activeSaved = TryGetDocumentSaved(active);
+        await Task.Yield();
+        return (false, 1, activePath, activeSaved);
     }
 
-    public async Task<JObject> ReloadDocumentAsync(string filePath)
+    private async Task<(bool Reloaded, string Path, string? Reason)> ReloadDocumentOnMainThreadAsync(string filePath)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
@@ -270,15 +361,22 @@ internal sealed partial class DocumentService
             out uint cookie);
 
         if (hr != VSConstants.S_OK || cookie == 0 || docDataPtr == IntPtr.Zero)
-            return new JObject { ["reloaded"] = false, ["path"] = normalized, ["reason"] = "not_open" };
+        {
+            await Task.Yield();
+            return (false, normalized, "not_open");
+        }
 
         try
         {
             if (Marshal.GetObjectForIUnknown(docDataPtr) is not IVsPersistDocData docData)
-                return new JObject { ["reloaded"] = false, ["path"] = normalized, ["reason"] = "not_editable" };
+            {
+                await Task.Yield();
+                return (false, normalized, "not_editable");
+            }
 
             ErrorHandler.ThrowOnFailure(docData.ReloadDocData(0));
-            return new JObject { ["reloaded"] = true, ["path"] = normalized };
+            await Task.Yield();
+            return (true, normalized, null);
         }
         finally
         {

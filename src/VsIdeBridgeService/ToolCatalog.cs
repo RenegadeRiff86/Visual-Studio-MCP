@@ -13,28 +13,28 @@ internal static partial class ToolCatalog
 
     private static IReadOnlyList<ToolEntry> CreateEntries()
     {
-        return new IEnumerable<ToolEntry>[]
-        {
+        return
+        [
             // ── core: discovery + binding ──────────────────────────────────────
-            CoreTools(),
+            .. CoreTools(),
             // ── search + read ──────────────────────────────────────────────────
-            SearchTools(),
+            .. SearchTools(),
             // ── diagnostics + build ────────────────────────────────────────────
-            DiagnosticsTools(),
+            .. DiagnosticsTools(),
             // ── semantic navigation ────────────────────────────────────────────
-            SemanticTools(),
+            .. SemanticTools(),
             // ── editor / document management ───────────────────────────────────
-            DocumentTools(),
+            .. DocumentTools(),
             // ── debug ──────────────────────────────────────────────────────────
-            DebugTools(),
+            .. DebugTools(),
             // ── project management ─────────────────────────────────────────────
-            ProjectTools(),
+            .. ProjectTools(),
             // ── git (service-native subprocess) ───────────────────────────────
-            GitTools(),
+            .. GitTools(),
             // ── python env/package management (service-native subprocess) ──────
-            PythonNativeTools(),
+            .. PythonNativeTools(),
             // ── nuget package management (service-native subprocess) ───────────
-            NugetTools(),
-        }.SelectMany(static group => group).ToArray();
+            .. NugetTools(),
+        ];
     }
 }

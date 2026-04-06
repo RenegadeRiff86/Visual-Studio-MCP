@@ -181,12 +181,12 @@ internal sealed partial class SearchService
     private static IReadOnlyList<SmartQueryTerm> ExtractSmartQueryTerms(string query)
     {
         List<SmartQueryTerm> terms = [];
-        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> seen = [];
 
         void AddTerm(string value, int weight, bool wholeWord)
         {
             string trimmed = value.Trim();
-            if (trimmed.Length < 2 || !seen.Add(trimmed))
+            if (trimmed.Length < 2 || !seen.Add(trimmed.ToLowerInvariant()))
             {
                 return;
             }
@@ -218,15 +218,15 @@ internal sealed partial class SearchService
             }
         }
 
-        HashSet<string> stopWords = new(StringComparer.OrdinalIgnoreCase)
-        {
+        HashSet<string> stopWords =
+        [
             "where", "what", "when", "which", "that", "this", "with", "from", "into", "used", "using",
             "call", "calls", "show", "find", "open", "close", "line", "file", "files", "query", "context",
-        };
+        ];
 
         foreach (Match match in Regex.Matches(query, "[A-Za-z][A-Za-z0-9_]{3,}"))
         {
-            if (!stopWords.Contains(match.Value))
+            if (!stopWords.Contains(match.Value.ToLowerInvariant()))
             {
                 AddTerm(match.Value, 80, wholeWord: true);
             }

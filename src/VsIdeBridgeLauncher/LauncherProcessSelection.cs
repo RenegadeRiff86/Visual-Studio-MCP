@@ -35,7 +35,7 @@ namespace VsIdeBridgeLauncher
             bool timedOut,
             int timeoutMilliseconds)
         {
-            List<LauncherProcessSnapshot> snapshotList = new List<LauncherProcessSnapshot>(snapshots);
+            List<LauncherProcessSnapshot> snapshotList = new(snapshots);
             int? launchedProcessId = SelectNewestLaunchedProcessId(snapshotList, existingProcessIds);
             int activeProcessId = launchedProcessId ?? primaryProcessId;
 
@@ -70,8 +70,8 @@ namespace VsIdeBridgeLauncher
 
         public static IReadOnlyList<string> NormalizeTempRoots(IEnumerable<string> candidates)
         {
-            List<string> tempRoots = new List<string>();
-            HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            List<string> tempRoots = new();
+            HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
 
             foreach (string candidate in candidates)
             {
@@ -97,7 +97,7 @@ namespace VsIdeBridgeLauncher
 
         public static IReadOnlyList<string> BuildDiscoveryFileCandidates(IEnumerable<string> tempRoots, int processId)
         {
-            List<string> paths = new List<string>();
+            List<string> paths = new();
             foreach (string tempRoot in NormalizeTempRoots(tempRoots))
             {
                 paths.Add(Path.Combine(tempRoot, "vs-ide-bridge", "pipes", string.Format("bridge-{0}.json", processId)));
@@ -139,7 +139,7 @@ namespace VsIdeBridgeLauncher
         }
     }
 
-    internal struct LauncherProcessSnapshot
+    internal readonly struct LauncherProcessSnapshot
     {
         public LauncherProcessSnapshot(int processId, DateTime startTimeUtc, bool hasBridgeDiscovery, bool hasMainWindow)
         {

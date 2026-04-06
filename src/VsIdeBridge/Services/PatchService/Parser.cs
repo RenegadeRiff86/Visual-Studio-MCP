@@ -37,8 +37,8 @@ internal sealed partial class PatchService
         }
 
         return "Patch format not recognized. " +
-            "Preferred: *** Begin Patch\\n*** Update File: <path>\\n@@\\n <context>\\n-old\\n+new\\n*** End Patch. " +
-            "Also accepted: unified diff with --- a/<path> / +++ b/<path> / @@ -line,count +line,count @@ headers.";
+            "Required: *** Begin Patch\\n*** Update File: <path>\\n@@\\n <context>\\n-old\\n+new\\n*** End Patch. " +
+            "Use editor patch directives only; do not send unified diff headers like --- or +++.";
     }
 
     private static bool LooksLikeEditorPatchEnvelope(string patchText)
@@ -61,7 +61,7 @@ internal sealed partial class PatchService
             throw new CommandErrorException(InvalidArgumentsCode, "Editor patch is missing the *** Begin Patch header.");
         }
 
-        List<FilePatch> patches = new List<FilePatch>();
+        List<FilePatch> patches = [];
         int lineIndex = 1;
         while (lineIndex < lines.Length)
         {
@@ -97,7 +97,9 @@ internal sealed partial class PatchService
                 continue;
             }
 
-            throw new CommandErrorException(InvalidArgumentsCode, $"Unsupported editor patch directive: {line}");
+            throw new CommandErrorException(
+                InvalidArgumentsCode,
+                $"Unsupported editor patch directive: {line}. This tool expects editor patch format like '*** Update File: <path>' and does not accept unified diff headers such as '---' or '+++'.");
         }
 
         throw new CommandErrorException(InvalidArgumentsCode, "Editor patch is missing the *** End Patch footer.");
@@ -107,7 +109,7 @@ internal sealed partial class PatchService
     {
         string path = ParseEditorPatchPath(lines[lineIndex], "*** Add File: ");
         lineIndex++;
-        List<HunkLine> addedLines = new List<HunkLine>();
+        List<HunkLine> addedLines = [];
         while (lineIndex < lines.Length && !IsEditorPatchDirective(lines[lineIndex]))
         {
             string line = lines[lineIndex];
@@ -167,7 +169,7 @@ internal sealed partial class PatchService
             lineIndex++;
         }
 
-        List<SearchBlock> blocks = new List<SearchBlock>();
+        List<SearchBlock> blocks = [];
         SearchBlock? currentBlock = null;
         while (lineIndex < lines.Length && !IsEditorPatchDirective(lines[lineIndex]))
         {
@@ -241,7 +243,7 @@ internal sealed partial class PatchService
     {
         string normalized = patchText.Replace("\r\n", "\n").Replace('\r', '\n').TrimEnd('\n');
         string[] lines = normalized.Split('\n');
-        List<FilePatch> patches = new List<FilePatch>();
+        List<FilePatch> patches = [];
         FilePatch? currentFile = null;
         int lineIndex = 0;
 

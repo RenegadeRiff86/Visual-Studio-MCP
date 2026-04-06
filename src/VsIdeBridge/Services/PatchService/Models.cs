@@ -114,5 +114,18 @@ internal sealed partial class PatchService
             !string.IsNullOrWhiteSpace(SourcePath) &&
             !PathNormalization.AreEquivalent(SourcePath, TargetPath);
     }
+
+    private sealed class PreparedPatchOperation
+    {
+        public FilePatch FilePatch { get; set; } = new FilePatch();
+
+        public PatchPaths Paths { get; set; } = new PatchPaths();
+
+        public ApplyFilePatchResult Result { get; set; } = new ApplyFilePatchResult();
+
+        public string RequestedTargetContent { get; set; } = string.Empty;
+
+        public bool AlreadySatisfied { get; set; }
+    }
 }
 

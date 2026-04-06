@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using VsIdeBridgeService.Diagnostics;
+using static VsIdeBridgeService.BridgeConnectionDefaults;
 
 namespace VsIdeBridgeService;
 
@@ -8,24 +9,11 @@ namespace VsIdeBridgeService;
 // Thread-safe: multiple concurrent tool calls may use the same connection.
 internal sealed class BridgeConnection
 {
-    private const int FastTimeoutMs = 15_000;
-    private const int InteractiveTimeoutMs = 45_000;
-    private const int HeavyTimeoutMs = 130_000;
-    private const int FastPipeGateTimeoutMs = 750;
-    private const int InteractivePipeGateTimeoutMs = 2_000;
-    private const int HeavyPipeGateTimeoutMs = 5_000;
-    private const int BridgeError = -32001;
-    private const int TimeoutError = -32002;
-    private const int CommError = -32003;
-
     private readonly DiscoveryMode _discoveryMode;
     private readonly int? _timeoutOverrideMs;
     private readonly object _gate = new();
     private readonly DocumentDiagnosticsCoordinator _documentDiagnostics;
-
-    private BridgeInstanceSelector _selector = new();
-    private BridgeInstance? _cached;
-    private string _lastSolutionPath = string.Empty;
+    private readonly ConnectionState _state = new();
 
     public BridgeConnection(string[] args)
     {
@@ -41,6 +29,14 @@ internal sealed class BridgeConnection
         Heavy,
     }
 
+    private sealed class ConnectionState
+    {
+        public BridgeInstanceSelector Selector { get; set; } = new();
+        public BridgeInstance? Cached { get; set; }
+        public string LastSolutionPath { get; set; } = string.Empty;
+        public string? PendingBindingNotice { get; set; }
+    }
+
     // ── Public API used by tool handlers ──────────────────────────────────────
 
     public Task<JsonObject> SendAsync(JsonNode? id, string command, string args)
@@ -51,17 +47,17 @@ internal sealed class BridgeConnection
 
     public string CurrentSolutionPath
     {
-        get { lock (_gate) { return _lastSolutionPath; } }
+        get { lock (_gate) { return _state.LastSolutionPath; } }
     }
 
     public BridgeInstance? CurrentInstance
     {
-        get { lock (_gate) { return _cached; } }
+        get { lock (_gate) { return _state.Cached; } }
     }
 
     public BridgeInstanceSelector CurrentSelector
     {
-        get { lock (_gate) { return _selector; } }
+        get { lock (_gate) { return _state.Selector; } }
     }
 
     public DiscoveryMode Mode => _discoveryMode;
@@ -74,8 +70,9 @@ internal sealed class BridgeConnection
         BridgeInstanceSelector newSelector = ParseSelector(args);
         lock (_gate)
         {
-            _selector = newSelector;
-            _cached = null;
+            _state.Selector = newSelector;
+            _state.Cached = null;
+            _state.PendingBindingNotice = null;
         }
 
         try
@@ -101,14 +98,15 @@ internal sealed class BridgeConnection
     {
         lock (_gate)
         {
-            _selector = new BridgeInstanceSelector
+            _state.Selector = new BridgeInstanceSelector
             {
-                InstanceId = _selector.InstanceId,
-                ProcessId = _selector.ProcessId,
-                PipeName = _selector.PipeName,
+                InstanceId = _state.Selector.InstanceId,
+                ProcessId = _state.Selector.ProcessId,
+                PipeName = _state.Selector.PipeName,
                 SolutionHint = solutionHint,
             };
-            _cached = null;
+            _state.Cached = null;
+            _state.PendingBindingNotice = null;
         }
     }
 
@@ -127,8 +125,7 @@ internal sealed class BridgeConnection
         try
         {
             JsonObject response = await SendPipeAsync(command, args, ignoreSolutionHint, timeoutProfile).ConfigureAwait(false);
-            RememberSolutionPath(response["Data"]?["solutionPath"]?.GetValue<string>());
-            return response;
+            return await FinalizePipeResponseAsync(response, command, args, ignoreSolutionHint, timeoutProfile).ConfigureAwait(false);
         }
         catch (BridgeException ex) { throw new McpRequestException(id, BridgeError, ex.Message); }
         catch (TimeoutException ex) { throw new McpRequestException(id, TimeoutError, $"Timed out: {ex.Message}"); }
@@ -169,18 +166,24 @@ internal sealed class BridgeConnection
         ToolTimeoutProfile timeoutProfile)
     {
         BridgeInstance? evicted = ClearCached();
-        if (evicted is null)
-            throw new McpRequestException(id, CommError, $"VS bridge communication failed: {ex.Message}");
+        _ = evicted ?? throw new McpRequestException(id, CommError, $"VS bridge communication failed: {ex.Message}");
 
         try
         {
             JsonObject response = await SendPipeAsync(command, args, ignoreSolutionHint, timeoutProfile).ConfigureAwait(false);
-            RememberSolutionPath(response["Data"]?["solutionPath"]?.GetValue<string>());
-            return response;
+            return await FinalizePipeResponseAsync(response, command, args, ignoreSolutionHint, timeoutProfile).ConfigureAwait(false);
         }
         catch (BridgeException retryEx) { throw new McpRequestException(id, BridgeError, retryEx.Message); }
         catch (TimeoutException retryEx) { throw new McpRequestException(id, TimeoutError, $"Timed out: {retryEx.Message}"); }
-        catch (Exception retryEx) { throw new McpRequestException(id, CommError, $"VS bridge retry failed: {retryEx.Message}"); }
+        catch (Exception retryEx) when (retryEx is not null) { throw new McpRequestException(id, CommError, $"VS bridge retry failed: {retryEx.Message}"); }
+    }
+
+    private async Task<JsonObject> FinalizePipeResponseAsync(JsonObject response, string command, string args, bool ignoreSolutionHint, ToolTimeoutProfile timeoutProfile)
+    {
+        response = await RetryImplicitBindingCancellationAsync(response, command, args, ignoreSolutionHint, timeoutProfile).ConfigureAwait(false);
+        AttachPendingBindingNotice(response);
+        RememberSolutionPath(response["Data"]?["solutionPath"]?.GetValue<string>());
+        return response;
     }
 
     private async Task<BridgeInstance> GetInstanceAsync(bool ignoreSolutionHint)
@@ -188,8 +191,8 @@ internal sealed class BridgeConnection
         BridgeInstanceSelector selectorSnapshot;
         lock (_gate)
         {
-            if (_cached is not null) return _cached;
-            selectorSnapshot = _selector;
+            if (_state.Cached is not null) return _state.Cached;
+            selectorSnapshot = _state.Selector;
         }
 
         BridgeInstanceSelector effectiveSelector = ignoreSolutionHint
@@ -206,8 +209,14 @@ internal sealed class BridgeConnection
 
         lock (_gate)
         {
-            if (_cached is null && ReferenceEquals(_selector, selectorSnapshot))
-                _cached = discovered;
+            if (_state.Cached is null && ReferenceEquals(_state.Selector, selectorSnapshot))
+            {
+                _state.Cached = discovered;
+                if (!selectorSnapshot.HasAny)
+                {
+                    _state.PendingBindingNotice = $"Auto-bound to {discovered.Label}.";
+                }
+            }
         }
 
         return discovered;
@@ -217,8 +226,8 @@ internal sealed class BridgeConnection
     {
         lock (_gate)
         {
-            BridgeInstance? prev = _cached;
-            _cached = null;
+            BridgeInstance? prev = _state.Cached;
+            _state.Cached = null;
             return prev;
         }
     }
@@ -226,7 +235,69 @@ internal sealed class BridgeConnection
     private void RememberSolutionPath(string? path)
     {
         if (!string.IsNullOrWhiteSpace(path))
-            lock (_gate) { _lastSolutionPath = path; }
+            lock (_gate) { _state.LastSolutionPath = path; }
+    }
+
+    private void AttachPendingBindingNotice(JsonObject response)
+    {
+        string? notice;
+        lock (_gate)
+        {
+            notice = _state.PendingBindingNotice;
+            _state.PendingBindingNotice = null;
+        }
+
+        if (string.IsNullOrWhiteSpace(notice))
+        {
+            return;
+        }
+
+        response["BindingNotice"] = notice;
+        response["Binding"] = InstanceToJson(CurrentInstance ?? throw new InvalidOperationException("Current instance should exist when attaching a binding notice."));
+    }
+
+    private async Task<JsonObject> RetryImplicitBindingCancellationAsync(
+        JsonObject response,
+        string command,
+        string args,
+        bool ignoreSolutionHint,
+        ToolTimeoutProfile timeoutProfile)
+    {
+        bool shouldRetry;
+        lock (_gate)
+        {
+            shouldRetry = !string.IsNullOrWhiteSpace(_state.PendingBindingNotice)
+                && IsInterruptedOperationResponse(response);
+            if (shouldRetry)
+            {
+                _state.PendingBindingNotice += " Retried once after the initial command was interrupted.";
+            }
+        }
+
+        if (!shouldRetry)
+        {
+            return response;
+        }
+
+        return await SendPipeAsync(command, args, ignoreSolutionHint, timeoutProfile).ConfigureAwait(false);
+    }
+
+    private static bool IsInterruptedOperationResponse(JsonObject response)
+    {
+        bool success = response["Success"]?.GetValue<bool>() ?? false;
+        if (success)
+        {
+            return false;
+        }
+
+        string? summary = response["Summary"]?.GetValue<string>();
+        if (string.Equals(summary, "The operation was canceled.", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        string? errorMessage = response["Error"]?["message"]?.GetValue<string>();
+        return string.Equals(errorMessage, "Bridge server interrupted: The operation was canceled.", StringComparison.Ordinal);
     }
 
     // ── JSON helpers ───────────────────────────────────────────────────────────

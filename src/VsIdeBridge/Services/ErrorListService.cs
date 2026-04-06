@@ -73,7 +73,7 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
         }
         else
         {
-            rows = await WaitForRowsAsync(context, timeoutMilliseconds, intellisenseReady: waitForIntellisense).ConfigureAwait(true);
+            rows = await WaitForRowsAsync(context, timeoutMilliseconds).ConfigureAwait(true);
             if (includeBuildOutputFallback && rows.Count == 0)
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
@@ -95,7 +95,10 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
             }
         }
 
-        JObject[] filteredRows = ApplyQuery(rows, query).ToArray();
+        JObject[] matchingRows = [.. ApplyQuery(rows, query?.WithoutMax())];
+        JObject[] filteredRows = query?.Max > 0
+            ? [.. matchingRows.Take(query.Max.Value)]
+            : matchingRows;
         Dictionary<string, int> severityCounts = CreateSeverityCounts();
         foreach (JObject row in filteredRows)
         {
@@ -111,7 +114,7 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
         return new JObject
         {
             ["count"] = filteredRows.Length,
-            ["totalCount"] = rows.Count,
+            ["totalCount"] = matchingRows.Length,
             ["severityCounts"] = JObject.FromObject(severityCounts),
             ["totalSeverityCounts"] = JObject.FromObject(totalSeverityCounts),
             ["hasErrors"] = severityCounts["Error"] > 0,
@@ -145,13 +148,13 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        Dictionary<string, string> projectNamesByFile = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string> projectNamesByFile = [];
         foreach (string file in files)
         {
             string? projectUniqueName = SolutionFileLocator.TryFindProjectUniqueName(dte, file);
             if (!string.IsNullOrWhiteSpace(projectUniqueName))
             {
-                projectNamesByFile[file] = projectUniqueName!;
+                projectNamesByFile[file.ToLowerInvariant()] = projectUniqueName!;
             }
         }
 
@@ -165,7 +168,7 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
             return string.Empty;
         }
 
-        return projectNamesByFile.TryGetValue(file, out string? projectUniqueName)
+        return projectNamesByFile.TryGetValue(file.ToLowerInvariant(), out string? projectUniqueName)
             ? projectUniqueName ?? string.Empty
             : string.Empty;
     }
@@ -174,8 +177,8 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        List<string> files = new List<string>();
+        HashSet<string> seen = [];
+        List<string> files = [];
 
         // First add files from error rows (if any).
         foreach (var path in rows
@@ -183,7 +186,7 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
             .OfType<string>()
             .Where(IsBestPracticeCandidateFile))
         {
-            if (seen.Add(path))
+            if (seen.Add(path.ToLowerInvariant()))
             {
                 files.Add(path);
             }
@@ -202,7 +205,7 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
                 continue;
             }
 
-            if (seen.Add(path))
+            if (seen.Add(path.ToLowerInvariant()))
             {
                 files.Add(path);
             }
@@ -215,7 +218,7 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
                 break;
             }
 
-            if (seen.Add(path))
+            if (seen.Add(path.ToLowerInvariant()))
             {
                 files.Add(path);
             }

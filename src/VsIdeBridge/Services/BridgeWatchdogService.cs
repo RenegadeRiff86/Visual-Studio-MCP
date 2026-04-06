@@ -18,44 +18,13 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
     private readonly CancellationTokenSource _cts = new();
     private readonly int _probeIntervalMilliseconds = probeIntervalMilliseconds > 0 ? probeIntervalMilliseconds : DefaultProbeIntervalMilliseconds;
     private readonly int _probeTimeoutMilliseconds = probeTimeoutMilliseconds > 0 ? probeTimeoutMilliseconds : DefaultProbeTimeoutMilliseconds;
+    private readonly BridgeWatchdogProbeState _probe = new();
+    private readonly BridgeWatchdogCommandState _command = new();
 
     private Task? _monitorTask;
-    private Task<double>? _probeTask;
     private DateTimeOffset _startedAtUtc;
-    private DateTimeOffset _probeStartedAtUtc;
-    private DateTimeOffset? _lastProbeStartedAtUtc;
-    private DateTimeOffset? _lastProbeCompletedAtUtc;
-    private DateTimeOffset? _lastHealthyAtUtc;
-    private DateTimeOffset? _degradedSinceUtc;
-    private DateTimeOffset? _lastTimeoutCommandAtUtc;
-    private bool _probeTimeoutRecorded;
     private bool _started;
     private bool _disposed;
-    private bool _isDegraded;
-    private string _degradedReason = string.Empty;
-    private string _lastProbeError = string.Empty;
-    private double _lastProbeDurationMs;
-    private double _maxProbeDurationMs;
-    private long _totalProbeTimeouts;
-    private long _totalProbeFailures;
-    private int _consecutiveUnhealthyProbes;
-
-    private string _activeCommand = string.Empty;
-    private string _activeRequestId = string.Empty;
-    private DateTimeOffset? _activeCommandStartedAtUtc;
-    private string _lastCommand = string.Empty;
-    private string _lastCommandRequestId = string.Empty;
-    private string _lastCommandErrorCode = string.Empty;
-    private bool? _lastCommandSuccess;
-    private double _lastCommandDurationMs;
-    private DateTimeOffset? _lastCommandCompletedAtUtc;
-    private long _totalCommands;
-    private long _successfulCommands;
-    private long _failedCommands;
-    private long _timeoutCommands;
-    private double _sumCommandDurationMs;
-    private double _maxCommandDurationMs;
-    private long _successfulProbeCount;
 
     public void Start()
     {
@@ -81,9 +50,9 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
     {
         lock (_sync)
         {
-            _activeCommand = commandName ?? string.Empty;
-            _activeRequestId = requestId ?? string.Empty;
-            _activeCommandStartedAtUtc = DateTimeOffset.UtcNow;
+            _command.Active.Name = commandName ?? string.Empty;
+            _command.Active.RequestId = requestId ?? string.Empty;
+            _command.Active.StartedAtUtc = DateTimeOffset.UtcNow;
         }
     }
 
@@ -92,37 +61,41 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
         DateTimeOffset now = DateTimeOffset.UtcNow;
         lock (_sync)
         {
-            _totalCommands++;
-            _sumCommandDurationMs += durationMs;
-            _maxCommandDurationMs = Math.Max(_maxCommandDurationMs, durationMs);
+            _command.Metrics.TotalCommands++;
+            _command.Metrics.SumDurationMs += durationMs;
+            _command.Metrics.MaxDurationMs = Math.Max(_command.Metrics.MaxDurationMs, durationMs);
 
             if (success)
             {
-                _successfulCommands++;
+                _command.Metrics.SuccessfulCommands++;
             }
             else
             {
-                _failedCommands++;
+                _command.Metrics.FailedCommands++;
                 if (IsTimeoutError(errorCode))
                 {
-                    _timeoutCommands++;
-                    _lastTimeoutCommandAtUtc = now;
-                    if (!_isDegraded) _degradedSinceUtc = now;
-                    _isDegraded = true;
-                    _degradedReason = "command_timeout";
+                    _command.Metrics.TimeoutCommands++;
+                    _probe.Health.LastTimeoutCommandAtUtc = now;
+                    if (!_probe.Health.IsDegraded)
+                    {
+                        _probe.Health.DegradedSinceUtc = now;
+                    }
+
+                    _probe.Health.IsDegraded = true;
+                    _probe.Health.DegradedReason = "command_timeout";
                 }
             }
 
-            _lastCommand = commandName ?? string.Empty;
-            _lastCommandRequestId = requestId ?? string.Empty;
-            _lastCommandSuccess = success;
-            _lastCommandErrorCode = errorCode ?? string.Empty;
-            _lastCommandDurationMs = durationMs;
-            _lastCommandCompletedAtUtc = now;
+            _command.Last.Name = commandName ?? string.Empty;
+            _command.Last.RequestId = requestId ?? string.Empty;
+            _command.Last.Success = success;
+            _command.Last.ErrorCode = errorCode ?? string.Empty;
+            _command.Last.DurationMs = durationMs;
+            _command.Last.CompletedAtUtc = now;
 
-            _activeCommand = string.Empty;
-            _activeRequestId = string.Empty;
-            _activeCommandStartedAtUtc = null;
+            _command.Active.Name = string.Empty;
+            _command.Active.RequestId = string.Empty;
+            _command.Active.StartedAtUtc = null;
         }
     }
 
@@ -131,16 +104,16 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
         lock (_sync)
         {
             DateTimeOffset now = DateTimeOffset.UtcNow;
-            bool probeStalled = _probeTask is { IsCompleted: false } &&
-                _probeTimeoutRecorded &&
-                _probeStartedAtUtc != default;
+            bool probeStalled = _probe.Lifecycle.Task is { IsCompleted: false } &&
+                _probe.Lifecycle.TimeoutRecorded &&
+                _probe.Lifecycle.StartedAtUtc != default;
             double probeStalledForMs = probeStalled
-                ? Math.Max(0, (now - _probeStartedAtUtc).TotalMilliseconds)
+                ? Math.Max(0, (now - _probe.Lifecycle.StartedAtUtc).TotalMilliseconds)
                 : 0;
-            bool timeoutWindowOpen = _lastTimeoutCommandAtUtc is not null &&
-                (now - _lastTimeoutCommandAtUtc.Value).TotalMilliseconds <= CommandTimeoutDegradedWindowMilliseconds;
-            bool degraded = _isDegraded || probeStalled || timeoutWindowOpen;
-            string degradedReason = _degradedReason;
+            bool timeoutWindowOpen = _probe.Health.LastTimeoutCommandAtUtc is not null &&
+                (now - _probe.Health.LastTimeoutCommandAtUtc.Value).TotalMilliseconds <= CommandTimeoutDegradedWindowMilliseconds;
+            bool degraded = _probe.Health.IsDegraded || probeStalled || timeoutWindowOpen;
+            string degradedReason = _probe.Health.DegradedReason;
             if (probeStalled)
             {
                 degradedReason = "watchdog_probe_timeout";
@@ -150,9 +123,9 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
                 degradedReason = "command_timeout_recent";
             }
 
-            long totalCompletedCommands = _successfulCommands + _failedCommands;
+            long totalCompletedCommands = _command.Metrics.SuccessfulCommands + _command.Metrics.FailedCommands;
             double averageCommandDurationMs = totalCompletedCommands > 0
-                ? _sumCommandDurationMs / totalCompletedCommands
+                ? _command.Metrics.SumDurationMs / totalCompletedCommands
                 : 0.0;
 
             return new JObject
@@ -162,46 +135,46 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
                 ["probeTimeoutMs"] = _probeTimeoutMilliseconds,
                 ["isDegraded"] = degraded,
                 ["degradedReason"] = degradedReason,
-                ["degradedSinceUtc"] = ToNullableTimestamp(_degradedSinceUtc),
-                ["lastProbeStartedAtUtc"] = ToNullableTimestamp(_lastProbeStartedAtUtc),
-                ["lastProbeCompletedAtUtc"] = ToNullableTimestamp(_lastProbeCompletedAtUtc),
-                ["lastHealthyAtUtc"] = ToNullableTimestamp(_lastHealthyAtUtc),
-                ["lastProbeDurationMs"] = Math.Round(_lastProbeDurationMs, 1),
-                ["maxProbeDurationMs"] = Math.Round(_maxProbeDurationMs, 1),
-                ["totalProbeTimeouts"] = _totalProbeTimeouts,
-                ["totalProbeFailures"] = _totalProbeFailures,
-                ["consecutiveUnhealthyProbes"] = _consecutiveUnhealthyProbes,
+                ["degradedSinceUtc"] = ToNullableTimestamp(_probe.Health.DegradedSinceUtc),
+                ["lastProbeStartedAtUtc"] = ToNullableTimestamp(_probe.Lifecycle.LastStartedAtUtc),
+                ["lastProbeCompletedAtUtc"] = ToNullableTimestamp(_probe.Lifecycle.LastCompletedAtUtc),
+                ["lastHealthyAtUtc"] = ToNullableTimestamp(_probe.Health.LastHealthyAtUtc),
+                ["lastProbeDurationMs"] = Math.Round(_probe.Metrics.LastDurationMs, 1),
+                ["maxProbeDurationMs"] = Math.Round(_probe.Metrics.MaxDurationMs, 1),
+                ["totalProbeTimeouts"] = _probe.Metrics.TotalTimeouts,
+                ["totalProbeFailures"] = _probe.Metrics.TotalFailures,
+                ["consecutiveUnhealthyProbes"] = _probe.Health.ConsecutiveUnhealthyProbes,
                 ["probeStalled"] = probeStalled,
                 ["probeStalledForMs"] = Math.Round(probeStalledForMs, 1),
-                ["lastProbeError"] = _lastProbeError,
-                ["activeCommand"] = _activeCommandStartedAtUtc is null
+                ["lastProbeError"] = _probe.Health.LastError,
+                ["activeCommand"] = _command.Active.StartedAtUtc is null
                     ? JValue.CreateNull()
                     : new JObject
                     {
-                        ["name"] = _activeCommand,
-                        ["requestId"] = _activeRequestId,
-                        ["startedAtUtc"] = _activeCommandStartedAtUtc.Value.ToString("O"),
-                        ["elapsedMs"] = Math.Round((now - _activeCommandStartedAtUtc.Value).TotalMilliseconds, 1),
+                        ["name"] = _command.Active.Name,
+                        ["requestId"] = _command.Active.RequestId,
+                        ["startedAtUtc"] = _command.Active.StartedAtUtc.Value.ToString("O"),
+                        ["elapsedMs"] = Math.Round((now - _command.Active.StartedAtUtc.Value).TotalMilliseconds, 1),
                     },
-                ["lastCommand"] = _lastCommandCompletedAtUtc is null
+                ["lastCommand"] = _command.Last.CompletedAtUtc is null
                     ? JValue.CreateNull()
                     : new JObject
                     {
-                        ["name"] = _lastCommand,
-                        ["requestId"] = _lastCommandRequestId,
-                        ["success"] = _lastCommandSuccess,
-                        ["errorCode"] = _lastCommandErrorCode,
-                        ["durationMs"] = Math.Round(_lastCommandDurationMs, 1),
-                        ["completedAtUtc"] = _lastCommandCompletedAtUtc.Value.ToString("O"),
+                        ["name"] = _command.Last.Name,
+                        ["requestId"] = _command.Last.RequestId,
+                        ["success"] = _command.Last.Success,
+                        ["errorCode"] = _command.Last.ErrorCode,
+                        ["durationMs"] = Math.Round(_command.Last.DurationMs, 1),
+                        ["completedAtUtc"] = _command.Last.CompletedAtUtc.Value.ToString("O"),
                     },
                 ["totals"] = new JObject
                 {
-                    ["commands"] = _totalCommands,
-                    ["successfulCommands"] = _successfulCommands,
-                    ["failedCommands"] = _failedCommands,
-                    ["timeoutCommands"] = _timeoutCommands,
+                    ["commands"] = _command.Metrics.TotalCommands,
+                    ["successfulCommands"] = _command.Metrics.SuccessfulCommands,
+                    ["failedCommands"] = _command.Metrics.FailedCommands,
+                    ["timeoutCommands"] = _command.Metrics.TimeoutCommands,
                     ["averageCommandDurationMs"] = Math.Round(averageCommandDurationMs, 1),
-                    ["maxCommandDurationMs"] = Math.Round(_maxCommandDurationMs, 1),
+                    ["maxCommandDurationMs"] = Math.Round(_command.Metrics.MaxDurationMs, 1),
                 },
             };
         }
@@ -224,7 +197,7 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
         {
             _monitorTask?.Wait(TimeSpan.FromSeconds(2));
         }
-        catch (Exception ex)
+        catch (AggregateException ex)
         {
             System.Diagnostics.Debug.WriteLine(ex);
         }
@@ -244,7 +217,7 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
             {
                 break;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not null) // monitor loop: swallow probe failures to keep the watchdog alive
             {
                 RecordProbeFailure(ex.Message);
             }
@@ -271,23 +244,23 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
 
         lock (_sync)
         {
-            if (_probeTask is null)
+            if (_probe.Lifecycle.Task is null)
             {
                 shouldStartProbe = true;
             }
-            else if (_probeTask.IsCompleted)
+            else if (_probe.Lifecycle.Task.IsCompleted)
             {
-                completedProbe = _probeTask;
-                completedProbeWasTimedOut = _probeTimeoutRecorded;
-                _probeTask = null;
-                _probeTimeoutRecorded = false;
+                completedProbe = _probe.Lifecycle.Task;
+                completedProbeWasTimedOut = _probe.Lifecycle.TimeoutRecorded;
+                _probe.Lifecycle.Task = null;
+                _probe.Lifecycle.TimeoutRecorded = false;
             }
             else
             {
-                timeoutElapsedMs = Math.Max(0, (now - _probeStartedAtUtc).TotalMilliseconds);
-                if (!_probeTimeoutRecorded && timeoutElapsedMs >= _probeTimeoutMilliseconds)
+                timeoutElapsedMs = Math.Max(0, (now - _probe.Lifecycle.StartedAtUtc).TotalMilliseconds);
+                if (!_probe.Lifecycle.TimeoutRecorded && timeoutElapsedMs >= _probeTimeoutMilliseconds)
                 {
-                    _probeTimeoutRecorded = true;
+                    _probe.Lifecycle.TimeoutRecorded = true;
                     shouldRecordTimeout = true;
                 }
             }
@@ -309,7 +282,7 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
             {
                 return;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not null) // probe tick: swallow failures to keep the watchdog alive
             {
                 RecordProbeFailure(ex.Message);
             }
@@ -336,15 +309,15 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
 
         lock (_sync)
         {
-            if (_probeTask is not null)
+            if (_probe.Lifecycle.Task is not null)
             {
                 return;
             }
 
-            _probeTask = task;
-            _probeStartedAtUtc = startedAtUtc;
-            _lastProbeStartedAtUtc = startedAtUtc;
-            _probeTimeoutRecorded = false;
+            _probe.Lifecycle.Task = task;
+            _probe.Lifecycle.StartedAtUtc = startedAtUtc;
+            _probe.Lifecycle.LastStartedAtUtc = startedAtUtc;
+            _probe.Lifecycle.TimeoutRecorded = false;
         }
     }
 
@@ -353,16 +326,16 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
         DateTimeOffset now = DateTimeOffset.UtcNow;
         lock (_sync)
         {
-            _totalProbeTimeouts++;
-            _consecutiveUnhealthyProbes++;
-            _lastProbeError = $"UI responsiveness probe exceeded {_probeTimeoutMilliseconds} ms (elapsed={Math.Round(elapsedMs, 1)} ms).";
-            if (!_isDegraded)
+            _probe.Metrics.TotalTimeouts++;
+            _probe.Health.ConsecutiveUnhealthyProbes++;
+            _probe.Health.LastError = $"UI responsiveness probe exceeded {_probeTimeoutMilliseconds} ms (elapsed={Math.Round(elapsedMs, 1)} ms).";
+            if (!_probe.Health.IsDegraded)
             {
-                _degradedSinceUtc = now;
+                _probe.Health.DegradedSinceUtc = now;
             }
 
-            _isDegraded = true;
-            _degradedReason = "watchdog_probe_timeout";
+            _probe.Health.IsDegraded = true;
+            _probe.Health.DegradedReason = "watchdog_probe_timeout";
         }
     }
 
@@ -371,17 +344,17 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
         DateTimeOffset now = DateTimeOffset.UtcNow;
         lock (_sync)
         {
-            _totalProbeFailures++;
-            _consecutiveUnhealthyProbes++;
-            _lastProbeCompletedAtUtc = now;
-            _lastProbeError = message ?? string.Empty;
-            if (!_isDegraded)
+            _probe.Metrics.TotalFailures++;
+            _probe.Health.ConsecutiveUnhealthyProbes++;
+            _probe.Lifecycle.LastCompletedAtUtc = now;
+            _probe.Health.LastError = message ?? string.Empty;
+            if (!_probe.Health.IsDegraded)
             {
-                _degradedSinceUtc = now;
+                _probe.Health.DegradedSinceUtc = now;
             }
 
-            _isDegraded = true;
-            _degradedReason = "watchdog_probe_failure";
+            _probe.Health.IsDegraded = true;
+            _probe.Health.DegradedReason = "watchdog_probe_failure";
         }
     }
 
@@ -390,27 +363,30 @@ internal sealed class BridgeWatchdogService(AsyncPackage package, int probeInter
         DateTimeOffset now = DateTimeOffset.UtcNow;
         lock (_sync)
         {
-            _lastProbeCompletedAtUtc = now;
-            _lastHealthyAtUtc = now;
-            _lastProbeDurationMs = durationMs;
-            _successfulProbeCount++;
-            if (_successfulProbeCount % 120 == 0)
-                _maxProbeDurationMs = durationMs;
-            _maxProbeDurationMs = Math.Max(_maxProbeDurationMs, durationMs);
-            _lastProbeError = string.Empty;
-            _consecutiveUnhealthyProbes = 0;
+            _probe.Lifecycle.LastCompletedAtUtc = now;
+            _probe.Health.LastHealthyAtUtc = now;
+            _probe.Metrics.LastDurationMs = durationMs;
+            _probe.Metrics.SuccessfulCount++;
+            if (_probe.Metrics.SuccessfulCount % 120 == 0)
+            {
+                _probe.Metrics.MaxDurationMs = durationMs;
+            }
 
-            bool timeoutWindowOpen = _lastTimeoutCommandAtUtc is not null &&
-                (now - _lastTimeoutCommandAtUtc.Value).TotalMilliseconds <= CommandTimeoutDegradedWindowMilliseconds;
+            _probe.Metrics.MaxDurationMs = Math.Max(_probe.Metrics.MaxDurationMs, durationMs);
+            _probe.Health.LastError = string.Empty;
+            _probe.Health.ConsecutiveUnhealthyProbes = 0;
+
+            bool timeoutWindowOpen = _probe.Health.LastTimeoutCommandAtUtc is not null &&
+                (now - _probe.Health.LastTimeoutCommandAtUtc.Value).TotalMilliseconds <= CommandTimeoutDegradedWindowMilliseconds;
             if (!timeoutWindowOpen)
             {
-                _isDegraded = false;
-                _degradedReason = string.Empty;
-                _degradedSinceUtc = null;
+                _probe.Health.IsDegraded = false;
+                _probe.Health.DegradedReason = string.Empty;
+                _probe.Health.DegradedSinceUtc = null;
             }
-            else if (recoveredFromTimeout && string.Equals(_degradedReason, "watchdog_probe_timeout", StringComparison.Ordinal))
+            else if (recoveredFromTimeout && string.Equals(_probe.Health.DegradedReason, "watchdog_probe_timeout", StringComparison.Ordinal))
             {
-                _degradedReason = "command_timeout_recent";
+                _probe.Health.DegradedReason = "command_timeout_recent";
             }
         }
     }

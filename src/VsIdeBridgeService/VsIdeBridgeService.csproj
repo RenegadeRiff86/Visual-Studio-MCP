@@ -70,6 +70,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\VsIdeBridge.Diagnostics\VsIdeBridge.Diagnostics.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\VsIdeBridge.Discovery\VsIdeBridge.Discovery.csproj" />
   </ItemGroup>
 </Project>

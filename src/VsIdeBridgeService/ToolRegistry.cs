@@ -12,7 +12,7 @@ internal sealed class ToolExecutionRegistry
 
     public ToolExecutionRegistry(IEnumerable<ToolEntry> entries)
     {
-        _all = entries.ToArray();
+        _all = [.. entries];
         _byLookupName = BuildLookup(_all);
         _definitions = new ToolRegistry(_all.Select(entry => entry.Definition));
     }
@@ -29,7 +29,7 @@ internal sealed class ToolExecutionRegistry
 
     public JsonArray BuildToolsList()
     {
-        JsonArray result = new();
+        JsonArray result = [];
         foreach (ToolEntry entry in _all)
             result.Add(entry.Definition.BuildToolObject());
 
@@ -39,7 +39,11 @@ internal sealed class ToolExecutionRegistry
     public Task<JsonNode> DispatchAsync(JsonNode? id, string name, JsonObject? args, BridgeConnection bridge)
     {
         if (!_byLookupName.TryGetValue(name, out ToolEntry? entry))
-            throw new McpRequestException(id, McpErrorCodes.InvalidParams, $"Unknown tool '{name}'.");
+            throw new McpRequestException(id, McpErrorCodes.InvalidParams,
+                $"Unknown tool '{name}'. " +
+                "Call list_tools to browse all available tools, " +
+                "recommend_tools with a description of your goal to get targeted suggestions, " +
+                "or tool_help with a tool name to read its full documentation.");
 
         return entry.Handler(id, args, bridge);
     }

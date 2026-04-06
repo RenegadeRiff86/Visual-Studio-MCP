@@ -31,7 +31,7 @@ internal static class CommandResultWriter
         try
         {
             using (FileStream stream = new(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
-            using (StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false)))
+            using (StreamWriter writer = new(stream, new UTF8Encoding(false)))
             {
                 await writer.WriteAsync(json).ConfigureAwait(false);
                 await writer.FlushAsync().ConfigureAwait(false);

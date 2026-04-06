@@ -101,10 +101,23 @@ internal static class HttpServerController
 
     private static void StartCore()
     {
+        Task? oldTask;
         lock (Lock)
         {
-            if (_serverTask is { IsCompleted: false })
-                return;
+            if (_cts != null && _serverTask is { IsCompleted: false })
+                return; // Already running with a live token — do nothing.
+
+            oldTask = _serverTask; // May still be winding down after StopCore.
+        }
+
+        // Wait for the previous server to release the port before binding again.
+        // Runs outside the lock so we don't block concurrent status reads.
+        oldTask?.Wait(TimeSpan.FromSeconds(5));
+
+        lock (Lock)
+        {
+            if (_cts != null)
+                return; // Another caller started the server while we waited.
 
             CancellationTokenSource cts = new();
             _cts = cts;

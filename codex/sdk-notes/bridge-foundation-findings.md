@@ -76,3 +76,46 @@ This note captures the current foundation-level findings that should stay visibl
 - Separate long-running command budgets from normal quick request budgets.
 - Preserve success/failure reporting across longer command durations.
 - Prefer a progress-aware or pollable contract for builds and rebuilds.
+
+## Call Hierarchy
+
+- `call_hierarchy` currently opens the Visual Studio Call Hierarchy tool window, but the bridge still fails to return usable managed hierarchy data for symbols like `EvaluateWatchAsync` in `DebuggerService.cs`.
+- The current implementation in `src/VsIdeBridge/Services/SearchService/ManagedCallHierarchy.cs` is still based on Roslyn/document resolution heuristics.
+- That approach is the wrong default for this feature because the Visual Studio SDK already exposes a native Call Hierarchy API.
+
+### Confirmed native SDK surface
+
+- Installed assembly:
+  - `C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CallHierarchy\Microsoft.VisualStudio.Language.CallHierarchy.dll`
+- Public types present:
+  - `Microsoft.VisualStudio.Language.CallHierarchy.ICallHierarchyUIFactory`
+  - `Microsoft.VisualStudio.Language.CallHierarchy.ICallHierarchyToolWindowUI`
+  - `Microsoft.VisualStudio.Language.CallHierarchy.ICallHierarchyMemberItem`
+  - `Microsoft.VisualStudio.Language.CallHierarchy.ICallHierarchyItemDetails`
+  - `Microsoft.VisualStudio.Language.CallHierarchy.ICallHierarchySearchCallback`
+  - `Microsoft.VisualStudio.Language.CallHierarchy.CallHierarchyPredefinedSearchCategoryNames`
+  - `Microsoft.VisualStudio.Language.CallHierarchy.CallHierarchySearchScope`
+
+### Confirmed method shapes
+
+- `ICallHierarchyUIFactory.CreateToolWindowUI()`
+- `ICallHierarchyToolWindowUI.AddRootItem(ICallHierarchyMemberItem)`
+- `ICallHierarchyToolWindowUI.ClearAllItems()`
+- `ICallHierarchyMemberItem.StartSearch(string categoryName, CallHierarchySearchScope searchScope, ICallHierarchySearchCallback callback)`
+- `ICallHierarchySearchCallback.AddResult(...)`
+- `ICallHierarchySearchCallback.SearchSucceeded()`
+- `ICallHierarchySearchCallback.SearchFailed(string)`
+
+### Important missing piece
+
+- The repo does not yet use `Microsoft.VisualStudio.Language.CallHierarchy` directly.
+- The missing step is obtaining the starting `ICallHierarchyMemberItem` for the symbol under the caret.
+- A likely clue exists in the editor commanding layer:
+  - `Microsoft.VisualStudio.Text.Editor.Commanding.Commands.ViewCallHierarchyCommandArgs`
+- That suggests the native provider path may come from the editor command pipeline rather than the Call Hierarchy window API alone.
+
+### Safer direction
+
+- Stop extending the Roslyn reconstruction path as the primary implementation.
+- Add a native Call Hierarchy SDK integration path in `VsIdeBridge`.
+- Use the real VS hierarchy objects as the source of truth, and keep any Roslyn/document fallback strictly secondary.

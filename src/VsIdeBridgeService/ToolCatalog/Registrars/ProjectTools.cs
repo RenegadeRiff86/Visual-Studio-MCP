@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using static VsIdeBridgeService.ArgBuilder;
 using static VsIdeBridgeService.SchemaHelpers;
 
@@ -5,6 +6,11 @@ namespace VsIdeBridgeService;
 
 internal static partial class ToolCatalog
 {
+    private const string ProjectDescriptionProperty = "description";
+    private const string ListProjectsTool = "list_projects";
+    private const string QueryProjectItemsTool = "query_project_items";
+    private const string QueryProjectPropertiesTool = "query_project_properties";
+
     private static IEnumerable<ToolEntry> ProjectTools()
         =>
         ProjectQueryTools()
@@ -13,11 +19,15 @@ internal static partial class ToolCatalog
 
     private static IEnumerable<ToolEntry> ProjectQueryTools()
     {
-        yield return BridgeTool("list_projects",
-            "List all projects in the open solution. Call before using build with project= to discover exact project names.",
-            EmptySchema(), "list-projects", _ => Empty(), Project);
+        yield return BridgeTool(ListProjectsTool,
+            "List all projects in the open solution with their names, paths, and metadata. Use project names from the result to target specific projects in other commands like build, query_project_properties, or query_project_items.",
+            EmptySchema(), "list-projects", _ => Empty(), Project,
+            outputSchema: BuildListProjectsOutputSchema(),
+            searchHints: BuildSearchHints(
+                workflow: [("build", "Build a specific project by name"), (QueryProjectPropertiesTool, "Read properties for a listed project")],
+                related: [(QueryProjectItemsTool, "List files in a project"), ("query_project_references", "List references for a project")]));
 
-        yield return BridgeTool("query_project_items",
+        yield return BridgeTool(QueryProjectItemsTool,
             "List items in a project with FileArg paths, kinds, and item types.",
             ObjectSchema(
                 Req(Project, ProjectDesc),
@@ -28,9 +38,12 @@ internal static partial class ToolCatalog
                 (Project, OptionalString(a, Project)),
                 (Path, OptionalString(a, Path)),
                 (Max, OptionalText(a, Max))),
-            Project);
+            Project,
+            searchHints: BuildSearchHints(
+                workflow: [("read_file", "Read a listed file"), ("add_file_to_project", "Add a missing file to the project")],
+                related: [(QueryProjectPropertiesTool, "Read project properties"), ("file_outline", "Get symbol structure of a listed file")]));
 
-        yield return BridgeTool("query_project_properties",
+        yield return BridgeTool(QueryProjectPropertiesTool,
             "Read MSBuild project properties from one project.",
             ObjectSchema(
                 Req(Project, ProjectDesc),
@@ -39,14 +52,18 @@ internal static partial class ToolCatalog
             a => Build(
                 (Project, OptionalString(a, Project)),
                 ("names", OptionalStringArray(a, "names"))),
-            Project);
+            Project,
+            searchHints: BuildSearchHints(
+                related: [(QueryProjectItemsTool, "List files in the project"), ("query_project_references", "List project references"), ("build", "Build after reviewing properties")]));
 
         yield return BridgeTool("query_project_configurations",
             "List project configurations and platforms for one project.",
             ObjectSchema(Req(Project, ProjectDesc)),
             "query-project-configurations",
             a => Build((Project, OptionalString(a, Project))),
-            Project);
+            Project,
+            searchHints: BuildSearchHints(
+                related: [("set_build_configuration", "Switch to a different configuration"), ("build", "Build with the active configuration")]));
 
         yield return BridgeTool("query_project_references",
             "List project references for one project.",
@@ -60,7 +77,10 @@ internal static partial class ToolCatalog
                 (Project, OptionalString(a, Project)),
                 BoolArg("declared-only", a, "declared_only", false, true),
                 BoolArg("include-framework", a, "include_framework", false, true)),
-            Project);
+            Project,
+            searchHints: BuildSearchHints(
+                workflow: [("scan_project_dependencies", "Get a full dependency health scan")],
+                related: [("nuget_add_package", "Add a NuGet package"), (QueryProjectItemsTool, "List source files")]));
 
         yield return BridgeTool("query_project_outputs",
             "Resolve the primary output artifact and output directory for one project.",
@@ -73,8 +93,42 @@ internal static partial class ToolCatalog
                 (Project, OptionalString(a, Project)),
                 (Configuration, OptionalString(a, Configuration)),
                 ("target-framework", OptionalString(a, "target_framework"))),
-            Project);
+            Project,
+            searchHints: BuildSearchHints(
+                workflow: [("build", "Build the project to produce the output")],
+                related: [(QueryProjectPropertiesTool, "Read OutputPath and TargetFramework directly"), ("query_project_configurations", "List available configurations")]));
     }
+
+    private static JsonObject BuildListProjectsOutputSchema()
+        => new()
+        {
+            ["type"] = "object",
+            ["properties"] = new JsonObject
+            {
+                ["count"] = new JsonObject { ["type"] = "integer", [ProjectDescriptionProperty] = "Number of projects found." },
+                ["projects"] = new JsonObject
+                {
+                    ["type"] = "array",
+                    [ProjectDescriptionProperty] = "Array of project objects with name, path, and metadata.",
+                    ["items"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["properties"] = new JsonObject
+                        {
+                            ["name"] = new JsonObject { ["type"] = "string", [ProjectDescriptionProperty] = "The display name of the project." },
+                            ["uniqueName"] = new JsonObject { ["type"] = "string", [ProjectDescriptionProperty] = "The unique identifier for the project (includes solution folders)." },
+                            ["path"] = new JsonObject { ["type"] = "string", [ProjectDescriptionProperty] = "The absolute file system path to the project file." },
+                            ["kind"] = new JsonObject { ["type"] = "string", [ProjectDescriptionProperty] = "The project type identifier (e.g., project kind GUID)." },
+                            ["isStartup"] = new JsonObject { ["type"] = "boolean", [ProjectDescriptionProperty] = "Whether this is the solution startup project." },
+                        },
+                        ["required"] = new JsonArray { "name", "uniqueName", "path", "kind", "isStartup" },
+                        ["additionalProperties"] = false,
+                    },
+                },
+            },
+            ["required"] = new JsonArray { "count", "projects" },
+            ["additionalProperties"] = false,
+        };
 
     private static IEnumerable<ToolEntry> ProjectManagementTools()
     {
@@ -87,14 +141,19 @@ internal static partial class ToolCatalog
             a => Build(
                 (Project, OptionalString(a, Project)),
                 ("solution-folder", OptionalString(a, "solution_folder"))),
-            Project);
+            Project,
+            searchHints: BuildSearchHints(
+                workflow: [(ListProjectsTool, "Confirm the project was added"), ("build", "Build after adding")],
+                related: [("create_project", "Create a new project instead"), ("remove_project", "Remove a project")]));
 
         yield return BridgeTool("remove_project",
             "Remove a project from the solution by name or path.",
             ObjectSchema(Req(Project, "Project name or path to remove.")),
             "remove-project",
             a => Build((Project, OptionalString(a, Project))),
-            Project);
+            Project,
+            searchHints: BuildSearchHints(
+                related: [(ListProjectsTool, "List remaining projects"), ("add_project", "Re-add the project")]));
 
         yield return BridgeTool("rename_project",
             "Rename a project within the solution. This updates the project name shown by Visual Studio, but does not rename folders or the project file on disk.",
@@ -105,7 +164,9 @@ internal static partial class ToolCatalog
             a => Build(
                 (Project, OptionalString(a, Project)),
                 ("new-name", OptionalString(a, "new_name"))),
-            Project);
+            Project,
+            searchHints: BuildSearchHints(
+                related: [(ListProjectsTool, "Confirm the rename"), (QueryProjectPropertiesTool, "Read project properties")]));
 
         yield return BridgeTool("create_project",
             "Create a new project and add it to the open solution.",
@@ -122,14 +183,20 @@ internal static partial class ToolCatalog
                 ("language", OptionalString(a, "language")),
                 ("directory", OptionalString(a, "directory")),
                 ("solution-folder", OptionalString(a, "solution_folder"))),
-            Project);
+            Project,
+            searchHints: BuildSearchHints(
+                workflow: [(ListProjectsTool, "Confirm the project was created"), ("build", "Build the new project")],
+                related: [("add_project", "Add an existing project instead"), ("add_file_to_project", "Add source files to the new project")]));
 
         yield return BridgeTool("set_startup_project",
             "Set the solution startup project by name or path.",
             ObjectSchema(Req(Project, ProjectDesc)),
             "set-startup-project",
             a => Build((Project, OptionalString(a, Project))),
-            Project);
+            Project,
+            searchHints: BuildSearchHints(
+                workflow: [("debug_start", "Start debugging the startup project"), ("build", "Build the startup project")],
+                related: [(ListProjectsTool, "List projects to find the right name")]));
 
         yield return BridgeTool("add_file_to_project",
             "Add an existing FileArg to a project.",
@@ -140,7 +207,10 @@ internal static partial class ToolCatalog
             a => Build(
                 (Project, OptionalString(a, Project)),
                 (FileArg, OptionalString(a, FileArg))),
-            Project);
+            Project,
+            searchHints: BuildSearchHints(
+                workflow: [("read_file", "Read the added file"), ("build", "Build after adding")],
+                related: [("remove_file_from_project", "Remove a file from the project"), ("query_project_items", "List current project files")]));
 
         yield return BridgeTool("remove_file_from_project",
             "Remove a FileArg from a project.",
@@ -151,7 +221,9 @@ internal static partial class ToolCatalog
             a => Build(
                 (Project, OptionalString(a, Project)),
                 (FileArg, OptionalString(a, FileArg))),
-            Project);
+            Project,
+            searchHints: BuildSearchHints(
+                related: [("add_file_to_project", "Re-add the file"), ("query_project_items", "List remaining project files")]));
     }
 
     private static IEnumerable<ToolEntry> ProjectPythonTools()
@@ -165,7 +237,10 @@ internal static partial class ToolCatalog
             a => Build(
                 (Path, OptionalString(a, Path)),
                 (Project, OptionalString(a, Project))),
-            Project);
+            Project,
+            searchHints: BuildSearchHints(
+                workflow: [("python_list_envs", "Discover available interpreters first")],
+                related: [("python_sync_env", "Sync bridge interpreter to VS project")]));
 
         yield return BridgeTool("python_set_startup_file",
             "Set the startup FileArg for the active Python project.",
@@ -176,7 +251,9 @@ internal static partial class ToolCatalog
             a => Build(
                 (FileArg, OptionalString(a, FileArg)),
                 (Project, OptionalString(a, Project))),
-            Project);
+            Project,
+            searchHints: BuildSearchHints(
+                related: [("python_get_startup_file", "Read the current startup file")]));
 
         yield return BridgeTool("python_get_startup_file",
             "Get the startup FileArg configured for the active Python project.",
@@ -184,7 +261,9 @@ internal static partial class ToolCatalog
                 Opt(Project, "Python project name or path. Defaults to the active project.")),
             "get-python-startup-FileArg",
             a => Build((Project, OptionalString(a, Project))),
-            Project);
+            Project,
+            searchHints: BuildSearchHints(
+                related: [("python_set_startup_file", "Change the startup file")]));
 
         yield return BridgeTool("python_sync_env",
             "Sync the active bridge Python interpreter to the active Python project in Visual Studio.",
@@ -194,6 +273,8 @@ internal static partial class ToolCatalog
             a => Build(
                 (Path, PythonInterpreterState.LoadActiveInterpreterPath()),
                 (Project, OptionalString(a, Project))),
-            Project);
+            Project,
+            searchHints: BuildSearchHints(
+                related: [("python_set_project_env", "Set a specific interpreter"), ("python_list_envs", "List available interpreters")]));
     }
 }

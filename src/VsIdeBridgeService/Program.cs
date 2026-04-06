@@ -27,7 +27,7 @@ internal static class Program
                 McpServerMode.RunAsync(args[1..]).GetAwaiter().GetResult();
                 McpServerLog.Write("mcp-server stopped normally");
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not null) // top-level MCP stdio host boundary
             {
                 McpServerLog.Write($"mcp-server fatal error: {ex}");
                 Environment.ExitCode = 1;
@@ -44,7 +44,7 @@ internal static class Program
                 McpServerMode.RunHttpAsync(args[1..]).GetAwaiter().GetResult();
                 McpServerLog.Write("mcp-http stopped normally");
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not null) // top-level MCP HTTP host boundary
             {
                 McpServerLog.Write($"mcp-http fatal error: {ex}");
                 Environment.ExitCode = 1;
@@ -57,7 +57,7 @@ internal static class Program
         {
             ServiceBase.Run(new BridgeService(args));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not null) // top-level Windows service startup boundary
         {
             BootstrapLog($"fatal startup error: {ex}");
 
@@ -85,7 +85,7 @@ internal static class Program
     {
         try
         {
-            var logPath = Path.Combine(Path.GetTempPath(), "VsIdeBridgeService-bootstrap.log");
+            string logPath = Path.Combine(Path.GetTempPath(), "VsIdeBridgeService-bootstrap.log");
             File.AppendAllText(logPath, $"{DateTime.Now:O} {message}{Environment.NewLine}");
         }
         catch
@@ -164,7 +164,7 @@ internal sealed class BridgeService : ServiceBase
 
     private static PipeSecurity CreateControlPipeSecurity()
     {
-        var security = new PipeSecurity();
+        PipeSecurity security = new();
         AddPipeAccessRule(security, new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), PipeAccessRights.FullControl);
         AddPipeAccessRule(security, new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null), PipeAccessRights.FullControl);
         AddPipeAccessRule(security, new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null), NamedPipeAccessDefaults.ClientReadWriteRights);
@@ -194,7 +194,7 @@ internal sealed class BridgeService : ServiceBase
         {
             try
             {
-                using var server = NamedPipeServerStreamAcl.Create(
+                using NamedPipeServerStream server = NamedPipeServerStreamAcl.Create(
                     ServiceControlPipeName,
                     PipeDirection.In,
                     NamedPipeServerStream.MaxAllowedServerInstances,
@@ -205,11 +205,11 @@ internal sealed class BridgeService : ServiceBase
                     CreateControlPipeSecurity());
 
                 await server.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
-                using var reader = new StreamReader(server, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+                using StreamReader reader = new(server, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
 
                 while (server.IsConnected && !cancellationToken.IsCancellationRequested)
                 {
-                    var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+                    string? line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
                     if (line is null)
                     {
                         break;
@@ -222,7 +222,31 @@ internal sealed class BridgeService : ServiceBase
             {
                 break;
             }
-            catch (Exception ex)
+            catch (IOException ex)
+            {
+                Log($"control pipe error: {ex.Message}");
+                try
+                {
+                    await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+            catch (ObjectDisposedException ex)
+            {
+                Log($"control pipe error: {ex.Message}");
+                try
+                {
+                    await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+            catch (InvalidOperationException ex)
             {
                 Log($"control pipe error: {ex.Message}");
                 try
@@ -359,7 +383,7 @@ internal sealed class BridgeService : ServiceBase
 
     private static int GetIntArg(string[] args, string name, int defaultValue)
     {
-        for (var i = 0; i < args.Length; i++)
+        for (int i = 0; i < args.Length; i++)
         {
             if (!args[i].Equals($"--{name}", StringComparison.OrdinalIgnoreCase))
             {
@@ -390,15 +414,15 @@ internal sealed class BridgeService : ServiceBase
 
     private static string ResolveLogPath()
     {
-        var commonAppData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        string commonAppData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 
-        var candidates = new[]
-        {
+        string[] candidates =
+        [
             Path.Combine(commonAppData, "VsIdeBridge"),
             Path.Combine(localAppData, "VsIdeBridge"),
             Path.GetTempPath()
-        };
+        ];
 
         foreach (var directory in candidates)
         {

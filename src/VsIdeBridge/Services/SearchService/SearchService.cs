@@ -19,6 +19,7 @@ internal sealed partial class SearchService
     private const string FunctionKind = "function";
     private const string InterfaceKind = "interface";
     private const string PathFilterPropertyName = "pathFilter";
+    private const string TotalMatchCountPropertyName = "totalMatchCount";
 
     private sealed record SearchHit
     {
@@ -93,39 +94,39 @@ internal sealed partial class SearchService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
 
-        Dictionary<string, SolutionFileLocator.Match> merged = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, SolutionFileLocator.Match> merged = [];
 
         foreach (SolutionFileLocator.Match fileMatch in SolutionFileLocator.FindMatches(context.Dte, query, pathFilter, extensions))
         {
-            merged[fileMatch.Path] = fileMatch;
+            merged[fileMatch.Path.ToLowerInvariant()] = fileMatch;
         }
 
         if (includeNonProject)
         {
             foreach (SolutionFileLocator.Match fileMatch in SolutionFileLocator.FindDiskMatches(context.Dte, query, pathFilter, extensions, Math.Max(100, maxResults * 2)))
             {
-                if (!merged.TryGetValue(fileMatch.Path, out SolutionFileLocator.Match existing) || fileMatch.Score > existing.Score)
+                if (!merged.TryGetValue(fileMatch.Path.ToLowerInvariant(), out SolutionFileLocator.Match existing) || fileMatch.Score > existing.Score)
                 {
-                    merged[fileMatch.Path] = fileMatch;
+                    merged[fileMatch.Path.ToLowerInvariant()] = fileMatch;
                 }
             }
         }
 
-        SolutionFileLocator.Match[] items = merged.Values
+        SolutionFileLocator.Match[] items =
+        [.. merged.Values
             .OrderByDescending(fileMatch => fileMatch.Score)
             .ThenBy(item => item.Path.Length)
             .ThenBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
-            .Take(Math.Max(1, maxResults))
-            .ToArray();
+            .Take(Math.Max(1, maxResults))];
 
-        JArray matches = new(items.Select(item => new JObject
+        JArray matches = [..items.Select(item => new JObject
         {
             ["path"] = item.Path,
             ["name"] = Path.GetFileName(item.Path),
             ["project"] = item.ProjectUniqueName,
             ["score"] = item.Score,
             ["source"] = item.Source,
-        }));
+        })];
 
         return new JObject
         {
@@ -184,18 +185,18 @@ internal sealed partial class SearchService
         }
 
         int chunkSize = Math.Max(1, maxQueriesPerChunk);
-        Dictionary<string, SearchHit> mergedHits = new(StringComparer.OrdinalIgnoreCase);
-        JArray queryResults = new();
-        JArray chunks = new();
+        Dictionary<string, SearchHit> mergedHits = [];
+        JArray queryResults = [];
+        JArray chunks = [];
         int totalMatchCount = await ExecuteBatchChunksAsync(
             context, normalizedQueries, scope, matchCase, wholeWord, useRegex,
             projectUniqueName, pathFilter, chunkSize, mergedHits, queryResults, chunks).ConfigureAwait(true);
 
-        SearchHit[] orderedMergedHits = mergedHits.Values
+        SearchHit[] orderedMergedHits =
+        [.. mergedHits.Values
             .OrderBy(hit => hit.Path, StringComparer.OrdinalIgnoreCase)
             .ThenBy(hit => hit.Line)
-            .ThenBy(hit => hit.Column)
-            .ToArray();
+            .ThenBy(hit => hit.Column)];
         Dictionary<string, List<FindResult>> groupedMatches = BuildGroupedMatchesFromHits(orderedMergedHits);
         string summaryQuery = normalizedQueries.Count == 1
             ? normalizedQueries[0]
@@ -211,7 +212,7 @@ internal sealed partial class SearchService
             ["chunkCount"] = chunks.Count,
             ["maxQueriesPerChunk"] = chunkSize,
             ["count"] = orderedMergedHits.Length,
-            ["totalMatchCount"] = totalMatchCount,
+            [TotalMatchCountPropertyName] = totalMatchCount,
             ["resultsWindow"] = resultsWindow,
             ["chunks"] = chunks,
             ["queryResults"] = queryResults,
@@ -236,7 +237,7 @@ internal sealed partial class SearchService
         int totalMatchCount = 0;
         for (int start = 0; start < normalizedQueries.Count; start += chunkSize)
         {
-            string[] chunkQueries = normalizedQueries.Skip(start).Take(chunkSize).ToArray();
+            string[] chunkQueries = [.. normalizedQueries.Skip(start).Take(chunkSize)];
             int chunkMatchCount = 0;
             foreach (string query in chunkQueries)
             {
@@ -276,12 +277,39 @@ internal sealed partial class SearchService
         string? pathFilter,
         int max)
     {
+        ManagedSearchOutcome managedSearch = await SearchManagedSymbolsAsync(
+            context,
+            name,
+            kind,
+            scope,
+            matchCase,
+            projectUniqueName,
+            pathFilter,
+            max).ConfigureAwait(true);
+        ManagedSymbolHit[] managedHits = managedSearch.Hits;
+        if (managedHits.Length > 0)
+        {
+            return new JObject
+            {
+                ["query"] = name,
+                ["kind"] = kind,
+                ["scope"] = scope,
+                ["project"] = projectUniqueName ?? string.Empty,
+                [PathFilterPropertyName] = pathFilter ?? string.Empty,
+                ["count"] = managedHits.Length,
+                [TotalMatchCountPropertyName] = managedHits.Length,
+                ["source"] = "roslyn",
+                ["managedSearch"] = SerializeManagedSearchOutcome(managedSearch),
+                ["matches"] = new JArray(managedHits.Select(SerializeManagedSymbolHit)),
+            };
+        }
+
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
 
-        CodeModelHit[] codeModelHits = SearchCodeModelSymbols(
+        CodeModelHit[] codeModelHits =
+        [.. SearchCodeModelSymbols(
             context.Dte, name, kind, scope, matchCase, projectUniqueName, pathFilter)
-            .Take(Math.Max(1, max))
-            .ToArray();
+            .Take(Math.Max(1, max))];
 
         if (codeModelHits.Length > 0)
         {
@@ -293,8 +321,9 @@ internal sealed partial class SearchService
                 ["project"] = projectUniqueName ?? string.Empty,
                 [PathFilterPropertyName] = pathFilter ?? string.Empty,
                 ["count"] = codeModelHits.Length,
-                ["totalMatchCount"] = codeModelHits.Length,
+                [TotalMatchCountPropertyName] = codeModelHits.Length,
                 ["source"] = "code-model",
+                ["managedSearch"] = SerializeManagedSearchOutcome(managedSearch),
                 ["matches"] = new JArray(codeModelHits.Select(SerializeCodeModelHit)),
             };
         }
@@ -305,7 +334,8 @@ internal sealed partial class SearchService
             context, pattern, scope, matchCase, wholeWord: false, useRegex: true,
             projectUniqueName, pathFilter).ConfigureAwait(true);
 
-        JObject[] hits = Matches
+        JObject[] hits =
+        [.. Matches
             .Take(max)
             .Select(hit =>
             {
@@ -313,8 +343,7 @@ internal sealed partial class SearchService
                 JObject obj = SerializeHit(hit);
                 obj["inferredKind"] = inferredKind;
                 return obj;
-            })
-            .ToArray();
+            })];
 
         return new JObject
         {
@@ -324,8 +353,9 @@ internal sealed partial class SearchService
             ["project"] = projectUniqueName ?? string.Empty,
             [PathFilterPropertyName] = pathFilter ?? string.Empty,
             ["count"] = hits.Length,
-            ["totalMatchCount"] = Matches.Count,
+            [TotalMatchCountPropertyName] = Matches.Count,
             ["source"] = "text",
+            ["managedSearch"] = SerializeManagedSearchOutcome(managedSearch),
             ["matches"] = new JArray(hits),
         };
     }
@@ -333,18 +363,18 @@ internal sealed partial class SearchService
     private static (string Pattern, string ResolvedKind) BuildSymbolTextPattern(string name, string kind)
     {
         string escaped = Regex.Escape(name);
-        switch (kind.ToLowerInvariant())
+        return kind.ToLowerInvariant() switch
         {
-            case FunctionKind: return ($@"\b{escaped}\s*\(", FunctionKind);
-            case "class": return ($@"\bclass\s+{escaped}\b", "class");
-            case "struct": return ($@"\bstruct\s+{escaped}\b", "struct");
-            case "enum": return ($@"\benum(?:\s+class)?\s+{escaped}\b", "enum");
-            case "namespace": return ($@"\bnamespace\s+{escaped}\b", "namespace");
-            case InterfaceKind: return ($@"\binterface\s+{escaped}\b", InterfaceKind);
-            case "member": return ($@"\b{escaped}\b", "member");
-            case "type": return ($@"\b{escaped}\b", "type");
-            default: return ($@"\b{escaped}\b", "all"); // "all" — whole-word match; kind inferred per-hit
-        }
+            FunctionKind => ($@"\b{escaped}\s*\(", FunctionKind),
+            "class" => ($@"\bclass\s+{escaped}\b", "class"),
+            "struct" => ($@"\bstruct\s+{escaped}\b", "struct"),
+            "enum" => ($@"\benum(?:\s+class)?\s+{escaped}\b", "enum"),
+            "namespace" => ($@"\bnamespace\s+{escaped}\b", "namespace"),
+            InterfaceKind => ($@"\binterface\s+{escaped}\b", InterfaceKind),
+            "member" => ($@"\b{escaped}\b", "member"),
+            "type" => ($@"\b{escaped}\b", "type"),
+            _ => ($@"\b{escaped}\b", "all"), // "all" — whole-word match; kind inferred per-hit
+        };
     }
 
     private static string InferSymbolKind(string lineText, string name)
@@ -393,7 +423,7 @@ internal sealed partial class SearchService
             ["query"] = query,
             ["scope"] = scope,
             ["searchTerms"] = new JArray(searchTerms),
-            ["totalMatchCount"] = Matches.Count,
+            [TotalMatchCountPropertyName] = Matches.Count,
             ["contextCount"] = contexts.Count,
             ["populateResultsWindow"] = populateResultsWindow,
             ["resultsWindow"] = resultsWindow,

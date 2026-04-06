@@ -5,16 +5,36 @@ using Xunit;
 
 namespace VsIdeBridgeLauncher.Tests;
 
-public class LauncherProcessSelectionTests
+internal static class LauncherProcessSelectionTestData
 {
+    internal static readonly HashSet<int> NoExistingProcessIds = [];
+    private static readonly DateTime TestDayUtc = new(2026, 3, 27, 0, 0, 0, DateTimeKind.Utc);
+    internal const int DuplicateCandidateMinute = 2;
+    internal const int ExpectedNormalizedPathCount = 2;
+    internal const int StartupTimeoutMilliseconds = 30_000;
+
+    internal static DateTime UtcAt(int hour, int minute)
+    {
+        return TestDayUtc.AddHours(hour).AddMinutes(minute);
+    }
+
+    internal static DateTime UtcAtEightPm(int minute)
+    {
+        return UtcAt(20, minute);
+    }
+}
+
+public class LauncherProcessSelectionCandidateTests
+{
+
     [Fact]
     public void SelectNewestLaunchedProcessId_IgnoresExistingProcesses()
     {
         List<LauncherProcessSnapshot> snapshots =
         [
-            new LauncherProcessSnapshot(11, new DateTime(2026, 3, 27, 18, 0, 0, DateTimeKind.Utc), false, false),
-            new LauncherProcessSnapshot(12, new DateTime(2026, 3, 27, 18, 1, 0, DateTimeKind.Utc), false, false),
-            new LauncherProcessSnapshot(13, new DateTime(2026, 3, 27, 18, 2, 0, DateTimeKind.Utc), false, false)
+            new LauncherProcessSnapshot(11, LauncherProcessSelectionTestData.UtcAt(18, 0), false, false),
+            new LauncherProcessSnapshot(12, LauncherProcessSelectionTestData.UtcAt(18, 1), false, false),
+            new LauncherProcessSnapshot(13, LauncherProcessSelectionTestData.UtcAt(18, LauncherProcessSelectionTestData.DuplicateCandidateMinute), false, false)
         ];
 
         HashSet<int> existingProcessIds = [13];
@@ -29,12 +49,12 @@ public class LauncherProcessSelectionTests
     {
         List<LauncherProcessSnapshot> snapshots =
         [
-            new LauncherProcessSnapshot(21, new DateTime(2026, 3, 27, 19, 0, 0, DateTimeKind.Utc), false, false),
-            new LauncherProcessSnapshot(22, new DateTime(2026, 3, 27, 19, 5, 0, DateTimeKind.Utc), false, false),
-            new LauncherProcessSnapshot(23, new DateTime(2026, 3, 27, 19, 2, 0, DateTimeKind.Utc), false, false)
+            new LauncherProcessSnapshot(21, LauncherProcessSelectionTestData.UtcAt(19, 0), false, false),
+            new LauncherProcessSnapshot(22, LauncherProcessSelectionTestData.UtcAt(19, 5), false, false),
+            new LauncherProcessSnapshot(23, LauncherProcessSelectionTestData.UtcAt(19, LauncherProcessSelectionTestData.DuplicateCandidateMinute), false, false)
         ];
 
-        int? processId = LauncherProcessSelection.SelectNewestLaunchedProcessId(snapshots, new HashSet<int>());
+        int? processId = LauncherProcessSelection.SelectNewestLaunchedProcessId(snapshots, LauncherProcessSelectionTestData.NoExistingProcessIds);
 
         Assert.Equal(22, processId);
     }
@@ -44,8 +64,8 @@ public class LauncherProcessSelectionTests
     {
         List<LauncherProcessSnapshot> snapshots =
         [
-            new LauncherProcessSnapshot(31, new DateTime(2026, 3, 27, 20, 0, 0, DateTimeKind.Utc), false, false),
-            new LauncherProcessSnapshot(32, new DateTime(2026, 3, 27, 20, 1, 0, DateTimeKind.Utc), false, false)
+            new LauncherProcessSnapshot(31, LauncherProcessSelectionTestData.UtcAtEightPm(0), false, false),
+            new LauncherProcessSnapshot(32, LauncherProcessSelectionTestData.UtcAtEightPm(1), false, false)
         ];
 
         HashSet<int> existingProcessIds = [31, 32];
@@ -60,11 +80,11 @@ public class LauncherProcessSelectionTests
     {
         List<LauncherProcessSnapshot> snapshots =
         [
-            new LauncherProcessSnapshot(41, new DateTime(2026, 3, 27, 20, 5, 0, DateTimeKind.Utc), true, false),
-            new LauncherProcessSnapshot(42, new DateTime(2026, 3, 27, 20, 6, 0, DateTimeKind.Utc), false, false)
+            new LauncherProcessSnapshot(41, LauncherProcessSelectionTestData.UtcAtEightPm(5), true, false),
+            new LauncherProcessSnapshot(42, LauncherProcessSelectionTestData.UtcAtEightPm(6), false, false)
         ];
 
-        int? processId = LauncherProcessSelection.SelectNewestLaunchedProcessId(snapshots, new HashSet<int>());
+        int? processId = LauncherProcessSelection.SelectNewestLaunchedProcessId(snapshots, LauncherProcessSelectionTestData.NoExistingProcessIds);
 
         Assert.Equal(41, processId);
     }
@@ -74,11 +94,11 @@ public class LauncherProcessSelectionTests
     {
         List<LauncherProcessSnapshot> snapshots =
         [
-            new LauncherProcessSnapshot(51, new DateTime(2026, 3, 27, 20, 7, 0, DateTimeKind.Utc), false, true),
-            new LauncherProcessSnapshot(52, new DateTime(2026, 3, 27, 20, 8, 0, DateTimeKind.Utc), false, false)
+            new LauncherProcessSnapshot(51, LauncherProcessSelectionTestData.UtcAtEightPm(7), false, true),
+            new LauncherProcessSnapshot(52, LauncherProcessSelectionTestData.UtcAtEightPm(8), false, false)
         ];
 
-        int? processId = LauncherProcessSelection.SelectNewestLaunchedProcessId(snapshots, new HashSet<int>());
+        int? processId = LauncherProcessSelection.SelectNewestLaunchedProcessId(snapshots, LauncherProcessSelectionTestData.NoExistingProcessIds);
 
         Assert.Equal(51, processId);
     }
@@ -86,157 +106,16 @@ public class LauncherProcessSelectionTests
     [Fact]
     public void SelectNewestLaunchedProcessId_UsesPidAsTiebreakerForEquivalentCandidates()
     {
-        DateTime startTime = new DateTime(2026, 3, 27, 20, 9, 0, DateTimeKind.Utc);
+        DateTime startTime = LauncherProcessSelectionTestData.UtcAtEightPm(9);
         List<LauncherProcessSnapshot> snapshots =
         [
             new LauncherProcessSnapshot(61, startTime, false, false),
             new LauncherProcessSnapshot(62, startTime, false, false)
         ];
 
-        int? processId = LauncherProcessSelection.SelectNewestLaunchedProcessId(snapshots, new HashSet<int>());
+        int? processId = LauncherProcessSelection.SelectNewestLaunchedProcessId(snapshots, LauncherProcessSelectionTestData.NoExistingProcessIds);
 
         Assert.Equal(62, processId);
     }
 
-    [Fact]
-    public void EvaluateStartupProgress_FailsWhenPrimaryProcessExitsAndNoReplacementExists()
-    {
-        LauncherStartupEvaluation evaluation = LauncherProcessSelection.EvaluateStartupProgress(
-            primaryProcessId: 71,
-            primaryHasExited: true,
-            primaryExitCode: 99,
-            snapshots: [],
-            existingProcessIds: new HashSet<int>(),
-            timedOut: false,
-            timeoutMilliseconds: 30_000);
-
-        Assert.Equal(LauncherStartupState.Failed, evaluation.State);
-        Assert.Contains("ExitCode=99", evaluation.Error);
-    }
-
-    [Fact]
-    public void EvaluateStartupProgress_ContinuesWithReplacementProcessWhenPrimaryExits()
-    {
-        LauncherStartupEvaluation evaluation = LauncherProcessSelection.EvaluateStartupProgress(
-            primaryProcessId: 81,
-            primaryHasExited: true,
-            primaryExitCode: 1,
-            snapshots:
-            [
-                new LauncherProcessSnapshot(82, new DateTime(2026, 3, 27, 20, 10, 0, DateTimeKind.Utc), false, false)
-            ],
-            existingProcessIds: new HashSet<int>(),
-            timedOut: false,
-            timeoutMilliseconds: 30_000);
-
-        Assert.Equal(LauncherStartupState.Continue, evaluation.State);
-        Assert.Equal(82, evaluation.ActiveProcessId);
-    }
-
-    [Fact]
-    public void EvaluateStartupProgress_SucceedsWhenReplacementProcessShowsBridgeDiscovery()
-    {
-        LauncherStartupEvaluation evaluation = LauncherProcessSelection.EvaluateStartupProgress(
-            primaryProcessId: 91,
-            primaryHasExited: true,
-            primaryExitCode: 1,
-            snapshots:
-            [
-                new LauncherProcessSnapshot(92, new DateTime(2026, 3, 27, 20, 11, 0, DateTimeKind.Utc), true, false)
-            ],
-            existingProcessIds: new HashSet<int>(),
-            timedOut: false,
-            timeoutMilliseconds: 30_000);
-
-        Assert.Equal(LauncherStartupState.Succeeded, evaluation.State);
-        Assert.Equal(92, evaluation.ActiveProcessId);
-    }
-
-    [Fact]
-    public void EvaluateStartupProgress_FailsWithTimedOutActiveProcess()
-    {
-        LauncherStartupEvaluation evaluation = LauncherProcessSelection.EvaluateStartupProgress(
-            primaryProcessId: 101,
-            primaryHasExited: false,
-            primaryExitCode: null,
-            snapshots:
-            [
-                new LauncherProcessSnapshot(102, new DateTime(2026, 3, 27, 20, 12, 0, DateTimeKind.Utc), false, false)
-            ],
-            existingProcessIds: new HashSet<int>(),
-            timedOut: true,
-            timeoutMilliseconds: 30_000);
-
-        Assert.Equal(LauncherStartupState.Failed, evaluation.State);
-        Assert.Contains("PID 102", evaluation.Error);
-    }
-
-    [Fact]
-    public void EvaluateStartupProgress_SucceedsWhenPrimaryProcessShowsMainWindow()
-    {
-        LauncherStartupEvaluation evaluation = LauncherProcessSelection.EvaluateStartupProgress(
-            primaryProcessId: 111,
-            primaryHasExited: false,
-            primaryExitCode: null,
-            snapshots:
-            [
-                new LauncherProcessSnapshot(111, new DateTime(2026, 3, 27, 20, 13, 0, DateTimeKind.Utc), false, true)
-            ],
-            existingProcessIds: new HashSet<int>(),
-            timedOut: false,
-            timeoutMilliseconds: 30_000);
-
-        Assert.Equal(LauncherStartupState.Succeeded, evaluation.State);
-        Assert.Equal(111, evaluation.ActiveProcessId);
-    }
-
-    [Fact]
-    public void EvaluateStartupProgress_TimesOutAgainstPrimaryProcessWhenNoReplacementExists()
-    {
-        LauncherStartupEvaluation evaluation = LauncherProcessSelection.EvaluateStartupProgress(
-            primaryProcessId: 121,
-            primaryHasExited: false,
-            primaryExitCode: null,
-            snapshots: [],
-            existingProcessIds: new HashSet<int>(),
-            timedOut: true,
-            timeoutMilliseconds: 30_000);
-
-        Assert.Equal(LauncherStartupState.Failed, evaluation.State);
-        Assert.Contains("PID 121", evaluation.Error);
-    }
-
-    [Fact]
-    public void NormalizeTempRoots_RemovesEmptyAndDuplicateEntries()
-    {
-        IReadOnlyList<string> roots = LauncherProcessSelection.NormalizeTempRoots(
-        new object?[]
-        {
-            null,
-            "",
-            "C:\\Temp\\",
-            "C:\\Temp",
-            "D:\\Scratch\\",
-            "D:\\Scratch"
-        }.Cast<string>());
-
-        Assert.Equal(2, roots.Count);
-        Assert.Equal("C:\\Temp", roots[0]);
-        Assert.Equal("D:\\Scratch", roots[1]);
-    }
-
-    [Fact]
-    public void BuildDiscoveryFileCandidates_UsesNormalizedRoots()
-    {
-        IReadOnlyList<string> paths = LauncherProcessSelection.BuildDiscoveryFileCandidates(
-        [
-            "C:\\Temp\\",
-            "D:\\Scratch"
-        ],
-            processId: 4321);
-
-        Assert.Equal(2, paths.Count);
-        Assert.Equal("C:\\Temp\\vs-ide-bridge\\pipes\\bridge-4321.json", paths[0]);
-        Assert.Equal("D:\\Scratch\\vs-ide-bridge\\pipes\\bridge-4321.json", paths[1]);
-    }
 }

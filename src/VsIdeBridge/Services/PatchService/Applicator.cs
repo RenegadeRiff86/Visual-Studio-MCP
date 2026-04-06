@@ -26,12 +26,12 @@ internal sealed partial class PatchService
 
         string newline = DetectNewline(existingText);
         IReadOnlyList<string> existingLines = SplitLines(existingText, out bool hadFinalNewline);
-        List<string> resultLines = new List<string>();
+        List<string> resultLines = [];
         int sourceIndex = 0;
         int firstChangedLine = 1;
         bool firstChangeCaptured = false;
-        List<ChangedRange> changedRanges = new List<ChangedRange>();
-        List<int> deletedLineMarkers = new List<int>();
+        List<ChangedRange> changedRanges = [];
+        List<int> deletedLineMarkers = [];
         int matchedLineCount = 0;
         int mutationLineCount = 0;
 
@@ -111,12 +111,12 @@ internal sealed partial class PatchService
     {
         string newline = DetectNewline(existingText);
         IReadOnlyList<string> existingLines = SplitLines(existingText, out bool hadFinalNewline);
-        List<string> resultLines = new List<string>();
+        List<string> resultLines = [];
         int sourceIndex = 0;
         int firstChangedLine = 1;
         bool firstChangeCaptured = false;
-        List<ChangedRange> changedRanges = new List<ChangedRange>();
-        List<int> deletedLineMarkers = new List<int>();
+        List<ChangedRange> changedRanges = [];
+        List<int> deletedLineMarkers = [];
         int matchedLineCount = 0;
         int mutationLineCount = 0;
 
@@ -249,10 +249,9 @@ internal sealed partial class PatchService
 
     private static int FindSearchBlockStart(string path, IReadOnlyList<string> existingLines, int sourceIndex, SearchBlock block)
     {
-        string[] matchLines = block.Lines
+        string[] matchLines = [.. block.Lines
             .Where(line => line.Kind != '+')
-            .Select(line => line.Text)
-            .ToArray();
+            .Select(line => line.Text)];
 
         if (matchLines.Length == 0)
         {
@@ -264,42 +263,17 @@ internal sealed partial class PatchService
 
         int maxStart = existingLines.Count - matchLines.Length;
 
-        // Pass 1: exact match.
-        for (int candidate = Math.Max(0, sourceIndex); candidate <= maxStart; candidate++)
+        int exactMatchCandidate = FindSequentialMatch(existingLines, sourceIndex, maxStart, matchLines, useFuzzyMatch: false);
+        if (exactMatchCandidate >= 0)
         {
-            bool matches = true;
-            for (int offset = 0; offset < matchLines.Length; offset++)
-            {
-                if (!string.Equals(existingLines[candidate + offset], matchLines[offset], StringComparison.Ordinal))
-                {
-                    matches = false;
-                    break;
-                }
-            }
-
-            if (matches)
-            {
-                return candidate;
-            }
+            return exactMatchCandidate;
         }
 
         // Second pass: fuzzy match to handle LLM escape artifacts.
-        for (int candidate = Math.Max(0, sourceIndex); candidate <= maxStart; candidate++)
+        int fuzzyMatchCandidate = FindSequentialMatch(existingLines, sourceIndex, maxStart, matchLines, useFuzzyMatch: true);
+        if (fuzzyMatchCandidate >= 0)
         {
-            bool matches = true;
-            for (int offset = 0; offset < matchLines.Length; offset++)
-            {
-                if (!LinesMatchFuzzy(existingLines[candidate + offset], matchLines[offset]))
-                {
-                    matches = false;
-                    break;
-                }
-            }
-
-            if (matches)
-            {
-                return candidate;
-            }
+            return fuzzyMatchCandidate;
         }
 
         // Pass 3: anchor-line matching. When exact and fuzzy sequential passes fail, pick the most
@@ -307,40 +281,93 @@ internal sealed partial class PatchService
         // many of its context lines match fuzzily. Accept the highest-scoring position provided it
         // covers at least 60 % of lines — or accept unconditionally when all context lines are
         // trivial (blank or single-character braces/brackets) and no better signal is available.
+        (int bestCandidate, int bestScore) = FindBestAnchorMatch(existingLines, sourceIndex, maxStart, matchLines);
+        if (bestCandidate >= 0 && (bestScore * 5 >= matchLines.Length * 3 || AllTrivialMatchLines(matchLines)))
         {
-            int anchorIdx = FindAnchorLineIndex(matchLines);
-            int bestScore = 0;
-            int bestCandidate = -1;
-            for (int candidate = Math.Max(0, sourceIndex); candidate <= maxStart; candidate++)
-            {
-                if (!LinesMatchFuzzy(existingLines[candidate + anchorIdx], matchLines[anchorIdx]))
-                    continue;
-                int score = CountMatchingLines(existingLines, candidate, matchLines);
-                if (score > bestScore)
-                {
-                    bestScore = score;
-                    bestCandidate = candidate;
-                }
-            }
-            if (bestCandidate >= 0 && (bestScore * 5 >= matchLines.Length * 3 || AllTrivialMatchLines(matchLines)))
-                return bestCandidate;
+            return bestCandidate;
         }
+
+        // Re-run Pass 3 to find the best partial match for a useful error message.
+        (int errorBestCandidate, int errorBestScore) = FindBestAnchorMatch(existingLines, sourceIndex, maxStart, matchLines);
 
         string descriptor = string.IsNullOrWhiteSpace(block.Header)
             ? "editor patch block"
             : $"editor patch block '{block.Header}'";
         string firstMatchLine = matchLines.Length > 0 ? Truncate(matchLines[0], 60) : "(empty)";
+        string bestMatchHint = errorBestCandidate >= 0
+            ? $" Best partial match at line {errorBestCandidate + 1} ({errorBestScore}/{matchLines.Length} lines matched)."
+            : string.Empty;
         throw new CommandErrorException(
             InvalidArgumentsCode,
-            $"Could not locate {descriptor} in {path} (searched from line {sourceIndex + 1}). " +
+            $"Could not locate {descriptor} in {path} (searched from line {sourceIndex + 1}).{bestMatchHint} " +
             $"First context line: \"{firstMatchLine}\". " +
             "Fix: call read_file to verify the context lines exist in the file, then regenerate the patch with correct content.",
             new
             {
                 block = block.Header,
                 sourceIndex = sourceIndex + 1,
+                bestMatchLine = errorBestCandidate >= 0 ? errorBestCandidate + 1 : (int?)null,
+                bestMatchScore = errorBestCandidate >= 0 ? errorBestScore : (int?)null,
                 matchLines,
             });
+    }
+
+    private static int FindSequentialMatch(
+        IReadOnlyList<string> existingLines,
+        int sourceIndex,
+        int maxStart,
+        IReadOnlyList<string> matchLines,
+        bool useFuzzyMatch)
+    {
+        for (int candidate = Math.Max(0, sourceIndex); candidate <= maxStart; candidate++)
+        {
+            bool matches = true;
+            for (int offset = 0; offset < matchLines.Count; offset++)
+            {
+                bool linesMatch = useFuzzyMatch
+                    ? LinesMatchFuzzy(existingLines[candidate + offset], matchLines[offset])
+                    : string.Equals(existingLines[candidate + offset], matchLines[offset], StringComparison.Ordinal);
+                if (!linesMatch)
+                {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if (matches)
+            {
+                return candidate;
+            }
+        }
+
+        return -1;
+    }
+
+    private static (int BestCandidate, int BestScore) FindBestAnchorMatch(
+        IReadOnlyList<string> existingLines,
+        int sourceIndex,
+        int maxStart,
+        string[] matchLines)
+    {
+        int anchorIdx = FindAnchorLineIndex(matchLines);
+        int bestScore = 0;
+        int bestCandidate = -1;
+        for (int candidate = Math.Max(0, sourceIndex); candidate <= maxStart; candidate++)
+        {
+            if (!LinesMatchFuzzy(existingLines[candidate + anchorIdx], matchLines[anchorIdx]))
+            {
+                continue;
+            }
+
+            int score = CountMatchingLines(existingLines, candidate, matchLines);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestCandidate = candidate;
+            }
+        }
+
+        return (bestCandidate, bestScore);
     }
 
     /// <summary>
@@ -431,7 +458,7 @@ internal sealed partial class PatchService
         }
 
         // Strip one level of backslash-escaping (\\\" -> \", \\\\\\\\ -> \\\\, \\\\n -> \\n, etc.)
-        System.Text.StringBuilder sb = new System.Text.StringBuilder(line.Length);
+        System.Text.StringBuilder sb = new(line.Length);
         for (int i = 0; i < line.Length; i++)
         {
             if (line[i] == '\\' && i + 1 < line.Length)

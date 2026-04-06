@@ -14,24 +14,33 @@ using VsIdeBridge.Shared;
 
 namespace VsIdeBridge.Commands;
 
-internal static class IdeCoreCommands
+internal static partial class IdeCoreCommands
 {
     private const string WarningsCommandName = "warnings";
     private const string WarningsPropertyName = "warnings";
+    private const string MessagesCommandName = "messages";
+    private const string MessagesPropertyName = "messages";
     private const string ExampleCppPath = @"C:\repo\src\foo.cpp";
     private static readonly string WarningsCommandExample =
         CreateExampleCommand(WarningsCommandName, ("group_by", new JValue("code")));
+    private static readonly string MessagesCommandExample =
+        CreateExampleCommand(MessagesCommandName, ("group_by", new JValue("code")));
 
     private static string CreateExampleCommand(string commandName, params (string Name, JToken Value)[] args)
     {
         if (args.Length == 0)
             return commandName;
 
-        JObject payload = new JObject();
+        JObject payload = [];
         foreach ((string name, JToken value) in args)
             payload[name] = value.DeepClone();
 
-        return commandName + " " + payload.ToString(Formatting.None);
+        return commandName + " " + SerializeCompactJson(payload);
+    }
+
+    private static string SerializeCompactJson(JToken token)
+    {
+        return JsonConvert.SerializeObject(token, Formatting.None);
     }
 
     private static string CreateExampleFileCommand(string commandName)
@@ -68,254 +77,6 @@ internal static class IdeCoreCommands
         return CreateExampleCommand(commandName, CreateExampleLocationArguments());
     }
 
-    internal static async Task<CommandExecutionResult> ExecuteBatchAsync(IdeCommandContext context, JArray steps, bool stopOnError)
-    {
-        JArray results = new JArray();
-        int successCount = 0;
-        int failureCount = 0;
-        bool stoppedEarly = false;
-
-        for (int i = 0; i < steps.Count; i++)
-        {
-            (JObject stepResult, bool succeeded) = await ExecuteBatchStepAsync(context, steps[i], i).ConfigureAwait(true);
-            if (succeeded) successCount++; else failureCount++;
-            results.Add(stepResult);
-
-            if (stopOnError && !(stepResult.Value<bool?>("success") ?? false))
-            {
-                stoppedEarly = i < steps.Count - 1;
-                break;
-            }
-        }
-
-        JObject commandData = new JObject
-        {
-            ["batchCount"] = steps.Count,
-            ["successCount"] = successCount,
-            ["failureCount"] = failureCount,
-            ["stoppedEarly"] = stoppedEarly,
-            ["results"] = results,
-        };
-
-        return new CommandExecutionResult(
-            $"Batch: {successCount}/{steps.Count} succeeded, {failureCount} failed.",
-            commandData);
-    }
-
-    private static async Task<(JObject result, bool succeeded)> ExecuteBatchStepAsync(
-        IdeCommandContext context, JToken entry, int index)
-    {
-        if (entry is not JObject step)
-        {
-            JObject stepResult = new JObject
-            {
-                ["index"] = index,
-                ["id"] = JValue.CreateNull(),
-                ["command"] = string.Empty,
-                ["success"] = false,
-                ["summary"] = "Batch entry must be a JSON object.",
-                [WarningsPropertyName] = new JArray(),
-                ["data"] = new JObject(),
-                ["error"] = new JObject { ["code"] = "invalid_batch_entry", ["message"] = "Batch entry must be a JSON object." },
-            };
-            return (stepResult, false);
-        }
-
-        string? stepId = (string?)step["id"];
-        string commandName = (string?)step["command"] ?? string.Empty;
-        string commandArgs = (string?)step["args"] ?? string.Empty;
-
-        if (!context.Runtime.TryGetCommand(commandName, out var cmd))
-        {
-            JObject stepResult = new JObject
-            {
-                ["index"] = index,
-                ["id"] = (JToken?)stepId ?? JValue.CreateNull(),
-                ["command"] = commandName,
-                ["success"] = false,
-                ["summary"] = $"Unknown command: {commandName}",
-                [WarningsPropertyName] = new JArray(),
-                ["data"] = new JObject(),
-                ["error"] = new JObject { ["code"] = "unknown_command", ["message"] = $"Command not registered: {commandName}" },
-            };
-            return (stepResult, false);
-        }
-
-        CommandArguments parsedArgs = CommandArgumentParser.Parse(commandArgs);
-        try
-        {
-            CommandExecutionResult commandResult = await cmd.ExecuteDirectAsync(context, parsedArgs).ConfigureAwait(true);
-            JObject stepResult = new JObject
-            {
-                ["index"] = index,
-                ["id"] = (JToken?)stepId ?? JValue.CreateNull(),
-                ["command"] = commandName,
-                ["success"] = true,
-                ["summary"] = commandResult.Summary,
-                [WarningsPropertyName] = commandResult.Warnings,
-                ["data"] = commandResult.Data,
-                ["error"] = JValue.CreateNull(),
-            };
-            return (stepResult, true);
-        }
-        catch (CommandErrorException ex)
-        {
-            JObject stepResult = new JObject
-            {
-                ["index"] = index,
-                ["id"] = (JToken?)stepId ?? JValue.CreateNull(),
-                ["command"] = commandName,
-                ["success"] = false,
-                ["summary"] = ex.Message,
-                [WarningsPropertyName] = new JArray(),
-                ["data"] = new JObject(),
-                ["error"] = new JObject { ["code"] = ex.Code, ["message"] = ex.Message },
-            };
-            return (stepResult, false);
-        }
-        catch (Exception ex)
-        {
-            JObject stepResult = new JObject
-            {
-                ["index"] = index,
-                ["id"] = (JToken?)stepId ?? JValue.CreateNull(),
-                ["command"] = commandName,
-                ["success"] = false,
-                ["summary"] = ex.Message,
-                [WarningsPropertyName] = new JArray(),
-                ["data"] = new JObject(),
-                ["error"] = new JObject { ["code"] = "internal_error", ["message"] = ex.Message },
-            };
-            return (stepResult, false);
-        }
-    }
-
-    private static Task<CommandExecutionResult> GetHelpResultAsync()
-    {
-        BridgeCommandMetadata[] commandMetadata = BridgeCommandCatalog.All
-            .OrderBy(item => item.PipeName, StringComparer.Ordinal)
-            .ToArray();
-        string generatedAtUtc = DateTime.UtcNow.ToString("O");
-        JArray commandDetails = BuildCommandDetails(commandMetadata);
-
-        JArray commands = new JArray();
-        JArray legacyCommands = new JArray();
-        foreach (BridgeCommandMetadata command in commandMetadata)
-        {
-            commands.Add(command.PipeName);
-            legacyCommands.Add(command.CanonicalName);
-        }
-
-        return Task.FromResult(new CommandExecutionResult(
-            "Command catalog written.",
-            new JObject
-            {
-                ["schemaVersion"] = "vs-ide-bridge.help.v1",
-                ["generatedAtUtc"] = generatedAtUtc,
-                ["catalog"] = new JObject
-                {
-                    ["schemaVersion"] = "vs-ide-bridge.command-catalog.v1",
-                    ["generatedAtUtc"] = generatedAtUtc,
-                    ["count"] = commandMetadata.Length,
-                    ["commands"] = commandDetails.DeepClone(),
-                    ["nameField"] = "name",
-                    ["canonicalNameField"] = "canonicalName",
-                    ["exampleField"] = "example",
-                    ["aliasesField"] = "aliases",
-                    ["notes"] = new JArray
-                    {
-                        "Use name for pipe/MCP command routing.",
-                        "Use canonicalName only for compatibility mapping or VS Command Window fallbacks.",
-                    },
-                },
-                ["commands"] = commands,
-                ["legacyCommands"] = legacyCommands,
-                ["note"] = "Pipe requests accept the simple command names in commands[]. The legacy Tools.Ide* names still work in Visual Studio and over the pipe.",
-                ["commandDetails"] = commandDetails,
-                ["recipes"] = new JArray
-                {
-                    new JObject
-                    {
-                        ["name"] = "find-symbol-definition",
-                        ["summary"] = "Use symbol search before text search when you know the identifier name.",
-                        ["command"] = CreateExampleCommand("search-symbols", ("query", new JValue("propose_export_file_name_and_path")), ("kind", new JValue("function")))
-                    },
-                    new JObject
-                    {
-                        ["name"] = "inspect-symbol-at-location",
-                        ["summary"] = "Use quick info to get the destination location and nearby definition context.",
-                        ["command"] = CreateExampleLocationCommand("quick-info")
-                    },
-                    new JObject
-                    {
-                        ["name"] = "group-current-warnings",
-                        ["summary"] = "Filter the Error List down to warnings and group them by code.",
-                        ["command"] = WarningsCommandExample
-                    },
-                    new JObject
-                    {
-                        ["name"] = "fetch-multiple-slices",
-                        ["summary"] = "Use inline ranges JSON when you need several code windows in one round-trip.",
-                        ["command"] = CreateExampleCommand("document-slices", ("ranges", CreateExampleSlicesRanges()))
-                    }
-                },
-                ["example"] = CreateExampleCommand("state", ("out", new JValue(@"C:\temp\ide-state.json"))),
-                ["documentSliceExample"] = CreateExampleCommand("document-slice", ("file", new JValue(ExampleCppPath)), ("start_line", new JValue(120)), ("end_line", new JValue(180)), ("out", new JValue(@"C:\temp\slice.json"))),
-                ["documentSlicesExample"] = CreateExampleCommand("document-slices", ("ranges", CreateExampleSlicesRanges())),
-                ["searchSymbolsExample"] = CreateExampleCommand("search-symbols", ("query", new JValue("propose_export_file_name_and_path")), ("kind", new JValue("function"))),
-                ["quickInfoExample"] = CreateExampleLocationCommand("quick-info"),
-                ["findTextPathExample"] = CreateExampleCommand("find-text", ("query", new JValue("OnInit")), ("path", new JValue("src\\libslic3r"))),
-                ["fileSymbolsExample"] = CreateExampleCommand("file-symbols", ("file", new JValue(ExampleCppPath)), ("kind", new JValue("function"))),
-                ["smartContextExample"] = CreateExampleCommand("smart-context", ("query", new JValue("where is GUI_App::OnInit used")), ("max_contexts", new JValue(3)), ("out", new JValue(@"C:\temp\smart-context.json"))),
-                ["referencesExample"] = CreateExampleCommand("find-references", [.. CreateExampleLocationArguments(), ("out", new JValue(@"C:\temp\references.json"))]),
-                ["callHierarchyExample"] = CreateExampleCommand("call-hierarchy", [.. CreateExampleLocationArguments(), ("out", new JValue(@"C:\temp\call-hierarchy.json"))]),
-                ["applyDiffFormat"] = "Use unified diff text with ---/+++ file headers and @@ hunks, or editor patch text with *** Begin Patch / *** End Patch and *** Update File / *** Add File / *** Delete File blocks.",
-                ["applyDiffExample"] = CreateExampleCommand("apply-diff", ("patch_file", new JValue(@"C:\temp\change.diff")), ("out", new JValue(@"C:\temp\apply-diff.json"))),
-                ["openSolutionExample"] = CreateExampleCommand("open-solution", ("solution", new JValue(@"C:\path\to\solution.sln")), ("out", new JValue(@"C:\temp\open-solution.json")))
-            }));
-    }
-
-    private static JArray BuildCommandDetails(IEnumerable<BridgeCommandMetadata> commandMetadata)
-    {
-        JArray details = new JArray();
-        foreach (BridgeCommandMetadata command in commandMetadata)
-        {
-            JArray aliases = new JArray();
-            foreach (string alias in PipeCommandNames.GetAliases(command.CanonicalName))
-            {
-                if (string.Equals(alias, command.PipeName, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                aliases.Add(alias);
-            }
-
-            details.Add(new JObject
-            {
-                ["name"] = command.PipeName,
-                ["canonicalName"] = command.CanonicalName,
-                ["legacyName"] = command.CanonicalName,
-                ["description"] = command.Description,
-                ["example"] = command.Example,
-                ["aliases"] = aliases,
-            });
-        }
-
-        return details;
-    }
-
-    private static async Task<CommandExecutionResult> GetSmokeTestResultAsync(IdeCommandContext context)
-    {
-        JObject state = await context.Runtime.IdeStateService.GetStateAsync(context.Dte).ConfigureAwait(true);
-        return new CommandExecutionResult(
-            "Smoke test captured IDE state.",
-            new JObject
-            {
-                ["success"] = true,
-                ["state"] = state,
-            });
-    }
 
     private static JObject GetUiSettingsData(IdeCommandContext context)
     {
@@ -368,82 +129,9 @@ internal static class IdeCoreCommands
                     ["url"] = HttpServerStateManager.Url
                 });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not null) // rethrow as CommandErrorException so callers get a clean error code
         {
             throw new CommandErrorException("http_toggle_failed", $"Failed to toggle HTTP server: {ex.Message}");
-        }
-    }
-
-    private static string? TryResolveSolutionDocPath(IdeCommandContext context, string fileName)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-
-        try
-        {
-            string? solutionPath = context.Dte.Solution?.FullName;
-            if (string.IsNullOrWhiteSpace(solutionPath))
-            {
-                return null;
-            }
-
-            string? solutionDirectory = Path.GetDirectoryName(solutionPath);
-            if (string.IsNullOrWhiteSpace(solutionDirectory))
-            {
-                return null;
-            }
-
-            string documentPath = Path.Combine(solutionDirectory, fileName);
-            return File.Exists(documentPath) ? documentPath : null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static async Task<CommandExecutionResult> ShowHelpMenuAsync(IdeCommandContext context)
-    {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
-
-        string? readmePath = TryResolveSolutionDocPath(context, "README.md");
-        string? bugsPath = TryResolveSolutionDocPath(context, "BUGS.md");
-        if (!string.IsNullOrWhiteSpace(readmePath))
-        {
-            context.Dte.ItemOperations.OpenFile(readmePath);
-        }
-
-        string message = string.IsNullOrWhiteSpace(readmePath)
-            ? "README.md could not be resolved from the current solution. Start with the repo README for setup and usage, check BUGS.md for current runtime gaps, and use Tools.IdeHelp only when you need the raw command catalog."
-            : $"Opened README.md for the main product guide.{Environment.NewLine}{Environment.NewLine}Check BUGS.md for current runtime gaps and use Tools.IdeHelp only when you need the raw command catalog.";
-
-        VsShellUtilities.ShowMessageBox(
-            context.Package,
-            message,
-            "VS IDE Bridge",
-            OLEMSGICON.OLEMSGICON_INFO,
-            OLEMSGBUTTON.OLEMSGBUTTON_OK,
-            OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
-
-        return new CommandExecutionResult(
-            string.IsNullOrWhiteSpace(readmePath) ? "Displayed IDE Bridge help." : "Opened IDE Bridge help.",
-            new JObject
-            {
-                ["readmePath"] = (JToken?)readmePath ?? JValue.CreateNull(),
-                ["bugsPath"] = (JToken?)bugsPath ?? JValue.CreateNull(),
-                ["commandWindowHelp"] = "Tools.IdeHelp",
-            });
-    }
-
-    internal sealed class IdeHelpMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-        : IdeCommandBase(package, runtime, commandService, 0x0102, acceptsParameters: false)
-    {
-        protected override string CanonicalName => "Tools.VsIdeBridgeHelpMenu";
-
-        internal override bool AllowAutomationInvocation => false;
-
-        protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
-        {
-            return ShowHelpMenuAsync(context);
         }
     }
 
@@ -490,28 +178,6 @@ internal static class IdeCoreCommands
                 .ConfigureAwait(true);
 
             return new CommandExecutionResult("Bridge approval granted.", commandData);
-        }
-    }
-
-    internal sealed class IdeHelpCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-        : IdeCommandBase(package, runtime, commandService, 0x0100)
-    {
-        protected override string CanonicalName => "Tools.IdeHelp";
-
-        protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
-        {
-            return GetHelpResultAsync();
-        }
-    }
-
-    internal sealed class IdeSmokeTestCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-        : IdeCommandBase(package, runtime, commandService, 0x0101)
-    {
-        protected override string CanonicalName => "Tools.IdeSmokeTest";
-
-        protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
-        {
-            return await GetSmokeTestResultAsync(context).ConfigureAwait(true);
         }
     }
 
@@ -615,10 +281,7 @@ internal static class IdeCoreCommands
             };
 
             using Process? process = Process.Start(startInfo);
-            if (process is null)
-            {
-                throw new CommandErrorException("launch_failed", "Visual Studio launch failed: Process.Start returned null.");
-            }
+            _ = process ?? throw new CommandErrorException("launch_failed", "Visual Studio launch failed: Process.Start returned null.");
 
             if (solutionPath is string verifiedSolutionPath && !string.IsNullOrWhiteSpace(verifiedSolutionPath))
             {
@@ -738,34 +401,6 @@ internal static class IdeCoreCommands
         }
     }
 
-    internal sealed class IdeBatchCommandsCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-        : IdeCommandBase(package, runtime, commandService, 0x0225)
-    {
-        protected override string CanonicalName => "Tools.IdeBatchCommands";
-
-        protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
-        {
-            string batchFile = args.GetRequiredString("batch-file");
-            if (!File.Exists(batchFile))
-            {
-                throw new CommandErrorException("file_not_found", $"Batch file not found: {batchFile}");
-            }
-
-            string json = File.ReadAllText(batchFile);
-            JArray steps;
-            try
-            {
-                steps = JArray.Parse(json);
-            }
-            catch (JsonException ex)
-            {
-                throw new CommandErrorException("invalid_json", $"Failed to parse batch file: {ex.Message}");
-            }
-
-            bool stopOnError = args.GetBoolean("stop-on-error", false);
-            return await ExecuteBatchAsync(context, steps, stopOnError).ConfigureAwait(true);
-        }
-    }
 }
 
 

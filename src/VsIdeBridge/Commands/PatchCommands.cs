@@ -10,7 +10,7 @@ internal static class PatchCommands
 {
     private const string InvalidArguments = "invalid_arguments";
 
-    internal sealed class IdeApplyUnifiedDiffCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0221)
+    internal sealed class IdeApplyEditorPatchCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0221)
     {
         protected override string CanonicalName => "Tools.IdeApplyUnifiedDiff";
 
@@ -25,7 +25,7 @@ internal static class PatchCommands
             string? baseDirectory = args.GetString("base-directory");
             bool openChangedFiles = args.GetBoolean("open-changed-files", defaultValue: true);
 
-            Newtonsoft.Json.Linq.JObject commandData = await context.Runtime.PatchService.ApplyUnifiedDiffAsync(
+            Newtonsoft.Json.Linq.JObject commandData = await context.Runtime.PatchService.ApplyEditorPatchAsync(
                 context.Dte,
                 context.Runtime.DocumentService,
                 patchFile,
@@ -37,7 +37,7 @@ internal static class PatchCommands
 
             commandData["diagnosticsRefreshQueued"] = true;
 
-            return new CommandExecutionResult($"Applied unified diff to {commandData["count"]} file(s).", commandData);
+            return new CommandExecutionResult($"Applied editor patch to {commandData["count"]} file(s).", commandData);
         }
     }
 
@@ -110,7 +110,7 @@ internal static class PatchCommands
                 saveChanges: true,
                 includeBestPracticeWarnings: args.GetBoolean("best-practice-warnings", false)).ConfigureAwait(true);
 
-            Newtonsoft.Json.Linq.JObject commandData = new Newtonsoft.Json.Linq.JObject
+            Newtonsoft.Json.Linq.JObject commandData = new()
             {
                 ["path"] = resolvedPath,
                 ["byteCount"] = Encoding.UTF8.GetByteCount(content),

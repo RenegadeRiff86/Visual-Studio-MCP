@@ -298,6 +298,25 @@ internal static partial class SolutionProjectCommands
                 throw new CommandErrorException(FileNotFoundCode, $"Startup file not found: {requestedFilePath}");
             }
 
+            (string projectName, string uniqueName, string projectPath, string startupFileValue) =
+                await SetPythonStartupFileAsync(context, projectQuery, requestedFilePath).ConfigureAwait(false);
+
+            return new CommandExecutionResult(
+                $"Startup file for '{projectName}' set to '{startupFileValue}'.",
+                new JObject
+                {
+                    ["project"] = projectName,
+                    [UniqueNamePropertyName] = uniqueName,
+                    ["path"] = projectPath,
+                    ["startupFile"] = startupFileValue,
+                });
+        }
+
+        private static async Task<(string ProjectName, string UniqueName, string ProjectPath, string StartupFileValue)> SetPythonStartupFileAsync(
+            IdeCommandContext context,
+            string? projectQuery,
+            string requestedFilePath)
+        {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             EnsureSolutionOpen(context.Dte);
 
@@ -310,15 +329,7 @@ internal static partial class SolutionProjectCommands
             }
 
             project.Save(projectPath);
-            return new CommandExecutionResult(
-                $"Startup file for '{project.Name}' set to '{startupFileValue}'.",
-                new JObject
-                {
-                    ["project"] = project.Name,
-                    [UniqueNamePropertyName] = project.UniqueName,
-                    ["path"] = projectPath,
-                    ["startupFile"] = startupFileValue,
-                });
+            return (project.Name, project.UniqueName, projectPath, startupFileValue!);
         }
     }
 
@@ -330,6 +341,24 @@ internal static partial class SolutionProjectCommands
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
             string? projectQuery = args.GetString("project");
+            (string projectName, string uniqueName, string projectPath, string startupFileValue) =
+                await GetPythonStartupFileAsync(context, projectQuery).ConfigureAwait(false);
+
+            return new CommandExecutionResult(
+                $"Startup file for '{projectName}' is '{startupFileValue}'.",
+                new JObject
+                {
+                    ["project"] = projectName,
+                    [UniqueNamePropertyName] = uniqueName,
+                    ["path"] = projectPath,
+                    ["startupFile"] = startupFileValue,
+                });
+        }
+
+        private static async Task<(string ProjectName, string UniqueName, string ProjectPath, string StartupFileValue)> GetPythonStartupFileAsync(
+            IdeCommandContext context,
+            string? projectQuery)
+        {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             EnsureSolutionOpen(context.Dte);
 
@@ -344,15 +373,7 @@ internal static partial class SolutionProjectCommands
                     $"No startup file is configured for Python project '{project.Name}'.");
             }
 
-            return new CommandExecutionResult(
-                $"Startup file for '{project.Name}' is '{startupFileValue}'.",
-                new JObject
-                {
-                    ["project"] = project.Name,
-                    [UniqueNamePropertyName] = project.UniqueName,
-                    ["path"] = projectPath,
-                    ["startupFile"] = startupFileValue,
-                });
+            return (project.Name, project.UniqueName, projectPath, startupFileValue!);
         }
     }
 }

@@ -4,7 +4,7 @@ public sealed partial class ToolRegistry
 {
     private static Dictionary<string, ToolDefinition> BuildLookup(IEnumerable<ToolDefinition> tools)
     {
-        Dictionary<string, ToolDefinition> lookup = new Dictionary<string, ToolDefinition>(StringComparer.Ordinal);
+        Dictionary<string, ToolDefinition> lookup = new(StringComparer.Ordinal);
         foreach (ToolDefinition tool in tools)
         {
             AddLookupEntry(lookup, tool.Name, tool);

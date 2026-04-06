@@ -24,7 +24,7 @@ internal sealed partial class ErrorListService
 {
     private static JObject CreateBestPracticeRow(string code, string message, string file, int line, string symbol, string helpUri = "")
     {
-        JObject row = new JObject
+        JObject row = new()
         {
             [SeverityKey] = WarningSeverity,
             [CodeKey] = code,
@@ -75,7 +75,7 @@ internal sealed partial class ErrorListService
         _bestPracticeProvider.Tasks.Clear();
         foreach (var row in rows)
         {
-            ErrorTask task = new ErrorTask
+            ErrorTask task = new()
             {
                 Category = TaskCategory.BuildCompile,
                 ErrorCategory = MapTaskErrorCategory(GetRowString(row, SeverityKey)),
@@ -136,7 +136,7 @@ internal sealed partial class ErrorListService
             return false;
         }
 
-        BestPracticeTableDataSource tableSource = new BestPracticeTableDataSource();
+        BestPracticeTableDataSource tableSource = new();
         ITableManager tableManager = tableManagerProvider.GetTableManager(StandardTables.ErrorsTable);
         if (!tableManager.AddSource(tableSource, BestPracticeTableColumns))
         {
@@ -230,22 +230,19 @@ internal sealed partial class ErrorListService
         };
     }
 
-    private async Task<IReadOnlyList<JObject>> WaitForRowsAsync(IdeCommandContext context, int timeoutMilliseconds, bool intellisenseReady = false)
+    private async Task<IReadOnlyList<JObject>> WaitForRowsAsync(IdeCommandContext context, int timeoutMilliseconds)
     {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
-        EnsureErrorListWindow(context.Dte);
-
         int timeout = timeoutMilliseconds > 0 ? timeoutMilliseconds : DefaultWaitTimeoutMilliseconds;
         DateTimeOffset deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeout);
-        JObject[] lastRows = Array.Empty<JObject>();
+        JObject[] lastRows = [];
         int? lastCount = null;
         int stableSamples = 0;
-        // When IntelliSense has already confirmed ready, one stable read is sufficient.
-        int requiredStableSamples = intellisenseReady ? 1 : StableSampleCount;
+        int requiredStableSamples = StableSampleCount;
 
         while (DateTimeOffset.UtcNow < deadline)
         {
             context.CancellationToken.ThrowIfCancellationRequested();
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
 
             IReadOnlyList<JObject>? rows = null;
             try
@@ -270,8 +267,8 @@ internal sealed partial class ErrorListService
                 }
 
                 lastRows = [.. rows];
-                // A clean solution should return promptly once the Error List is stable,
-                // instead of waiting out the full timeout for a non-zero row count.
+                // Wait for multiple stable reads even after IntelliSense reports ready,
+                // because some Error List providers continue hydrating message rows after that point.
                 if (stableSamples >= requiredStableSamples)
                 {
                     return rows;
@@ -279,7 +276,6 @@ internal sealed partial class ErrorListService
             }
 
             await Task.Delay(PopulationPollIntervalMilliseconds, context.CancellationToken).ConfigureAwait(false);
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
         }
 
         return lastRows;
@@ -300,7 +296,7 @@ internal sealed partial class ErrorListService
         }
 
         ErrorItems items = errorList.ErrorItems;
-        List<JObject> dteRows = new List<JObject>(items.Count);
+        List<JObject> dteRows = [];
         for (int i = 1; i <= items.Count; i++)
         {
             ErrorItem errorItem = items.Item(i);
@@ -312,7 +308,7 @@ internal sealed partial class ErrorListService
             int column = errorItem.Column;
             NormalizeBuildOutputLocation(ref file, ref line, ref column);
             string code = InferCode(description);
-            dteRows.Add(new JObject
+            dteRows.Add(new()
             {
                 [SeverityKey] = severity,
                 ["code"] = code,
@@ -352,8 +348,8 @@ internal sealed partial class ErrorListService
             return false;
         }
 
-        using ErrorTableCollector collector = new ErrorTableCollector();
-        List<IDisposable> subscriptions = new List<IDisposable>();
+        using ErrorTableCollector collector = new();
+        List<IDisposable> subscriptions = [];
         try
         {
             foreach (var source in tableManager.Sources)

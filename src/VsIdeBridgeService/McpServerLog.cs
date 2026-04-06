@@ -43,7 +43,7 @@ internal static class McpServerLog
     public static void WriteResponse(JsonObject response)
     {
         JsonNode? id = response["id"];
-        JsonObject? result = response["result"] as JsonObject;
+        JsonObject? result = response["result"] is JsonObject resultObject ? resultObject : null;
         JsonObject? error = response["error"] as JsonObject;
 
         if (error is not null)

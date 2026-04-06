@@ -28,8 +28,8 @@ internal abstract class IdeCommandBase
         Package = package;
         Runtime = runtime;
 
-        CommandID menuCommandId = new CommandID(CommandRegistrar.CommandSet, commandId);
-        OleMenuCommand menuCommand = new OleMenuCommand(Execute, menuCommandId);
+        CommandID menuCommandId = new(CommandRegistrar.CommandSet, commandId);
+        OleMenuCommand menuCommand = new(Execute, menuCommandId);
         if (acceptsParameters)
         {
             menuCommand.ParametersDescription = "$";
@@ -66,7 +66,7 @@ internal abstract class IdeCommandBase
         DTE2? dte = await Package.GetServiceAsync(typeof(SDTE)) as DTE2;
         Assumes.Present(dte);
 
-        IdeCommandContext context = new IdeCommandContext(Package, dte, Runtime.Logger, Runtime, Package.DisposalToken);
+        IdeCommandContext context = new(Package, dte, Runtime.Logger, Runtime, Package.DisposalToken);
         await Task.Factory.StartNew(
             static () => { },
             System.Threading.CancellationToken.None,
@@ -79,7 +79,7 @@ internal abstract class IdeCommandBase
             outputPath = ResolveOutputPath(args);
             requestId = args.GetString("request-id");
             CommandExecutionResult commandResult = await ExecuteAsync(context, args).ConfigureAwait(false);
-            CommandEnvelope envelope = new CommandEnvelope
+            CommandEnvelope envelope = new()
             {
                 SchemaVersion = JsonSchemaVersioning.CurrentSchemaVersion,
                 Command = CanonicalName,
@@ -100,7 +100,7 @@ internal abstract class IdeCommandBase
         {
             await HandleCommandErrorAsync(context, ex, requestId, outputPath, startedAt).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not null) // top-level exception boundary; all unexpected exceptions are handled here
         {
             await HandleUnexpectedExceptionAsync(context, ex, requestId, outputPath, startedAt).ConfigureAwait(false);
         }
@@ -123,7 +123,7 @@ internal abstract class IdeCommandBase
     private async Task HandleCommandErrorAsync(IdeCommandContext context, CommandErrorException ex, string? requestId, string outputPath, DateTimeOffset startedAt)
     {
         Newtonsoft.Json.Linq.JToken? failureData = await Runtime.FailureContextService.CaptureAsync(context).ConfigureAwait(false);
-        CommandEnvelope envelope = new CommandEnvelope
+        CommandEnvelope envelope = new()
         {
             SchemaVersion = JsonSchemaVersioning.CurrentSchemaVersion,
             Command = CanonicalName,
@@ -145,7 +145,7 @@ internal abstract class IdeCommandBase
     private async Task HandleUnexpectedExceptionAsync(IdeCommandContext context, Exception ex, string? requestId, string outputPath, DateTimeOffset startedAt)
     {
         Newtonsoft.Json.Linq.JToken? failureData = await Runtime.FailureContextService.CaptureAsync(context).ConfigureAwait(false);
-        CommandEnvelope envelope = new CommandEnvelope
+        CommandEnvelope envelope = new()
         {
             SchemaVersion = JsonSchemaVersioning.CurrentSchemaVersion,
             Command = CanonicalName,

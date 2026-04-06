@@ -10,15 +10,9 @@ internal sealed class DocumentDiagnosticsSnapshot
 
     public string? LastError { get; init; }
 
-    public string? LastQueuedUtc { get; init; }
+    public DocumentDiagnosticsTimingSnapshot Timing { get; init; } = new();
 
-    public string? LastStartedUtc { get; init; }
-
-    public string? LastCompletedUtc { get; init; }
-
-    public JsonObject? Errors { get; init; }
-
-    public JsonObject? Warnings { get; init; }
+    public DocumentDiagnosticsResultSnapshot Results { get; init; } = new();
 
     public JsonObject ToJson()
     {
@@ -37,31 +31,47 @@ internal sealed class DocumentDiagnosticsSnapshot
             json["lastError"] = LastError;
         }
 
-        if (!string.IsNullOrWhiteSpace(LastQueuedUtc))
+        if (!string.IsNullOrWhiteSpace(Timing.LastQueuedUtc))
         {
-            json["lastQueuedUtc"] = LastQueuedUtc;
+            json["lastQueuedUtc"] = Timing.LastQueuedUtc;
         }
 
-        if (!string.IsNullOrWhiteSpace(LastStartedUtc))
+        if (!string.IsNullOrWhiteSpace(Timing.LastStartedUtc))
         {
-            json["lastStartedUtc"] = LastStartedUtc;
+            json["lastStartedUtc"] = Timing.LastStartedUtc;
         }
 
-        if (!string.IsNullOrWhiteSpace(LastCompletedUtc))
+        if (!string.IsNullOrWhiteSpace(Timing.LastCompletedUtc))
         {
-            json["lastCompletedUtc"] = LastCompletedUtc;
+            json["lastCompletedUtc"] = Timing.LastCompletedUtc;
         }
 
-        if (Errors is not null)
+        if (Results.Errors is not null)
         {
-            json["errors"] = Errors.DeepClone();
+            json["errors"] = Results.Errors.DeepClone();
         }
 
-        if (Warnings is not null)
+        if (Results.Warnings is not null)
         {
-            json["warnings"] = Warnings.DeepClone();
+            json["warnings"] = Results.Warnings.DeepClone();
         }
 
         return json;
     }
+}
+
+internal sealed class DocumentDiagnosticsTimingSnapshot
+{
+    public string? LastQueuedUtc { get; init; }
+
+    public string? LastStartedUtc { get; init; }
+
+    public string? LastCompletedUtc { get; init; }
+}
+
+internal sealed class DocumentDiagnosticsResultSnapshot
+{
+    public JsonObject? Errors { get; init; }
+
+    public JsonObject? Warnings { get; init; }
 }

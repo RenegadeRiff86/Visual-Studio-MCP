@@ -20,7 +20,7 @@ internal static class Program
         }
 
         var (verb, optionArgs) = ResolveVerb(args);
-        var options = ParseOptions(optionArgs);
+        Dictionary<string, string?> options = ParseOptions(optionArgs);
 
         try
         {
@@ -36,7 +36,12 @@ internal static class Program
                 _ => Fail($"Unknown command '{verb}'.")
             };
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
+        {
+            Console.Error.WriteLine($"ERROR: {ex.Message}");
+            return 1;
+        }
+        catch (UnauthorizedAccessException ex)
         {
             Console.Error.WriteLine($"ERROR: {ex.Message}");
             return 1;
@@ -61,25 +66,25 @@ internal static class Program
 
     private static int RunInstall(Dictionary<string, string?> options)
     {
-        var repoRoot = GetPathOption(options, "repo-root") ?? FindRepoRoot();
-        var configuration = GetOption(options, "configuration") ?? InstallerDefaults.DefaultConfiguration;
-        var installDir = GetPathOption(options, "install-dir") ?? InstallerDefaults.DefaultInstallDir;
-        var serviceName = GetOption(options, "service-name") ?? InstallerDefaults.ServiceName;
-        var vsixId = GetOption(options, "vsix-id") ?? InstallerDefaults.VsixId;
-        var idleSoftSeconds = GetIntOption(options, "idle-soft-seconds", InstallerDefaults.DefaultIdleSoftSeconds);
-        var idleHardSeconds = GetIntOption(options, "idle-hard-seconds", InstallerDefaults.DefaultIdleHardSeconds);
+        string? repoRoot = GetPathOption(options, "repo-root") ?? FindRepoRoot();
+        string configuration = GetOption(options, "configuration") ?? InstallerDefaults.DefaultConfiguration;
+        string installDir = GetPathOption(options, "install-dir") ?? InstallerDefaults.DefaultInstallDir;
+        string serviceName = GetOption(options, "service-name") ?? InstallerDefaults.ServiceName;
+        string vsixId = GetOption(options, "vsix-id") ?? InstallerDefaults.VsixId;
+        int idleSoftSeconds = GetIntOption(options, "idle-soft-seconds", InstallerDefaults.DefaultIdleSoftSeconds);
+        int idleHardSeconds = GetIntOption(options, "idle-hard-seconds", InstallerDefaults.DefaultIdleHardSeconds);
 
-        var cliSource = GetPathOption(options, "cli-source")
+        string cliSource = GetPathOption(options, "cli-source")
             ?? Path.Combine(repoRoot, "src", "VsIdeBridgeService", "bin", configuration, "cli", "net8.0");
-        var serviceSource = GetPathOption(options, "service-source")
+        string serviceSource = GetPathOption(options, "service-source")
             ?? Path.Combine(repoRoot, "src", "VsIdeBridgeService", "bin", configuration, "net8.0-windows");
-        var launcherSource = GetPathOption(options, "launcher-source")
+        string launcherSource = GetPathOption(options, "launcher-source")
             ?? Path.Combine(repoRoot, "src", "VsIdeBridgeLauncher", "bin", configuration);
-        var vsixPath = GetPathOption(options, "vsix-path")
+        string vsixPath = GetPathOption(options, "vsix-path")
             ?? Path.Combine(repoRoot, "src", "VsIdeBridge", "bin", configuration, "net472", InstallerDefaults.VsixFileName);
 
-        var skipVsix = HasFlag(options, "skip-vsix");
-        var skipService = HasFlag(options, "skip-service");
+        bool skipVsix = HasFlag(options, "skip-vsix");
+        bool skipService = HasFlag(options, "skip-service");
 
         if (!Directory.Exists(cliSource))
         {
@@ -88,7 +93,7 @@ internal static class Program
 
         Directory.CreateDirectory(installDir);
 
-        var cliDest = Path.Combine(installDir, InstallerDefaults.CliDirectoryName);
+        string cliDest = Path.Combine(installDir, InstallerDefaults.CliDirectoryName);
         CopyDirectory(cliSource, cliDest);
         Console.WriteLine($"Installed CLI files -> {cliDest}");
 
@@ -104,11 +109,11 @@ internal static class Program
                 return Fail($"Launcher source directory not found: {launcherSource}");
             }
 
-            var serviceDest = Path.Combine(installDir, InstallerDefaults.ServiceDirectoryName);
+            string serviceDest = Path.Combine(installDir, InstallerDefaults.ServiceDirectoryName);
             CopyDirectory(serviceSource, serviceDest);
             CopyDirectory(launcherSource, serviceDest);
-            var installedServiceExe = Path.Combine(serviceDest, InstallerDefaults.ServiceExecutableName);
-            var installedLauncherExe = Path.Combine(serviceDest, InstallerDefaults.LauncherExecutableName);
+            string installedServiceExe = Path.Combine(serviceDest, InstallerDefaults.ServiceExecutableName);
+            string installedLauncherExe = Path.Combine(serviceDest, InstallerDefaults.LauncherExecutableName);
             if (!File.Exists(installedServiceExe))
             {
                 return Fail($"Service executable not found after copy: {installedServiceExe}");
@@ -130,6 +135,7 @@ internal static class Program
                 return Fail($"VSIX not found: {vsixPath}");
             }
 
+            UninstallVsix(vsixId);
             UninstallVsix(InstallerDefaults.LegacyVsixId);
             InstallVsix(vsixPath);
             Console.WriteLine($"VSIX installed/updated ({vsixId}).");
@@ -141,11 +147,11 @@ internal static class Program
 
     private static int RunUninstall(Dictionary<string, string?> options)
     {
-        var installDir = GetPathOption(options, "install-dir") ?? InstallerDefaults.DefaultInstallDir;
-        var serviceName = GetOption(options, "service-name") ?? InstallerDefaults.ServiceName;
-        var vsixId = GetOption(options, "vsix-id") ?? InstallerDefaults.VsixId;
-        var skipVsix = HasFlag(options, "skip-vsix");
-        var skipService = HasFlag(options, "skip-service");
+        string installDir = GetPathOption(options, "install-dir") ?? InstallerDefaults.DefaultInstallDir;
+        string serviceName = GetOption(options, "service-name") ?? InstallerDefaults.ServiceName;
+        string vsixId = GetOption(options, "vsix-id") ?? InstallerDefaults.VsixId;
+        bool skipVsix = HasFlag(options, "skip-vsix");
+        bool skipService = HasFlag(options, "skip-service");
 
         if (!skipService)
         {
@@ -172,8 +178,8 @@ internal static class Program
 
     private static void InstallVsix(string vsixPath)
     {
-        var installer = FindVsixInstallerPath();
-        var exitCode = RunProcess(installer, $"/quiet \"{vsixPath}\"");
+        string installer = FindVsixInstallerPath();
+        int exitCode = RunProcess(installer, $"/quiet \"{vsixPath}\"");
         if (exitCode != 0)
         {
             throw new InvalidOperationException($"VSIX install failed with exit code {exitCode}.");
@@ -182,8 +188,8 @@ internal static class Program
 
     private static void UninstallVsix(string vsixId)
     {
-        var installer = FindVsixInstallerPath();
-        var exitCode = RunProcess(installer, $"/quiet /uninstall:{vsixId}");
+        string installer = FindVsixInstallerPath();
+        int exitCode = RunProcess(installer, $"/quiet /uninstall:{vsixId}");
         if (exitCode != 0)
         {
             Console.WriteLine($"VSIX uninstall returned exit code {exitCode}. Continuing.");
@@ -193,9 +199,9 @@ internal static class Program
     private static void InstallOrUpdateService(string serviceName, string serviceExePath, int idleSoftSeconds, int idleHardSeconds)
     {
         RemoveService(serviceName);
-        var binPath = $"\"{serviceExePath}\" --idle-soft-seconds {idleSoftSeconds} --idle-hard-seconds {idleHardSeconds}";
-        var createArgs = $"create \"{serviceName}\" binPath= \"{binPath}\" start= auto DisplayName= \"{InstallerDefaults.ServiceDisplayName}\"";
-        var createExit = RunProcess("sc.exe", createArgs);
+        string binPath = $"\"{serviceExePath}\" --idle-soft-seconds {idleSoftSeconds} --idle-hard-seconds {idleHardSeconds}";
+        string createArgs = $"create \"{serviceName}\" binPath= \"{binPath}\" start= auto DisplayName= \"{InstallerDefaults.ServiceDisplayName}\"";
+        int createExit = RunProcess("sc.exe", createArgs);
         if (createExit != 0)
         {
             throw new InvalidOperationException($"Failed to create service '{serviceName}'. Exit code: {createExit}");
@@ -212,23 +218,23 @@ internal static class Program
 
     private static string FindVsixInstallerPath()
     {
-        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-        var root = Path.Combine(programFiles, "Microsoft Visual Studio", InstallerDefaults.VisualStudioMajorVersion);
+        string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        string root = Path.Combine(programFiles, "Microsoft Visual Studio", InstallerDefaults.VisualStudioMajorVersion);
         if (!Directory.Exists(root))
         {
             throw new InvalidOperationException($"Visual Studio {InstallerDefaults.VisualStudioMajorVersion} installation path not found.");
         }
 
-        foreach (var edition in InstallerDefaults.VisualStudioEditions)
+        foreach (string edition in InstallerDefaults.VisualStudioEditions)
         {
-            var candidate = Path.Combine(root, edition, "Common7", "IDE", "VSIXInstaller.exe");
+            string candidate = Path.Combine(root, edition, "Common7", "IDE", "VSIXInstaller.exe");
             if (File.Exists(candidate))
             {
                 return candidate;
             }
         }
 
-        var fallback = Directory.GetFiles(root, "VSIXInstaller.exe", SearchOption.AllDirectories).FirstOrDefault();
+        string? fallback = Directory.GetFiles(root, "VSIXInstaller.exe", SearchOption.AllDirectories).FirstOrDefault();
         if (!string.IsNullOrWhiteSpace(fallback))
         {
             return fallback;
@@ -239,9 +245,9 @@ internal static class Program
 
     private static int RunProcess(string fileName, string arguments)
     {
-        using var installerProcess = new Process
+        using Process installerProcess = new()
         {
-            StartInfo = new ProcessStartInfo
+            StartInfo = new()
             {
                 FileName = fileName,
                 Arguments = arguments,
@@ -253,8 +259,8 @@ internal static class Program
         };
 
         installerProcess.Start();
-        var stdout = installerProcess.StandardOutput.ReadToEnd();
-        var stderr = installerProcess.StandardError.ReadToEnd();
+        string stdout = installerProcess.StandardOutput.ReadToEnd();
+        string stderr = installerProcess.StandardError.ReadToEnd();
         installerProcess.WaitForExit();
 
         if (!string.IsNullOrWhiteSpace(stdout))
@@ -274,26 +280,26 @@ internal static class Program
     {
         Directory.CreateDirectory(destinationDir);
 
-        foreach (var file in Directory.GetFiles(sourceDir))
+        foreach (string file in Directory.GetFiles(sourceDir))
         {
-            var fileName = Path.GetFileName(file);
+            string fileName = Path.GetFileName(file);
             File.Copy(file, Path.Combine(destinationDir, fileName), overwrite: true);
         }
 
-        foreach (var directory in Directory.GetDirectories(sourceDir))
+        foreach (string directory in Directory.GetDirectories(sourceDir))
         {
-            var childName = Path.GetFileName(directory);
+            string childName = Path.GetFileName(directory);
             CopyDirectory(directory, Path.Combine(destinationDir, childName));
         }
     }
 
     private static string FindRepoRoot()
     {
-        var current = AppContext.BaseDirectory;
-        var directory = new DirectoryInfo(current);
+        string current = AppContext.BaseDirectory;
+        DirectoryInfo? directory = new(current);
         while (directory is not null)
         {
-            var sln = Path.Combine(directory.FullName, InstallerDefaults.SolutionFileName);
+            string sln = Path.Combine(directory.FullName, InstallerDefaults.SolutionFileName);
             if (File.Exists(sln))
             {
                 return directory.FullName;
@@ -307,8 +313,8 @@ internal static class Program
 
     private static void EnsureAdmin()
     {
-        using var identity = WindowsIdentity.GetCurrent();
-        var principal = new WindowsPrincipal(identity);
+        using WindowsIdentity identity = WindowsIdentity.GetCurrent();
+        WindowsPrincipal principal = new(identity);
         if (!principal.IsInRole(WindowsBuiltInRole.Administrator))
         {
             throw new UnauthorizedAccessException("Run this installer from an elevated terminal (Administrator).");
@@ -319,16 +325,16 @@ internal static class Program
 
     private static Dictionary<string, string?> ParseOptions(string[] args)
     {
-        var map = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        for (var i = 0; i < args.Length; i++)
+        Dictionary<string, string?> map = new(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < args.Length; i++)
         {
-            var arg = args[i];
+            string arg = args[i];
             if (!arg.StartsWith("--", StringComparison.Ordinal))
             {
                 throw new InvalidOperationException($"Unexpected argument: {arg}");
             }
 
-            var key = arg[2..];
+            string key = arg[2..];
             if (i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal))
             {
                 map[key] = args[++i];
@@ -344,19 +350,19 @@ internal static class Program
 
     private static string? GetOption(Dictionary<string, string?> options, string key)
     {
-        return options.TryGetValue(key, out var value) ? value : null;
+        return options.TryGetValue(key, out string? value) ? value : null;
     }
 
     private static string? GetPathOption(Dictionary<string, string?> options, string key)
     {
-        var value = GetOption(options, key);
+        string? value = GetOption(options, key);
         return string.IsNullOrWhiteSpace(value) ? null : Path.GetFullPath(value);
     }
 
     private static int GetIntOption(Dictionary<string, string?> options, string key, int defaultValue)
     {
-        var raw = GetOption(options, key);
-        return int.TryParse(raw, out var value) && value > 0 ? value : defaultValue;
+        string? raw = GetOption(options, key);
+        return int.TryParse(raw, out int value) && value > 0 ? value : defaultValue;
     }
 
     private static bool HasFlag(Dictionary<string, string?> options, string key)

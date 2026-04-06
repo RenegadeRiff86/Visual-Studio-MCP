@@ -22,6 +22,7 @@ internal static partial class ToolCatalog
     private const string Configuration = "configuration";
     private const string Platform = "platform";
     private const string ErrorsOnly = "errors_only";
+    private const string Warnings = "warnings";
     private const string RequireCleanDiagnostics = "require_clean_diagnostics";
     private const string Diagnostics = "diagnostics";
     private const string Git = "git";
@@ -55,7 +56,10 @@ internal static partial class ToolCatalog
                 Opt(Project, ProjectFilterDesc),
                 Opt(Path, "Optional path filter."),
                 Opt(Text, "Optional message text filter."),
-                Opt(GroupBy, "Optional grouping mode.")));
+                Opt(GroupBy, "Optional grouping mode.")))
+            .WithSearchHints(BuildSearchHints(
+                workflow: [("read_file", "Read the file containing the error"), ("goto_definition", "Navigate to the error location"), ("apply_diff", "Fix the error")],
+                related: [(Warnings, "Check warnings instead"), ("diagnostics_snapshot", "Get a combined IDE + error snapshot"), ("build_errors", "Run MSBuild directly for a definitive build result")]));
         return new(errorsDefinition,
             async (id, args, bridge) =>
             {
@@ -89,7 +93,7 @@ internal static partial class ToolCatalog
 
     private static ToolEntry CreateWarningsTool()
     {
-        return new("warnings",
+        return new(Warnings,
             "Capture warning rows with optional code/path/project filters.",
             ObjectSchema(
                 Opt(Severity, "Optional severity filter."),
@@ -101,7 +105,7 @@ internal static partial class ToolCatalog
                 Opt(Path, "Optional path filter."),
                 Opt(Text, "Optional message text filter."),
                 Opt(GroupBy, "Optional grouping mode (e.g. code).")),
-            "diagnostics",
+            Diagnostics,
             async (id, args, bridge) =>
             {
                 if (bridge.DocumentDiagnostics.TryGetCachedWarnings(args, out JsonObject cachedWarnings))
@@ -124,7 +128,54 @@ internal static partial class ToolCatalog
                     (Path, OptionalString(args, Path)),
                     (Text, OptionalString(args, Text)),
                     ("group-by", OptionalString(args, GroupBy)));
-                JsonObject response = await bridge.SendAsync(id, "warnings", warningArgs)
+                JsonObject response = await bridge.SendAsync(id, Warnings, warningArgs)
+                    .ConfigureAwait(false);
+                CompactDiagnosticsResponse(response, args);
+                return BridgeResult(response);
+            },
+            searchHints: BuildSearchHints(
+                workflow: [("read_file", "Read the file with the warning"), ("goto_definition", "Navigate to the warning location")],
+                related: [("errors", "Check errors instead"), ("diagnostics_snapshot", "Get a combined IDE + diagnostics snapshot")]));
+    }
+
+    private static ToolEntry CreateMessagesTool()
+    {
+        ToolDefinition messagesDefinition = ToolDefinitionCatalog.Messages(
+                ObjectSchema(
+                    Opt(Severity, "Optional severity filter."),
+                    OptBool(WaitForIntellisense, "Wait for IntelliSense readiness first (default true)."),
+                    OptBool(Quick, "Read current snapshot immediately (default false)."),
+                    OptInt(Max, "Max rows to return. Defaults to 50 when no filters are set."),
+                    Opt(Code, "Optional message code prefix filter."),
+                    Opt(Project, ProjectFilterDesc),
+                    Opt(Path, "Optional path filter."),
+                    Opt(Text, "Optional message text filter."),
+                    Opt(GroupBy, "Optional grouping mode (e.g. code).")))
+            .WithSearchHints(
+                BuildSearchHints(
+                    workflow: [("read_file", "Read the file behind the message"), ("goto_definition", "Navigate to the message location")],
+                related: [(Warnings, "Check warnings instead"), ("errors", "Check errors instead"), ("diagnostics_snapshot", "Get a combined IDE + diagnostics snapshot")]));
+
+        return new(messagesDefinition,
+            async (id, args, bridge) =>
+            {
+                bool hasFilters = args?[Code] is not null || args?[Severity] is not null
+                    || args?[Project] is not null || args?[Path] is not null || args?[Text] is not null;
+                string? maxValue = args?[Max] is not null ? OptionalText(args, Max) : (hasFilters ? null : DefaultMaxRows);
+
+                bool useQuick = args?[Quick]?.GetValue<bool>() ?? false;
+                string? severityValue = OptionalString(args, Severity) ?? "Message";
+                string messageArgs = Build(
+                    (Severity, severityValue),
+                    BoolArg(WaitForIntellisenseHyphen, args, WaitForIntellisense, false, true),
+                    BoolArg(Quick, args, Quick, useQuick, true),
+                    (Max, maxValue),
+                    (Code, OptionalString(args, Code)),
+                    (Project, OptionalString(args, Project)),
+                    (Path, OptionalString(args, Path)),
+                    (Text, OptionalString(args, Text)),
+                    ("group-by", OptionalString(args, GroupBy)));
+                JsonObject response = await bridge.SendAsync(id, "messages", messageArgs)
                     .ConfigureAwait(false);
                 CompactDiagnosticsResponse(response, args);
                 return BridgeResult(response);
@@ -139,6 +190,7 @@ internal static partial class ToolCatalog
     {
         yield return CreateErrorsTool();
         yield return CreateWarningsTool();
+        yield return CreateMessagesTool();
 
         yield return new("diagnostics_snapshot",
             "One-shot snapshot combining IDE state, build status, debugger mode, and error/warning counts. " +
@@ -156,7 +208,9 @@ internal static partial class ToolCatalog
                     .ConfigureAwait(false);
                 CompactDiagnosticsResponse(response, args);
                 return BridgeResult(response, args);
-            });
+            },
+            searchHints: BuildSearchHints(
+                related: [("errors", "Get only errors"), (Warnings, "Get only warnings"), ("vs_state", "Check IDE state"), ("build", "Trigger a build")]));
     }
 
     private static void CompactDiagnosticsResponse(JsonObject response, JsonObject? args)
@@ -166,7 +220,8 @@ internal static partial class ToolCatalog
             return;
         }
 
-        CompactDiagnosticsNode(data, DefaultCompactDiagnosticsRows);
+        int maxRows = args?[Max]?.GetValue<int>() ?? DefaultCompactDiagnosticsRows;
+        CompactDiagnosticsNode(data, maxRows);
     }
 
     private static bool WantsFullDiagnosticsPayload(JsonObject? args)
@@ -225,7 +280,9 @@ internal static partial class ToolCatalog
     {
         yield return BridgeTool("build_configurations",
             "List available solution build configurations and platforms.",
-            EmptySchema(), "build-configurations", _ => Empty(), Diagnostics);
+            EmptySchema(), "build-configurations", _ => Empty(), Diagnostics,
+            searchHints: BuildSearchHints(
+                related: [("build", "Trigger a build"), ("set_build_configuration", "Activate a configuration")]));
 
         yield return BridgeTool("set_build_configuration",
             "Activate one build configuration/platform pair.",
@@ -236,62 +293,100 @@ internal static partial class ToolCatalog
             a => Build(
                 (Configuration, OptionalString(a, Configuration)),
                 (Platform, OptionalString(a, Platform))),
-            Diagnostics);
+            Diagnostics,
+            searchHints: BuildSearchHints(
+                workflow: [("build", "Build with the new configuration")],
+                related: [("build_configurations", "List available configurations")]));
 
         yield return CreateBuildTool(
             "build",
             "Build the solution or a specific project. Omit project to build the entire solution. Use list_projects to discover project names. Set errors_only=true to return the build summary plus only error rows.",
             "build",
-            includeProject: true);
+            includeProject: true,
+            searchHints: BuildSearchHints(
+                workflow: [("errors", "Check errors after building"), ("build_errors", "Run MSBuild directly for a definitive result")],
+                related: [("rebuild", "Clean then build"), ("build_solution", "Build the solution explicitly")]));
 
         yield return CreateBuildTool(
             "rebuild",
             "Rebuild the active solution inside Visual Studio. This performs a clean step before building and is heavier than build. Set errors_only=true to return the rebuild summary plus only error rows.",
             "rebuild",
-            includeProject: false);
+            includeProject: false,
+            searchHints: BuildSearchHints(
+                workflow: [("errors", "Check errors after rebuilding")],
+                related: [("build", "Build without cleaning"), ("rebuild_solution", "Rebuild the solution explicitly")]));
 
         yield return CreateBuildTool(
             "build_solution",
             "Build the active solution explicitly. Use this when you want the solution-wide build command rather than the generic build entry. Set errors_only=true to keep the response compact.",
             "build",
-            includeProject: false);
+            includeProject: false,
+            searchHints: BuildSearchHints(
+                workflow: [("errors", "Check errors after building")],
+                related: [("build", "Build a specific project"), ("rebuild_solution", "Rebuild the solution")]));
 
         yield return CreateBuildTool(
             "rebuild_solution",
             "Rebuild the active solution explicitly. Use this when you want the solution-wide rebuild command by name. Set errors_only=true to keep the response compact.",
             "rebuild-solution",
-            includeProject: false);
+            includeProject: false,
+            searchHints: BuildSearchHints(
+                workflow: [("errors", "Check errors after rebuilding")],
+                related: [("rebuild", "Generic rebuild"), ("build_solution", "Build without cleaning")]));
 
         yield return new("build_errors",
-            "Run MSBuild directly and return compiler errors as structured JSON. " +
-            "Definitive build result — unaffected by IntelliSense state. " +
-            "Use to verify a clean build without triggering the full VS build pipeline. Expect this to be slower than normal bridge inspection tools. Use build/build_solution/rebuild/rebuild_solution with errors_only=true when you want the IDE build path but compact error output.",
+            "Build the active solution through Visual Studio and return only compiler errors as structured JSON. " +
+            "Equivalent to build_solution with errors_only=true. " +
+            "Use build/build_solution for the full build response including warnings and messages.",
             ObjectSchema(
-                Opt(Configuration, "Build configuration (default Release)."),
-                Opt("project", "Project name or path. Omit for the whole solution."),
+                Opt(Project, "Project name to build (e.g. VsIdeBridgeInstaller). Omit to build the entire solution."),
+                Opt(Configuration, "Optional build configuration (e.g. Release)."),
+                Opt(Platform, "Optional build platform (e.g. x64)."),
                 OptInt(Max, "Max error rows to return (default 20).")),
             Diagnostics,
-            (id, args, bridge) => BuildErrorsTool.ExecuteAsync(id, args, bridge));
+            async (id, args, bridge) =>
+            {
+                string buildArgs = Build(
+                    (Project, OptionalString(args, Project)),
+                    (Configuration, OptionalString(args, Configuration)),
+                    (Platform, OptionalString(args, Platform)),
+                    BoolArg(WaitForIntellisenseHyphen, args, WaitForIntellisense, true, true),
+                    BoolArg("require-clean-diagnostics", args, RequireCleanDiagnostics, false, true));
+
+                JsonObject response = await bridge.SendAsync(id, "build", buildArgs).ConfigureAwait(false);
+
+                JsonObject? errorDiagnostics = await TryCaptureErrorDiagnosticsAsync(id, args, bridge).ConfigureAwait(false);
+                if (errorDiagnostics is not null)
+                {
+                    response["errorDiagnostics"] = errorDiagnostics;
+                }
+                response["errorsOnly"] = true;
+                return BridgeResult(response);
+            },
+            searchHints: BuildSearchHints(
+                workflow: [("read_file", "Read the file with the build error"), ("goto_definition", "Navigate to the error location"), ("apply_diff", "Fix the error")],
+                related: [("errors", "Check IDE error list instead"), ("build_solution", "Build solution with full output")]));
     }
 
-    private static ToolEntry CreateBuildTool(string name, string description, string pipeCommand, bool includeProject)
+    private static ToolEntry CreateBuildTool(string name, string description, string pipeCommand, bool includeProject, JsonObject? searchHints = null)
     {
-        List<(string Name, JsonObject Schema, bool Required)> properties = new List<(string Name, JsonObject Schema, bool Required)>();
+        List<(string Name, JsonObject Schema, bool Required)> properties =
+        [
+            Opt(Configuration, "Optional build configuration (e.g. Release)."),
+            Opt(Platform, "Optional build platform (e.g. x64)."),
+            OptBool(WaitForIntellisense, "Wait for IntelliSense readiness before building (default true)."),
+            OptBool(RequireCleanDiagnostics, "When false, bypasses the pre-build dirty-diagnostics guard (default false)."),
+            OptBool(ErrorsOnly, "When true, return the build summary plus only error rows so warnings and messages do not flood the response."),
+            OptInt(Max, "Max error rows to return when errors_only is true (default 50)."),
+        ];
         if (includeProject)
         {
-            properties.Add(Opt(Project, "Project name to build (e.g. VsIdeBridgeInstaller). Omit to build the entire solution."));
+            properties.Insert(0, Opt(Project, "Project name to build (e.g. VsIdeBridgeInstaller). Omit to build the entire solution."));
         }
-
-        properties.Add(Opt(Configuration, "Optional build configuration (e.g. Release)."));
-        properties.Add(Opt(Platform, "Optional build platform (e.g. x64)."));
-        properties.Add(OptBool(WaitForIntellisense, "Wait for IntelliSense readiness before building (default true)."));
-        properties.Add(OptBool(RequireCleanDiagnostics, "When false, bypasses the pre-build dirty-diagnostics guard (default false)."));
-        properties.Add(OptBool(ErrorsOnly, "When true, return the build summary plus only error rows so warnings and messages do not flood the response."));
-        properties.Add(OptInt(Max, "Max error rows to return when errors_only is true (default 50)."));
 
         return new(name,
             description,
-            ObjectSchema(properties.ToArray()),
+            ObjectSchema([.. properties]),
             Diagnostics,
             async (id, args, bridge) =>
             {
@@ -323,7 +418,8 @@ internal static partial class ToolCatalog
                 }
 
                 return BridgeResult(response);
-            });
+            },
+            searchHints: searchHints);
     }
 
     private static async Task<JsonObject?> TryCapturePreBuildDiagnosticsAsync(JsonNode? id, BridgeConnection bridge)

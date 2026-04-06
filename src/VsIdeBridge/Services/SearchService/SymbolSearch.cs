@@ -67,11 +67,11 @@ internal sealed partial class SearchService
             files = files.Where(item => MatchesPathFilter(item.Path, normalizedPathFilter));
         }
 
-        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> seen = [];
         List<CodeModelHit> hits = [];
-        foreach ((string Path, string ProjectUniqueName) file in files)
+        foreach ((string filePath, string fileProjectUniqueName) in files)
         {
-            if (string.IsNullOrWhiteSpace(file.Path))
+            if (string.IsNullOrWhiteSpace(filePath))
             {
                 continue;
             }
@@ -80,10 +80,10 @@ internal sealed partial class SearchService
             CodeElements? elements = null;
             try
             {
-                projectItem = dte.Solution.FindProjectItem(file.Path);
+                projectItem = dte.Solution.FindProjectItem(filePath);
                 elements = projectItem?.FileCodeModel?.CodeElements;
             }
-            catch (Exception ex)
+            catch (System.Runtime.InteropServices.COMException ex)
             {
                 TraceSearchFailure("FindProjectItem", ex);
             }
@@ -95,7 +95,7 @@ internal sealed partial class SearchService
 
             foreach (CodeElement element in elements)
             {
-                CollectMatchingSymbols(element, file.Path, file.ProjectUniqueName, query, kind, comparison, hits, seen);
+                CollectMatchingSymbols(element, filePath, fileProjectUniqueName, query, kind, comparison, hits, seen);
             }
         }
 
@@ -123,7 +123,7 @@ internal sealed partial class SearchService
         {
             kind = element.Kind;
         }
-        catch (Exception ex)
+        catch (System.Runtime.InteropServices.COMException ex)
         {
             TraceSearchFailure("CollectMatchingSymbols.Kind", ex);
             return;
@@ -215,7 +215,7 @@ internal sealed partial class SearchService
                 _ => null,
             };
         }
-        catch (Exception ex)
+        catch (System.Runtime.InteropServices.COMException ex)
         {
             TraceSearchFailure("EnumerateChildren", ex);
         }
@@ -266,7 +266,7 @@ internal sealed partial class SearchService
         {
             return element.Name ?? string.Empty;
         }
-        catch (Exception ex)
+        catch (System.Runtime.InteropServices.COMException ex)
         {
             TraceSearchFailure("TryGetElementName", ex);
             return string.Empty;
@@ -281,7 +281,7 @@ internal sealed partial class SearchService
         {
             return string.IsNullOrWhiteSpace(element.FullName) ? TryGetElementName(element) : element.FullName;
         }
-        catch (Exception ex)
+        catch (System.Runtime.InteropServices.COMException ex)
         {
             TraceSearchFailure("TryGetFullName", ex);
             return TryGetElementName(element);
@@ -303,7 +303,7 @@ internal sealed partial class SearchService
                     ?? fullName;
             }
         }
-        catch (Exception ex)
+        catch (System.Runtime.InteropServices.COMException ex)
         {
             TraceSearchFailure("TryGetSignature", ex);
         }
@@ -319,7 +319,7 @@ internal sealed partial class SearchService
         {
             return point?.Line ?? 0;
         }
-        catch (Exception ex)
+        catch (System.Runtime.InteropServices.COMException ex)
         {
             TraceSearchFailure("TryGetLine", ex);
             return 0;

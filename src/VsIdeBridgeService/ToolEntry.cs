@@ -3,16 +3,8 @@ using VsIdeBridge.Shared;
 
 namespace VsIdeBridgeService;
 
-internal sealed class ToolEntry
+internal sealed class ToolEntry(ToolDefinition definition, Func<JsonNode?, JsonObject?, BridgeConnection, Task<JsonNode>> handler)
 {
-    public ToolEntry(
-        ToolDefinition definition,
-        Func<JsonNode?, JsonObject?, BridgeConnection, Task<JsonNode>> handler)
-    {
-        Definition = definition;
-        Handler = handler;
-    }
-
     public ToolEntry(
         string name,
         string description,
@@ -28,9 +20,9 @@ internal sealed class ToolEntry
         string? summary = null,
         bool? readOnly = null,
         bool? mutating = null,
-        bool? destructive = null)
-        : this(
-            ToolDefinition.CreateLegacy(
+        bool? destructive = null,
+        JsonObject? searchHints = null)
+        : this(ToolDefinition.CreateLegacy(
                 name,
                 category,
                 description,
@@ -44,14 +36,15 @@ internal sealed class ToolEntry
                 summary,
                 readOnly,
                 mutating,
-                destructive),
-            handler)
+                destructive,
+                searchHints: searchHints),
+        handler)
     {
     }
 
-    public ToolDefinition Definition { get; }
+    public ToolDefinition Definition { get; } = definition;
 
-    public Func<JsonNode?, JsonObject?, BridgeConnection, Task<JsonNode>> Handler { get; }
+    public Func<JsonNode?, JsonObject?, BridgeConnection, Task<JsonNode>> Handler { get; } = handler;
 
     public string Name => Definition.Name;
 

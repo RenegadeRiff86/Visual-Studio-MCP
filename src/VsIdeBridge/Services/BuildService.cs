@@ -1,9 +1,12 @@
 using EnvDTE;
 using EnvDTE80;
+using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 
@@ -28,14 +31,15 @@ internal sealed class BuildService(ReadinessService readinessService)
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
 
         DateTimeOffset startedAt = DateTimeOffset.UtcNow;
-        await context.Logger.LogAsync($"IDE Bridge: build starting ({dte.Solution.FullName})", context.CancellationToken).ConfigureAwait(true);
-        solutionBuild.Build(true);
+        DateTimeOffset deadline = GetDeadline(timeoutMilliseconds);
+        string solutionName = dte.Solution.FullName;
 
-        await WaitForBuildCompletionAsync(
-            context,
-            solutionBuild,
-            GetDeadline(timeoutMilliseconds),
-            "Timed out waiting for the build to finish.").ConfigureAwait(true);
+        // GetServiceAsync does not require the main thread — release it here.
+        IVsSolutionBuildManager2? buildManager = await context.Package.GetServiceAsync(typeof(SVsSolutionBuildManager)).ConfigureAwait(false) as IVsSolutionBuildManager2;
+
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
+        await context.Logger.LogAsync($"IDE Bridge: build starting ({solutionName})", context.CancellationToken).ConfigureAwait(true);
+        await RunSolutionBuildStepAsync(context, solutionBuild, buildManager, clean: false, deadline, "Timed out waiting for the build to finish.").ConfigureAwait(true);
 
         double elapsed = (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
         bool succeeded = solutionBuild.LastBuildInfo == 0;
@@ -53,21 +57,15 @@ internal sealed class BuildService(ReadinessService readinessService)
 
         DateTimeOffset startedAt = DateTimeOffset.UtcNow;
         DateTimeOffset deadline = GetDeadline(timeoutMilliseconds);
+        string solutionName = dte.Solution.FullName;
 
-        await context.Logger.LogAsync($"IDE Bridge: rebuild starting ({dte.Solution.FullName})", context.CancellationToken).ConfigureAwait(true);
-        solutionBuild.Clean(true);
-        await WaitForBuildCompletionAsync(
-            context,
-            solutionBuild,
-            deadline,
-            "Timed out waiting for the clean step to finish.").ConfigureAwait(true);
+        // GetServiceAsync does not require the main thread — release it here.
+        IVsSolutionBuildManager2? buildManager = await context.Package.GetServiceAsync(typeof(SVsSolutionBuildManager)).ConfigureAwait(false) as IVsSolutionBuildManager2;
 
-        solutionBuild.Build(true);
-        await WaitForBuildCompletionAsync(
-            context,
-            solutionBuild,
-            deadline,
-            "Timed out waiting for the rebuild to finish.").ConfigureAwait(true);
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
+        await context.Logger.LogAsync($"IDE Bridge: rebuild starting ({solutionName})", context.CancellationToken).ConfigureAwait(true);
+        await RunSolutionBuildStepAsync(context, solutionBuild, buildManager, clean: true, deadline, "Timed out waiting for the clean step to finish.").ConfigureAwait(true);
+        await RunSolutionBuildStepAsync(context, solutionBuild, buildManager, clean: false, deadline, "Timed out waiting for the rebuild to finish.").ConfigureAwait(true);
 
         double elapsed = (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
         bool succeeded = solutionBuild.LastBuildInfo == 0;
@@ -81,6 +79,12 @@ internal sealed class BuildService(ReadinessService readinessService)
     public async Task<JObject> GetBuildStateAsync(DTE2 dte)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        return GetBuildStateCore(dte);
+    }
+
+    private static JObject GetBuildStateCore(DTE2 dte)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
 
         if (dte.Solution?.IsOpen != true)
         {
@@ -102,7 +106,7 @@ internal sealed class BuildService(ReadinessService readinessService)
             lastBuildInfoReason = ex.Message;
         }
 
-        JObject buildStatus = new JObject
+        JObject buildStatus = new()
         {
             [SolutionPathKey] = dte.Solution.FullName,
             [ActiveConfigurationKey] = solutionBuild.ActiveConfiguration?.Name ?? string.Empty,
@@ -123,6 +127,12 @@ internal sealed class BuildService(ReadinessService readinessService)
     public async Task<JObject> ListConfigurationsAsync(DTE2 dte)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        return ListConfigurationsCore(dte);
+    }
+
+    private static JObject ListConfigurationsCore(DTE2 dte)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
 
         if (dte.Solution?.IsOpen != true)
         {
@@ -132,7 +142,7 @@ internal sealed class BuildService(ReadinessService readinessService)
         SolutionBuild solutionBuild = dte.Solution.SolutionBuild;
         string activeConfiguration = solutionBuild.ActiveConfiguration?.Name ?? string.Empty;
         string activePlatform = (solutionBuild.ActiveConfiguration as SolutionConfiguration2)?.PlatformName ?? string.Empty;
-        JArray items = new JArray();
+        JArray items = [];
 
         foreach (SolutionConfiguration2 item in solutionBuild.SolutionConfigurations)
         {
@@ -186,21 +196,18 @@ internal sealed class BuildService(ReadinessService readinessService)
         (DTE2 dte, SolutionBuild solutionBuild) = await PrepareBuildAsync(context, configuration, platform).ConfigureAwait(true);
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
 
-        string? uniqueName = FindProjectUniqueName(dte, projectName);
-        if (uniqueName is null)
-            throw new CommandErrorException("project_not_found", $"Project '{projectName}' was not found in the solution.");
-
+        string uniqueName = FindProjectUniqueName(dte, projectName)
+            ?? throw new CommandErrorException("project_not_found", $"Project '{projectName}' was not found in the solution.");
         string activeConfig = solutionBuild.ActiveConfiguration?.Name ?? "Debug";
 
-        DateTimeOffset startedAt = DateTimeOffset.UtcNow;
-        await context.Logger.LogAsync($"IDE Bridge: building project '{uniqueName}'", context.CancellationToken).ConfigureAwait(true);
-        solutionBuild.BuildProject(activeConfig, uniqueName, false);
+        // GetServiceAsync does not require the main thread — release it here.
+        IVsSolutionBuildManager2? buildManager = await context.Package.GetServiceAsync(typeof(SVsSolutionBuildManager)).ConfigureAwait(false) as IVsSolutionBuildManager2;
 
-        await WaitForBuildCompletionAsync(
-            context,
-            solutionBuild,
-            GetDeadline(timeoutMilliseconds),
-            "Timed out waiting for the build to finish.").ConfigureAwait(true);
+        DateTimeOffset startedAt = DateTimeOffset.UtcNow;
+        DateTimeOffset deadline = GetDeadline(timeoutMilliseconds);
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
+        await context.Logger.LogAsync($"IDE Bridge: building project '{uniqueName}'", context.CancellationToken).ConfigureAwait(true);
+        await RunProjectBuildAsync(context, solutionBuild, buildManager, activeConfig, uniqueName, deadline).ConfigureAwait(true);
 
         double elapsed = (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
         bool succeeded = solutionBuild.LastBuildInfo == 0;
@@ -209,6 +216,73 @@ internal sealed class BuildService(ReadinessService readinessService)
             context.CancellationToken).ConfigureAwait(true);
 
         return CreateBuildResult(dte, solutionBuild, startedAt, operation: "build", projectName, uniqueName);
+    }
+
+    private static async Task RunProjectBuildAsync(
+        IdeCommandContext context,
+        SolutionBuild solutionBuild,
+        IVsSolutionBuildManager2? buildManager,
+        string activeConfig,
+        string uniqueName,
+        DateTimeOffset deadline)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
+        const string timeoutMessage = "Timed out waiting for the build to finish.";
+        if (buildManager is not null)
+        {
+            BuildCompletionWaiter waiter = new(buildManager);
+            try
+            {
+                solutionBuild.BuildProject(activeConfig, uniqueName, false);
+                await WaitForBuildEventAsync(waiter, deadline, context.CancellationToken, timeoutMessage).ConfigureAwait(false);
+            }
+            finally
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(CancellationToken.None);
+                waiter.Unsubscribe();
+            }
+        }
+        else
+        {
+            solutionBuild.BuildProject(activeConfig, uniqueName, false);
+            await WaitForBuildCompletionAsync(context, solutionBuild, deadline, timeoutMessage).ConfigureAwait(true);
+        }
+    }
+
+    private static async Task RunSolutionBuildStepAsync(
+        IdeCommandContext context,
+        SolutionBuild solutionBuild,
+        IVsSolutionBuildManager2? buildManager,
+        bool clean,
+        DateTimeOffset deadline,
+        string timeoutMessage)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
+        if (buildManager is not null)
+        {
+            BuildCompletionWaiter waiter = new(buildManager);
+            try
+            {
+                if (clean)
+                    solutionBuild.Clean(false);
+                else
+                    solutionBuild.Build(false);
+                await WaitForBuildEventAsync(waiter, deadline, context.CancellationToken, timeoutMessage).ConfigureAwait(false);
+            }
+            finally
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(CancellationToken.None);
+                waiter.Unsubscribe();
+            }
+        }
+        else
+        {
+            if (clean)
+                solutionBuild.Clean(true);
+            else
+                solutionBuild.Build(true);
+            await WaitForBuildCompletionAsync(context, solutionBuild, deadline, timeoutMessage).ConfigureAwait(true);
+        }
     }
 
     private static string? FindProjectUniqueName(DTE2 dte, string projectName)
@@ -346,5 +420,75 @@ internal sealed class BuildService(ReadinessService readinessService)
         }
 
         return !requireMatch;
+    }
+
+    private static async Task WaitForBuildEventAsync(
+        BuildCompletionWaiter waiter,
+        DateTimeOffset deadline,
+        CancellationToken cancellationToken,
+        string timeoutMessage)
+    {
+        TimeSpan remaining = deadline - DateTimeOffset.UtcNow;
+        if (remaining <= TimeSpan.Zero)
+        {
+            throw new CommandErrorException("timeout", timeoutMessage);
+        }
+
+        Task buildTask = waiter.CompletionTask;
+        Task delayTask = Task.Delay((int)Math.Min(remaining.TotalMilliseconds, int.MaxValue), cancellationToken);
+        Task first = await Task.WhenAny(buildTask, delayTask).ConfigureAwait(false);
+
+        if (first == buildTask)
+        {
+            return;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        throw new CommandErrorException("timeout", timeoutMessage);
+    }
+
+    private sealed class BuildCompletionWaiter : IVsUpdateSolutionEvents
+    {
+        private readonly IVsSolutionBuildManager2 _buildManager;
+        private readonly TaskCompletionSource<bool> _tcs = new();
+        private uint _cookie;
+
+        internal Task CompletionTask => _tcs.Task;
+
+        internal BuildCompletionWaiter(IVsSolutionBuildManager2 buildManager)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            _buildManager = buildManager;
+            _buildManager.AdviseUpdateSolutionEvents(this, out _cookie);
+        }
+
+        internal void Unsubscribe()
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (_cookie != 0)
+            {
+                _buildManager.UnadviseUpdateSolutionEvents(_cookie);
+                _cookie = 0;
+            }
+            _tcs.TrySetCanceled();
+        }
+
+        int IVsUpdateSolutionEvents.UpdateSolution_Begin(ref int pfCancelUpdate) => VSConstants.S_OK;
+
+        int IVsUpdateSolutionEvents.UpdateSolution_Done(int fSucceeded, int fModified, int fCancelCommand)
+        {
+            _tcs.TrySetResult(true);
+            return VSConstants.S_OK;
+        }
+
+        int IVsUpdateSolutionEvents.UpdateSolution_StartUpdate(ref int pfCancelUpdate) => VSConstants.S_OK;
+
+        int IVsUpdateSolutionEvents.UpdateSolution_Cancel()
+        {
+            _tcs.TrySetResult(true);
+            return VSConstants.S_OK;
+        }
+
+        int IVsUpdateSolutionEvents.OnActiveProjectCfgChange(IVsHierarchy pIVsHierarchy) => VSConstants.S_OK;
     }
 }

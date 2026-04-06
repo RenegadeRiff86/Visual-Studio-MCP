@@ -32,8 +32,8 @@ internal sealed partial class ErrorListService
             return [];
         }
 
-        List<JObject> rows = new List<JObject>();
-        using StringReader reader = new StringReader(text);
+        List<JObject> rows = [];
+        using StringReader reader = new(text);
         string? line;
         while ((line = reader.ReadLine()) is not null)
         {
@@ -152,10 +152,10 @@ internal sealed partial class ErrorListService
             return false;
         }
 
-        Match match = StructuredOutputPattern.Match(line);
+        Match match = StructuredOutputPattern().Match(line);
         if (!match.Success)
         {
-            match = MsBuildDiagnosticPattern.Match(line);
+            match = MsBuildDiagnosticPattern().Match(line);
         }
 
         if (!match.Success)
@@ -285,7 +285,7 @@ internal sealed partial class ErrorListService
 
     private static string ExtractExplicitCode(string description)
     {
-        Match match = ExplicitCodePattern.Match(description);
+        Match match = ExplicitCodePattern().Match(description);
         return match.Success ? NormalizeCode(match.Value) : string.Empty;
     }
 

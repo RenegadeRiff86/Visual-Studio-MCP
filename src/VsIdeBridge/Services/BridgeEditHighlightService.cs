@@ -29,7 +29,7 @@ internal sealed class BridgeEditHighlightService
     public void ApplyHighlights(IWpfTextView view, IReadOnlyCollection<(int StartLine, int EndLine)> changedRanges, IReadOnlyCollection<int> deletedLines)
     {
         ITextSnapshot snapshot = view.TextSnapshot;
-        BufferHighlights state = new BufferHighlights
+        BufferHighlights state = new()
         {
             ExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(HighlightExpirationMinutes),
         };
@@ -45,7 +45,7 @@ internal sealed class BridgeEditHighlightService
 
             SnapshotPoint snapshotStart = snapshot.GetLineFromLineNumber(startLine - 1).Start;
             ITextSnapshotLine lastLine = snapshot.GetLineFromLineNumber(Math.Min(snapshot.LineCount, endLine) - 1);
-            SnapshotSpan span = new SnapshotSpan(snapshotStart, lastLine.EndIncludingLineBreak);
+            SnapshotSpan span = new(snapshotStart, lastLine.EndIncludingLineBreak);
             state.AddedOrModified.Add(snapshot.CreateTrackingSpan(span, SpanTrackingMode.EdgeExclusive));
         }
 
@@ -73,7 +73,7 @@ internal sealed class BridgeEditHighlightService
             return [];
         }
 
-        List<(SnapshotSpan Span, string MarkerType)> highlightSpans = new();
+        List<(SnapshotSpan Span, string MarkerType)> highlightSpans = [];
         highlightSpans.AddRange(state.AddedOrModified.Select(span => (span.GetSpan(snapshot), "VsIdeBridgeChangedLine")));
         highlightSpans.AddRange(state.DeletedMarkers.Select(span => (span.GetSpan(snapshot), "VsIdeBridgeDeletedLine")));
         return highlightSpans;

@@ -61,7 +61,7 @@ internal sealed partial class PatchService
             ? Path.GetDirectoryName(dte.Solution.FullName) ?? baseDirectory
             : baseDirectory;
 
-        List<string> searchRoots = new List<string>();
+        List<string> searchRoots = [];
         AddDistinctPath(searchRoots, baseDirectory);
 
         string current = solutionDirectory;

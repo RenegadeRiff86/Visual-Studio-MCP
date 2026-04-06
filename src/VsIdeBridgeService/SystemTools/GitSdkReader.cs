@@ -34,7 +34,7 @@ internal static class GitSdkReader
     {
         using Repository repo = OpenRepository(id, repoDirectory);
 
-        JsonArray branches = new();
+        JsonArray branches = [];
         foreach (Branch branch in repo.Branches
                      .OrderBy(static b => b.IsRemote)
                      .ThenBy(static b => b.FriendlyName, StringComparer.OrdinalIgnoreCase))
@@ -67,7 +67,7 @@ internal static class GitSdkReader
     {
         using Repository repo = OpenRepository(id, repoDirectory);
 
-        JsonArray commits = new();
+        JsonArray commits = [];
         foreach (Commit commit in repo.Commits.Take(Math.Max(1, maxCount)))
         {
             commits.Add(new JsonObject
@@ -99,7 +99,7 @@ internal static class GitSdkReader
     {
         using Repository repo = OpenRepository(id, repoDirectory);
 
-        JsonArray remotes = new();
+        JsonArray remotes = [];
         foreach (Remote remote in repo.Network.Remotes.OrderBy(static r => r.Name, StringComparer.OrdinalIgnoreCase))
         {
             remotes.Add(new JsonObject
@@ -136,7 +136,7 @@ internal static class GitSdkReader
         {
             return new Repository(repoPath);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not null) // re-throw as MCP error; LibGit2Sharp throws various types
         {
             throw new McpRequestException(id, McpErrorCodes.BridgeError,
                 $"Failed to open repository at '{repoPath}': {ex.Message}");

@@ -30,37 +30,10 @@ internal static class McpProtocol
 
         if (firstByte.Value == (byte)'{' || firstByte.Value == (byte)'[')
         {
-            string rawJson = await ReadRawJsonAsync(input, firstByte.Value).ConfigureAwait(false);
-            return new IncomingMessage { Request = ParseJsonObject(rawJson), Format = WireFormat.RawJson };
+            return await ReadRawIncomingMessageAsync(input, firstByte.Value).ConfigureAwait(false);
         }
 
-        string header = await ReadHeaderAsync(input, firstByte.Value).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(header)) return null;
-
-        string? lengthLine = Array.Find(
-            header.Split('\n'),
-            line => line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase));
-        if (lengthLine is null)
-            throw new McpRequestException(null, InvalidRequest, "MCP request missing Content-Length header.");
-
-        if (!int.TryParse(lengthLine.Split(':', 2)[1].Trim(), out int length) || length < 0)
-            throw new McpRequestException(null, InvalidRequest, "MCP request has invalid Content-Length.");
-
-        byte[] payloadBytes = new byte[length];
-        int offset = 0;
-        while (offset < length)
-        {
-            int read = await input.ReadAsync(payloadBytes.AsMemory(offset, length - offset)).ConfigureAwait(false);
-            if (read == 0)
-                throw new McpRequestException(null, InvalidRequest, "Unexpected EOF while reading MCP payload.");
-            offset += read;
-        }
-
-        return new IncomingMessage
-        {
-            Request = ParseJsonObject(Encoding.UTF8.GetString(payloadBytes)),
-            Format = WireFormat.HeaderFramed,
-        };
+        return await ReadHeaderFramedMessageAsync(input, firstByte.Value).ConfigureAwait(false);
     }
 
     public static async Task WriteAsync(Stream output, JsonObject response, WireFormat format)
@@ -136,6 +109,16 @@ internal static class McpProtocol
         return Encoding.UTF8.GetString([.. bytes]);
     }
 
+    private static async Task<IncomingMessage> ReadRawIncomingMessageAsync(Stream input, byte firstByte)
+    {
+        string rawJson = await ReadRawJsonAsync(input, firstByte).ConfigureAwait(false);
+        return new IncomingMessage
+        {
+            Request = ParseJsonObject(rawJson),
+            Format = WireFormat.RawJson,
+        };
+    }
+
     private static async Task<string> ReadHeaderAsync(Stream input, byte firstByte)
     {
         List<byte> bytes = [firstByte];
@@ -147,7 +130,7 @@ internal static class McpProtocol
             if (lastFour.Count == HeaderTerminatorLength && lastFour.SequenceEqual(HeaderTerminator))
                 return Encoding.ASCII.GetString([.. bytes]);
 
-            byte[] arr = lastFour.ToArray();
+            byte[] arr = [.. lastFour];
             if (arr.Length >= 2 && arr[^1] == (byte)'\n' && arr[^2] == (byte)'\n'
                 && !(arr.Length >= 4 && arr[^4] == (byte)'\r'))
                 return Encoding.ASCII.GetString([.. bytes]);
@@ -160,6 +143,49 @@ internal static class McpProtocol
             lastFour.Enqueue(single[0]);
             if (lastFour.Count > HeaderTerminatorLength) lastFour.Dequeue();
         }
+    }
+
+    private static async Task<IncomingMessage?> ReadHeaderFramedMessageAsync(Stream input, byte firstByte)
+    {
+        string header = await ReadHeaderAsync(input, firstByte).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(header)) return null;
+
+        int length = ParseContentLength(header);
+        byte[] payloadBytes = await ReadPayloadBytesAsync(input, length).ConfigureAwait(false);
+        return new IncomingMessage
+        {
+            Request = ParseJsonObject(Encoding.UTF8.GetString(payloadBytes)),
+            Format = WireFormat.HeaderFramed,
+        };
+    }
+
+    private static int ParseContentLength(string header)
+    {
+        string lengthLine = Array.Find(
+            header.Split('\n'),
+            line => line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase))
+            ?? throw new McpRequestException(null, InvalidRequest, "MCP request missing Content-Length header.");
+
+        if (!int.TryParse(lengthLine.Split(':', 2)[1].Trim(), out int length) || length < 0)
+            throw new McpRequestException(null, InvalidRequest, "MCP request has invalid Content-Length.");
+
+        return length;
+    }
+
+    private static async Task<byte[]> ReadPayloadBytesAsync(Stream input, int length)
+    {
+        byte[] payloadBytes = new byte[length];
+        int offset = 0;
+        while (offset < length)
+        {
+            int read = await input.ReadAsync(payloadBytes.AsMemory(offset, length - offset)).ConfigureAwait(false);
+            if (read == 0)
+                throw new McpRequestException(null, InvalidRequest, "Unexpected EOF while reading MCP payload.");
+
+            offset += read;
+        }
+
+        return payloadBytes;
     }
 
     private static JsonObject ParseJsonObject(string json) =>

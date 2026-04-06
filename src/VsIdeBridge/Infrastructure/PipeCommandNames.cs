@@ -76,6 +76,7 @@ internal static class PipeCommandNames
         ["Tools.IdeRebuildSolution"] = ["rebuild", "rebuild-solution"],
         ["Tools.IdeGetErrorList"] = ["errors"],
         ["Tools.IdeGetWarnings"] = ["warnings"],
+        ["Tools.IdeGetMessages"] = ["messages"],
         ["Tools.IdeBuildAndCaptureErrors"] = ["build-errors"],
         ["Tools.IdeListProjects"] = ["list-projects"],
         ["Tools.IdeQueryProjectItems"] = ["query-project-items"],
@@ -108,7 +109,7 @@ internal static class PipeCommandNames
 
     public static IReadOnlyList<string> GetAliases(string canonicalName)
     {
-        List<string> aliases = new List<string>();
+        List<string> aliases = [];
         if (PreferredAliases.TryGetValue(canonicalName, out var preferred))
         {
             aliases.AddRange(preferred);
@@ -145,7 +146,7 @@ internal static class PipeCommandNames
             return string.Empty;
         }
 
-        StringBuilder builder = new StringBuilder();
+        StringBuilder builder = new();
         for (int i = 0; i < suffix.Length; i++)
         {
             char ch = suffix[i];

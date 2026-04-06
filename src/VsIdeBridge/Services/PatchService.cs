@@ -17,7 +17,7 @@ namespace VsIdeBridge.Services;
 
 internal sealed partial class PatchService
 {
-    public async Task<JObject> ApplyUnifiedDiffAsync(
+    public async Task<JObject> ApplyEditorPatchAsync(
         DTE2 dte,
         DocumentService documentService,
         string? patchFilePath,
@@ -29,7 +29,7 @@ internal sealed partial class PatchService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        var previousActiveDocument = CaptureActiveDocumentLocation(dte);
+        (string Path, int Line, int Column)? previousActiveDocument = CaptureActiveDocumentLocation(dte);
 
         if (string.IsNullOrWhiteSpace(patchFilePath) == string.IsNullOrWhiteSpace(patchText))
         {
@@ -59,13 +59,14 @@ internal sealed partial class PatchService
             throw new CommandErrorException(InvalidArgumentsCode, BuildMissingPatchFormatMessage(patchText));
         }
 
-        var resolvedBaseDirectory = ResolveBaseDirectory(dte, baseDirectory);
-        var appliedFiles = new JArray();
-        var filesToFocus = new List<(string Path, List<ChangedRange> Ranges)>();
+        string resolvedBaseDirectory = ResolveBaseDirectory(dte, baseDirectory);
+        JArray appliedFiles = [];
+        List<(string Path, List<ChangedRange> Ranges)> filesToFocus = [];
+        List<PreparedPatchOperation> preparedOperations = [];
 
         foreach (var filePatch in filePatches)
         {
-            var paths = ResolvePatchPaths(dte, resolvedBaseDirectory, filePatch);
+            PatchPaths paths = ResolvePatchPaths(dte, resolvedBaseDirectory, filePatch);
             EnsurePatchHasMeaningfulOperations(filePatch, paths);
             EnsureSafeToModifyOpenDocument(dte, paths.SourcePath);
             if (paths.IsMove)
@@ -77,17 +78,19 @@ internal sealed partial class PatchService
                 }
             }
 
-            var targetExists = PatchTargetExists(dte, paths.TargetPath);
-            var sourceContent = paths.IsNewFile ? string.Empty : ReadContentFromEditorOrDisk(dte, paths.SourcePath);
-            var requestedTargetContent = PathNormalization.AreEquivalent(paths.SourcePath, paths.TargetPath) && !paths.IsNewFile
-                ? sourceContent
-                : ReadContentFromEditorOrDisk(dte, paths.TargetPath);
+            bool targetExists = PatchTargetExists(dte, paths.TargetPath);
+            string sourceContent = paths.IsNewFile ? string.Empty : ReadContentFromEditorOrDisk(dte, paths.SourcePath);
+            string requestedTargetContent = paths.IsNewFile && !targetExists
+                ? string.Empty
+                : PathNormalization.AreEquivalent(paths.SourcePath, paths.TargetPath) && !paths.IsNewFile
+                    ? sourceContent
+                    : ReadContentFromEditorOrDisk(dte, paths.TargetPath);
             ApplyFilePatchResult result;
-            var alreadySatisfied = false;
+            bool alreadySatisfied = false;
             if (paths.IsNewFile)
             {
                 result = ApplyFilePatch(paths.TargetPath, string.Empty, filePatch);
-                var addFileDecision = AddFilePatchSemantics.Evaluate(result.Content, targetExists ? requestedTargetContent : null);
+                AddFilePatchDecision addFileDecision = AddFilePatchSemantics.Evaluate(result.Content, targetExists ? requestedTargetContent : null);
                 switch (addFileDecision)
                 {
                     case AddFilePatchDecision.Create:
@@ -113,11 +116,35 @@ internal sealed partial class PatchService
                         throw;
                     }
 
-                    var reverseResult = ApplyFilePatch(paths.TargetPath, requestedTargetContent, CreateReversePatch(filePatch));
+                    ApplyFilePatchResult reverseResult = ApplyFilePatch(paths.TargetPath, requestedTargetContent, CreateReversePatch(filePatch));
                     result = CreateAlreadySatisfiedResult(requestedTargetContent, reverseResult);
                     alreadySatisfied = true;
                 }
             }
+
+            preparedOperations.Add(new PreparedPatchOperation
+            {
+                FilePatch = filePatch,
+                Paths = paths,
+                Result = result,
+                RequestedTargetContent = requestedTargetContent,
+                AlreadySatisfied = alreadySatisfied,
+            });
+        }
+
+        List<PreparedPatchOperation> orderedOperations =
+        [
+            .. preparedOperations.Where(operation => !operation.Result.DeleteFile),
+            .. preparedOperations.Where(operation => operation.Result.DeleteFile),
+        ];
+
+        foreach (PreparedPatchOperation operation in orderedOperations)
+        {
+            FilePatch filePatch = operation.FilePatch;
+            PatchPaths paths = operation.Paths;
+            ApplyFilePatchResult result = operation.Result;
+            string requestedTargetContent = operation.RequestedTargetContent;
+            bool alreadySatisfied = operation.AlreadySatisfied;
 
             if (result.DeleteFile)
             {
@@ -138,10 +165,13 @@ internal sealed partial class PatchService
             }
             else
             {
-                var requestedContentChange = !string.Equals(requestedTargetContent, result.Content, StringComparison.Ordinal);
+                bool requestedContentChange = !string.Equals(requestedTargetContent, result.Content, StringComparison.Ordinal);
                 if (!requestedContentChange && alreadySatisfied)
                 {
-                    filesToFocus.Add((paths.TargetPath, result.ChangedRanges));
+                    if (CanRevealEditedFile(paths.TargetPath))
+                    {
+                        filesToFocus.Add((paths.TargetPath, result.ChangedRanges));
+                    }
 
                     appliedFiles.Add(new JObject
                     {
@@ -166,7 +196,10 @@ internal sealed partial class PatchService
                 {
                     alreadySatisfied = IsCurrentContentAlreadyPatched(paths.TargetPath, requestedTargetContent, filePatch);
                     ThrowIfPatchProducedNoContentChange(paths.TargetPath, filePatch, result, alreadySatisfied);
-                    filesToFocus.Add((paths.TargetPath, result.ChangedRanges));
+                    if (CanRevealEditedFile(paths.TargetPath))
+                    {
+                        filesToFocus.Add((paths.TargetPath, result.ChangedRanges));
+                    }
                     appliedFiles.Add(CreateAlreadySatisfiedFileItem(paths.TargetPath, filePatch, result, alreadySatisfied));
                     continue;
                 }
@@ -181,7 +214,7 @@ internal sealed partial class PatchService
                     ? SolutionFileLocator.TryFindProjectUniqueName(dte, paths.TargetPath)
                     : null;
 
-                var writeResult = await documentService.WriteDocumentTextAsync(
+                JObject writeResult = await documentService.WriteDocumentTextAsync(
                     dte,
                     paths.TargetPath,
                     result.Content,
@@ -191,8 +224,8 @@ internal sealed partial class PatchService
                     [.. result.ChangedRanges.Select(range => (range.StartLine, range.EndLine))],
                     result.DeletedLineMarkers).ConfigureAwait(true);
 
-                var contentChanged = (bool?)writeResult["contentChanged"] ?? true;
-                var verified = (bool?)writeResult["verified"] ?? false;
+                bool contentChanged = (bool?)writeResult["contentChanged"] ?? true;
+                bool verified = (bool?)writeResult["verified"] ?? false;
                 alreadySatisfied = requestedContentChange && !contentChanged && verified;
 
                 if (paths.IsMove)
@@ -204,9 +237,12 @@ internal sealed partial class PatchService
                     }
                 }
 
-                filesToFocus.Add((paths.TargetPath, result.ChangedRanges));
+                if (CanRevealEditedFile(paths.TargetPath))
+                {
+                    filesToFocus.Add((paths.TargetPath, result.ChangedRanges));
+                }
 
-                var fileItem = new JObject
+                JObject fileItem = new()
                 {
                     ["path"] = paths.TargetPath,
                     ["status"] = paths.IsMove ? "moved" : alreadySatisfied ? "already-satisfied" : paths.IsNewFile ? "added" : "modified",
@@ -232,7 +268,7 @@ internal sealed partial class PatchService
 
         if (openChangedFiles && filesToFocus.Count > 0)
         {
-            var primaryRange = filesToFocus[0].Ranges.FirstOrDefault();
+            ChangedRange? primaryRange = filesToFocus[0].Ranges.FirstOrDefault();
             if (primaryRange is not null)
             {
                 await documentService.RevealDocumentRangeAsync(
@@ -261,9 +297,21 @@ internal sealed partial class PatchService
             ["patchFormat"] = patchFormat,
             ["openChangedFiles"] = openChangedFiles,
             ["saveChangedFiles"] = saveChangedFiles,
-            ["visibleEdits"] = true,
+            ["visibleEdits"] = openChangedFiles && filesToFocus.Count > 0,
             ["items"] = appliedFiles,
         };
+    }
+
+    private static bool CanRevealEditedFile(string path)
+    {
+        string extension = Path.GetExtension(path);
+        return !string.Equals(extension, ".csproj", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(extension, ".vcxproj", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(extension, ".vbproj", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(extension, ".fsproj", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(extension, ".props", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(extension, ".targets", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(extension, ".sln", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void ThrowIfPatchProducedNoContentChange(string targetPath, FilePatch filePatch, ApplyFilePatchResult result, bool alreadySatisfied)

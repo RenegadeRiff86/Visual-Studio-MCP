@@ -68,7 +68,7 @@ internal static class CommandRegistrar
         runtime.RegisterCommand(new SearchNavigationCommands.IdeGetQuickInfoCommand(package, runtime, commandService));
         runtime.RegisterCommand(new SearchNavigationCommands.IdeGetDocumentSlicesCommand(package, runtime, commandService));
         runtime.RegisterCommand(new SearchNavigationCommands.IdeGetFileSymbolsCommand(package, runtime, commandService));
-        runtime.RegisterCommand(new PatchCommands.IdeApplyUnifiedDiffCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new PatchCommands.IdeApplyEditorPatchCommand(package, runtime, commandService));
         runtime.RegisterCommand(new PatchCommands.IdeWriteFileCommand(package, runtime, commandService));
     }
 
@@ -107,6 +107,7 @@ internal static class CommandRegistrar
         runtime.RegisterCommand(new DebugBuildCommands.IdeRebuildSolutionCommand(package, runtime, commandService));
         runtime.RegisterCommand(new DebugBuildCommands.IdeGetErrorListCommand(package, runtime, commandService));
         runtime.RegisterCommand(new DebugBuildCommands.IdeGetWarningsCommand(package, runtime, commandService));
+        runtime.RegisterCommand(new DebugBuildCommands.IdeGetMessagesCommand(package, runtime, commandService));
         runtime.RegisterCommand(new DebugBuildCommands.IdeBuildAndCaptureErrorsCommand(package, runtime, commandService));
     }
 

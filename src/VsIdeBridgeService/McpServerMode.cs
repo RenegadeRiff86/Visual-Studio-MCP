@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using System.Text.Json;
 using System.Net;
 using System.Text;
 using System.IO;
@@ -10,6 +11,7 @@ namespace VsIdeBridgeService;
 internal static class McpServerMode
 {
     private static readonly ToolExecutionRegistry Registry = ToolCatalog.CreateRegistry();
+    private const int BadRequestStatusCode = 400;
 
     public static async Task RunAsync(string[] args)
     {
@@ -19,14 +21,7 @@ internal static class McpServerMode
         using StdioHostLease? hostLease = StdioHostLease.TryCreate();
         ServiceControlClient? controlClient = null;
 
-        try
-        {
-            controlClient = await TryConnectControlPipeAsync().ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            McpServerLog.Write($"control pipe connect failed: {ex.Message}");
-        }
+        controlClient = await TryConnectControlPipeAsync().ConfigureAwait(false);
 
         McpServerLog.Write("stdio loop started");
 
@@ -59,7 +54,19 @@ internal static class McpServerMode
                     {
                         await controlClient.NotifyRequestAsync().ConfigureAwait(false);
                     }
-                    catch (Exception ex)
+                    catch (IOException ex)
+                    {
+                        McpServerLog.Write($"control pipe request notify failed: {ex.Message}");
+                        await controlClient.DisposeAsync().ConfigureAwait(false);
+                        controlClient = null;
+                    }
+                    catch (ObjectDisposedException ex)
+                    {
+                        McpServerLog.Write($"control pipe request notify failed: {ex.Message}");
+                        await controlClient.DisposeAsync().ConfigureAwait(false);
+                        controlClient = null;
+                    }
+                    catch (InvalidOperationException ex)
                     {
                         McpServerLog.Write($"control pipe request notify failed: {ex.Message}");
                         await controlClient.DisposeAsync().ConfigureAwait(false);
@@ -121,7 +128,7 @@ internal static class McpServerMode
             McpServerLog.Write($"request error method={method} code={ex.Code} message={ex.Message}");
             return McpProtocol.ErrorResponse(ex.Id ?? id, ex.Code, ex.Message);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not null) // top-level MCP request boundary
         {
             McpServerLog.Write($"request fatal method={method} message={ex}");
             return McpProtocol.ErrorResponse(id, McpErrorCodes.MethodNotFound, ex.Message);
@@ -222,14 +229,19 @@ internal static class McpServerMode
 
         McpServerLog.Write($"MCP HTTP server starting on {prefix}");
 
-        using var listener = new HttpListener();
+        using HttpListener listener = new();
         listener.Prefixes.Add(prefix);
         try
         {
             listener.Start();
             McpServerLog.Write("HTTP listener started successfully");
         }
-        catch (Exception ex)
+        catch (HttpListenerException ex)
+        {
+            McpServerLog.Write($"Failed to start listener: {ex}");
+            throw;
+        }
+        catch (ObjectDisposedException ex)
         {
             McpServerLog.Write($"Failed to start listener: {ex}");
             throw;
@@ -252,7 +264,15 @@ internal static class McpServerMode
             {
                 break;
             }
-            catch (Exception ex)
+            catch (HttpListenerException ex)
+            {
+                McpServerLog.Write($"HTTP accept error: {ex}");
+            }
+            catch (IOException ex)
+            {
+                McpServerLog.Write($"HTTP accept error: {ex}");
+            }
+            catch (ObjectDisposedException ex)
             {
                 McpServerLog.Write($"HTTP accept error: {ex}");
             }
@@ -270,20 +290,7 @@ internal static class McpServerMode
 
             if (method == "GET")
             {
-                // Simple health check / server info for connection test and UI dialogs
-                var info = new JsonObject
-                {
-                    ["name"] = "vs-ide-bridge",
-                    ["version"] = "0.1.0",
-                    ["protocolVersions"] = new JsonArray { "2025-03-26", "2024-11-05" },
-                    ["capabilities"] = new JsonObject { ["tools"] = new JsonObject() },
-                    ["status"] = "ok"
-                };
-                string json = info.ToJsonString();
-                byte[] bytes = Encoding.UTF8.GetBytes(json);
-                context.Response.ContentType = "application/json; charset=utf-8";
-                context.Response.ContentLength64 = bytes.Length;
-                await context.Response.OutputStream.WriteAsync(bytes).ConfigureAwait(false);
+                await WriteHealthResponseAsync(context).ConfigureAwait(false);
                 return;
             }
 
@@ -295,29 +302,9 @@ internal static class McpServerMode
                 return;
             }
 
-            string body;
-            using (var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding ?? Encoding.UTF8))
+            JsonObject? request = await ReadHttpRequestAsync(context).ConfigureAwait(false);
+            if (request is null)
             {
-                body = await reader.ReadToEndAsync().ConfigureAwait(false);
-            }
-
-            if (string.IsNullOrWhiteSpace(body))
-            {
-                context.Response.StatusCode = 400;
-                return;
-            }
-
-            JsonObject request;
-            try
-            {
-                var node = JsonNode.Parse(body);
-                request = node as JsonObject ?? throw new InvalidOperationException("Not an object");
-            }
-            catch (Exception)
-            {
-                // JSON parse failure or unexpected node type — return 400 Bad Request.
-                context.Response.StatusCode = 400;
-                await WriteErrorResponse(context, "Invalid JSON");
                 return;
             }
 
@@ -344,7 +331,7 @@ internal static class McpServerMode
             McpServerLog.Write($"HTTP MCP error code={ex.Code}: {ex.Message}");
             await WriteErrorResponse(context, ex.Message, ex.Code);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not null) // top-level HTTP request boundary
         {
             McpServerLog.Write($"HTTP request fatal: {ex}");
             await WriteErrorResponse(context, ex.Message);
@@ -360,19 +347,78 @@ internal static class McpServerMode
         }
     }
 
+    private static async Task WriteHealthResponseAsync(HttpListenerContext context)
+    {
+        JsonObject info = new()
+        {
+            ["name"] = "vs-ide-bridge",
+            ["version"] = "0.1.0",
+            ["protocolVersions"] = new JsonArray { "2025-03-26", "2024-11-05" },
+            ["capabilities"] = new JsonObject { ["tools"] = new JsonObject() },
+            ["status"] = "ok"
+        };
+
+        await WriteJsonResponseAsync(context, info).ConfigureAwait(false);
+    }
+
+    private static async Task<JsonObject?> ReadHttpRequestAsync(HttpListenerContext context)
+    {
+        string body = await ReadRequestBodyAsync(context.Request).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            context.Response.StatusCode = BadRequestStatusCode;
+            return null;
+        }
+
+        try
+        {
+            JsonNode? node = JsonNode.Parse(body);
+            return node as JsonObject ?? throw new InvalidOperationException("Not an object");
+        }
+        catch (InvalidOperationException)
+        {
+            context.Response.StatusCode = BadRequestStatusCode;
+            await WriteErrorResponse(context, "Invalid JSON").ConfigureAwait(false);
+            return null;
+        }
+        catch (FormatException)
+        {
+            context.Response.StatusCode = BadRequestStatusCode;
+            await WriteErrorResponse(context, "Invalid JSON").ConfigureAwait(false);
+            return null;
+        }
+        catch (JsonException)
+        {
+            context.Response.StatusCode = BadRequestStatusCode;
+            await WriteErrorResponse(context, "Invalid JSON").ConfigureAwait(false);
+            return null;
+        }
+    }
+
+    private static async Task<string> ReadRequestBodyAsync(HttpListenerRequest request)
+    {
+        using StreamReader reader = new(request.InputStream, request.ContentEncoding ?? Encoding.UTF8);
+        return await reader.ReadToEndAsync().ConfigureAwait(false);
+    }
+
+    private static async Task WriteJsonResponseAsync(HttpListenerContext context, JsonObject payload)
+    {
+        string json = payload.ToJsonString();
+        byte[] bytes = Encoding.UTF8.GetBytes(json);
+        context.Response.ContentType = "application/json; charset=utf-8";
+        context.Response.ContentLength64 = bytes.Length;
+        await context.Response.OutputStream.WriteAsync(bytes).ConfigureAwait(false);
+    }
+
     private static async Task WriteErrorResponse(HttpListenerContext context, string message, int code = -32603)
     {
-        var errorResponse = new JsonObject
+        JsonObject errorResponse = new()
         {
             ["jsonrpc"] = "2.0",
             ["id"] = null,
             ["error"] = new JsonObject { ["code"] = code, ["message"] = message }
         };
-        string json = errorResponse.ToJsonString();
-        byte[] bytes = Encoding.UTF8.GetBytes(json);
-        context.Response.ContentType = "application/json; charset=utf-8";
         context.Response.StatusCode = 200;
-        context.Response.ContentLength64 = bytes.Length;
-        await context.Response.OutputStream.WriteAsync(bytes).ConfigureAwait(false);
+        await WriteJsonResponseAsync(context, errorResponse).ConfigureAwait(false);
     }
 }

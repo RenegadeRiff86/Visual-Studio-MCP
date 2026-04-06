@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
@@ -19,24 +20,39 @@ internal sealed partial class SearchService
         string query,
         int resultsWindow)
     {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
-
-        if (await context.Package.GetServiceAsync(typeof(SVsFindResults)).ConfigureAwait(true) is not IFindResultsService service)
+        try
         {
-            return;
-        }
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
 
-        string title = $"IDE Bridge Find Results {resultsWindow}";
-        string description = $"Find all \"{query}\"";
-        string identifier = $"VsIdeBridge.FindResults.{resultsWindow}";
-        IFindResultsWindow2 window = service.StartSearch(title, description, identifier);
-        foreach (KeyValuePair<string, List<FindResult>> resultGroup in groupedMatches)
+            if (await context.Package.GetServiceAsync(typeof(SVsFindResults)).ConfigureAwait(true) is not IFindResultsService service)
+            {
+                return;
+            }
+
+            string title = $"IDE Bridge Find Results {resultsWindow}";
+            string description = $"Find all \"{query}\"";
+            string identifier = $"VsIdeBridge.FindResults.{resultsWindow}";
+            IFindResultsWindow2 window = service.StartSearch(title, description, identifier);
+            foreach (KeyValuePair<string, List<FindResult>> resultGroup in groupedMatches)
+            {
+                window.AddResults(resultGroup.Key, resultGroup.Key, null, resultGroup.Value);
+            }
+
+            window.Summary = $"Matching lines: {groupedMatches.Sum(resultGroup => resultGroup.Value.Count)} Matching files: {groupedMatches.Count}";
+            window.Complete();
+        }
+        catch (OperationCanceledException)
         {
-            window.AddResults(resultGroup.Key, resultGroup.Key, null, resultGroup.Value);
+            throw;
         }
-
-        window.Summary = $"Matching lines: {groupedMatches.Sum(resultGroup => resultGroup.Value.Count)} Matching files: {groupedMatches.Count}";
-        window.Complete();
+        catch (COMException)
+        {
+            // Best effort — populating the Find Results window is non-critical.
+        }
+        catch (InvalidOperationException)
+        {
+            // Best effort — populating the Find Results window is non-critical.
+        }
     }
 
     private static Regex BuildRegex(string query, bool matchCase, bool wholeWord, bool useRegex)
@@ -72,7 +88,7 @@ internal sealed partial class SearchService
 
         (string Path, string ProjectUniqueName)[] allFiles = scope switch
         {
-            "document" => new[] { await GetDocumentTargetAsync(context, normalizedPathFilter).ConfigureAwait(true) },
+            "document" => [await GetDocumentTargetAsync(context, normalizedPathFilter).ConfigureAwait(true)],
             "open" => [.. EnumerateOpenFiles(context.Dte)],
             "project" => [.. EnumerateSolutionFiles(context.Dte).Where(item => string.Equals(item.ProjectUniqueName, projectUniqueName, StringComparison.OrdinalIgnoreCase))],
             _ => [.. EnumerateSolutionFiles(context.Dte)],
@@ -84,7 +100,7 @@ internal sealed partial class SearchService
 
         Regex regex = BuildRegex(query, matchCase, wholeWord, useRegex);
         List<SearchHit> hits = [];
-        Dictionary<string, List<FindResult>> groupedMatches = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, List<FindResult>> groupedMatches = [];
 
         foreach ((string Path, string ProjectUniqueName) file in files)
         {
@@ -111,10 +127,10 @@ internal sealed partial class SearchService
                         SourceQueries = [query],
                     });
 
-                    if (!groupedMatches.TryGetValue(file.Path, out List<FindResult>? results))
+                    if (!groupedMatches.TryGetValue(file.Path.ToLowerInvariant(), out List<FindResult>? results))
                     {
                         results = [];
-                        groupedMatches[file.Path] = results;
+                        groupedMatches[file.Path.ToLowerInvariant()] = results;
                     }
 
                     results.Add(new FindResult(line, lineIndex, match.Index, new Span(match.Index, match.Length)));
@@ -132,8 +148,8 @@ internal sealed partial class SearchService
         string? projectUniqueName)
     {
         IReadOnlyList<SmartQueryTerm> terms = ExtractSmartQueryTerms(query);
-        Dictionary<string, SearchHit> hitMap = new(StringComparer.OrdinalIgnoreCase);
-        Dictionary<string, List<FindResult>> groupedMatches = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, SearchHit> hitMap = [];
+        Dictionary<string, List<FindResult>> groupedMatches = [];
 
         foreach (SmartQueryTerm term in terms)
         {
@@ -148,7 +164,7 @@ internal sealed partial class SearchService
 
             foreach (SearchHit hit in Matches)
             {
-                string key = $"{hit.Path}|{hit.Line}|{hit.Column}";
+                string key = $"{hit.Path.ToLowerInvariant()}|{hit.Line}|{hit.Column}";
 
                 if (!hitMap.TryGetValue(key, out SearchHit? existing))
                 {
@@ -171,10 +187,10 @@ internal sealed partial class SearchService
                     existing.SourceQueries.Add(term.Text);
                 }
 
-                if (!groupedMatches.TryGetValue(hit.Path, out List<FindResult>? results))
+                if (!groupedMatches.TryGetValue(hit.Path.ToLowerInvariant(), out List<FindResult>? results))
                 {
                     results = [];
-                    groupedMatches[hit.Path] = results;
+                    groupedMatches[hit.Path.ToLowerInvariant()] = results;
                 }
 
                 results.Add(new FindResult(hit.Preview, hit.Line - 1, hit.Column - 1, new Span(hit.Column - 1, hit.MatchLength)));
@@ -191,7 +207,7 @@ internal sealed partial class SearchService
     private static List<string> NormalizeQueries(IEnumerable<string> queries)
     {
         List<string> normalized = [];
-        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> seen = [];
 
         foreach (string? query in queries)
         {
@@ -201,7 +217,7 @@ internal sealed partial class SearchService
                 continue;
             }
 
-            if (!seen.Add(trimmed))
+            if (!seen.Add(trimmed.ToLowerInvariant()))
             {
                 continue;
             }
@@ -246,13 +262,13 @@ internal sealed partial class SearchService
 
     private static Dictionary<string, List<FindResult>> BuildGroupedMatchesFromHits(IEnumerable<SearchHit> hits)
     {
-        Dictionary<string, List<FindResult>> groupedMatches = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, List<FindResult>> groupedMatches = [];
         foreach (SearchHit hit in hits)
         {
-            if (!groupedMatches.TryGetValue(hit.Path, out List<FindResult>? results))
+            if (!groupedMatches.TryGetValue(hit.Path.ToLowerInvariant(), out List<FindResult>? results))
             {
                 results = [];
-                groupedMatches[hit.Path] = results;
+                groupedMatches[hit.Path.ToLowerInvariant()] = results;
             }
 
             results.Add(new FindResult(hit.Preview, hit.Line - 1, hit.Column - 1, new Span(hit.Column - 1, hit.MatchLength)));
@@ -263,6 +279,6 @@ internal sealed partial class SearchService
 
     private static string GetSearchHitKey(SearchHit hit)
     {
-        return $"{hit.Path}|{hit.Line}|{hit.Column}|{hit.MatchLength}";
+        return $"{hit.Path.ToLowerInvariant()}|{hit.Line}|{hit.Column}|{hit.MatchLength}";
     }
 }

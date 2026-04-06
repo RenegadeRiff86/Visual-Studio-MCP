@@ -1,88 +1,57 @@
 using System.Text.Json.Nodes;
+using static VsIdeBridge.Shared.ToolDefinitionPropertyNames;
 
 namespace VsIdeBridge.Shared;
 
-public sealed class ToolDefinition
+public sealed class ToolDefinition(
+    string name,
+    string category,
+    string summary,
+    string description,
+    JsonObject parameterSchema,
+    bool readOnly = false,
+    bool mutating = false,
+    bool destructive = false,
+    IEnumerable<string>? aliases = null,
+    IEnumerable<string>? tags = null,
+    string? bridgeCommand = null,
+    string? title = null,
+    JsonObject? annotations = null,
+    JsonObject? outputSchema = null,
+    IEnumerable<string>? hints = null,
+    JsonObject? searchHints = null)
 {
-    private const string ReadOnlyHintPropertyName = "readOnlyHint";
-    private const string MutatingHintPropertyName = "mutatingHint";
-    private const string DestructiveHintPropertyName = "destructiveHint";
-    private const string TitlePropertyName = "title";
-    private const string AnnotationsPropertyName = "annotations";
-    private const string InputSchemaPropertyName = "inputSchema";
-    private const string OutputSchemaPropertyName = "outputSchema";
-    private const string DescriptionPropertyName = "description";
-    private const string CategoryPropertyName = "category";
-    private const string SummaryPropertyName = "summary";
-    private const string AliasesPropertyName = "aliases";
-    private const string TagsPropertyName = "tags";
-    private const string BridgeCommandPropertyName = "bridgeCommand";
+    public string Name { get; } = name;
 
-    public ToolDefinition(
-        string name,
-        string category,
-        string summary,
-        string description,
-        JsonObject parameterSchema,
-        bool readOnly = false,
-        bool mutating = false,
-        bool destructive = false,
-        IEnumerable<string>? aliases = null,
-        IEnumerable<string>? tags = null,
-        string? bridgeCommand = null,
-        string? title = null,
-        JsonObject? annotations = null,
-        JsonObject? outputSchema = null)
-    {
-        Name = name;
-        Category = category;
-        Summary = summary;
-        Description = description;
-        ParameterSchema = parameterSchema;
-        ReadOnly = readOnly;
-        Mutating = destructive || mutating;
-        Destructive = destructive;
-        Aliases = aliases?.Where(static alias => !string.IsNullOrWhiteSpace(alias))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray()
-            ?? [];
-        Tags = tags?.Where(static tag => !string.IsNullOrWhiteSpace(tag))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray()
-            ?? [];
-        BridgeCommand = bridgeCommand;
-        Title = title;
-        AdditionalAnnotations = annotations;
-        OutputSchema = outputSchema;
-    }
+    public string Category { get; } = category;
 
-    public string Name { get; }
+    public string Summary { get; } = summary;
 
-    public string Category { get; }
+    public string Description { get; } = description;
 
-    public string Summary { get; }
+    public JsonObject ParameterSchema { get; } = parameterSchema;
 
-    public string Description { get; }
+    public bool ReadOnly { get; } = readOnly;
 
-    public JsonObject ParameterSchema { get; }
+    public bool Mutating { get; } = destructive || mutating;
 
-    public bool ReadOnly { get; }
+    public bool Destructive { get; } = destructive;
 
-    public bool Mutating { get; }
+    public IReadOnlyList<string> Aliases { get; } = NormalizeValues(aliases);
 
-    public bool Destructive { get; }
+    public IReadOnlyList<string> Tags { get; } = NormalizeValues(tags);
 
-    public IReadOnlyList<string> Aliases { get; }
+    public IReadOnlyList<string> Hints { get; } = NormalizeValues(hints);
 
-    public IReadOnlyList<string> Tags { get; }
+    public JsonObject? SearchHints { get; } = searchHints;
 
-    public string? BridgeCommand { get; }
+    public string? BridgeCommand { get; } = bridgeCommand;
 
-    public string? Title { get; }
+    public string? Title { get; } = title;
 
-    public JsonObject? AdditionalAnnotations { get; }
+    public JsonObject? AdditionalAnnotations { get; } = annotations;
 
-    public JsonObject? OutputSchema { get; }
+    public JsonObject? OutputSchema { get; } = outputSchema;
 
     public static ToolDefinition CreateLegacy(
         string name,
@@ -98,7 +67,9 @@ public sealed class ToolDefinition
         string? summary = null,
         bool? readOnly = null,
         bool? mutating = null,
-        bool? destructive = null)
+        bool? destructive = null,
+        IEnumerable<string>? hints = null,
+        JsonObject? searchHints = null)
     {
         bool resolvedReadOnly = readOnly ?? GetAnnotationBoolean(annotations, ReadOnlyHintPropertyName)
             ?? InferReadOnly(name);
@@ -127,12 +98,24 @@ public sealed class ToolDefinition
             bridgeCommand,
             title,
             annotations,
-            outputSchema);
+            outputSchema,
+            hints,
+            searchHints);
+    }
+
+    public ToolDefinition WithSearchHints(JsonObject? searchHints)
+    {
+        return CopyWith(searchHints: searchHints);
+    }
+
+    public ToolDefinition WithOutputSchema(JsonObject? outputSchema)
+    {
+        return CopyWith(outputSchema: outputSchema);
     }
 
     public JsonObject BuildCompactDiscoveryEntry()
     {
-        JsonObject entry = new JsonObject
+        JsonObject entry = new()
         {
             ["name"] = Name,
             [CategoryPropertyName] = Category,
@@ -148,27 +131,22 @@ public sealed class ToolDefinition
         if (Tags.Count > 0)
             entry[TagsPropertyName] = ToJsonArray(Tags);
 
+        if (SearchHints is not null)
+            entry[SearchHintsPropertyName] = SearchHints.DeepClone();
+
         return entry;
     }
 
     public JsonObject BuildToolObject()
     {
-        JsonObject tool = new JsonObject
+        JsonObject tool = new()
         {
             ["name"] = Name,
             [DescriptionPropertyName] = Description,
             [InputSchemaPropertyName] = ParameterSchema.DeepClone(),
         };
 
-        if (!string.IsNullOrWhiteSpace(Title))
-            tool[TitlePropertyName] = Title;
-
-        JsonObject annotations = BuildAnnotations();
-        if (annotations.Count > 0)
-            tool[AnnotationsPropertyName] = annotations;
-
-        if (OutputSchema is not null)
-            tool[OutputSchemaPropertyName] = OutputSchema.DeepClone();
+        ApplyCommonMetadata(tool);
 
         return tool;
     }
@@ -180,14 +158,21 @@ public sealed class ToolDefinition
         entry[InputSchemaPropertyName] = ParameterSchema.DeepClone();
         entry["example"] = example;
 
-        if (!string.IsNullOrWhiteSpace(Title))
-            entry[TitlePropertyName] = Title;
-
-        if (!string.IsNullOrWhiteSpace(BridgeCommand))
-            entry[BridgeCommandPropertyName] = BridgeCommand;
+        ApplyCommonMetadata(entry, includeBridgeCommand: true);
 
         if (!string.IsNullOrWhiteSpace(bridgeExample))
             entry["bridgeExample"] = bridgeExample;
+
+        return entry;
+    }
+
+    private void ApplyCommonMetadata(JsonObject entry, bool includeBridgeCommand = false)
+    {
+        if (!string.IsNullOrWhiteSpace(Title))
+            entry[TitlePropertyName] = Title;
+
+        if (includeBridgeCommand && !string.IsNullOrWhiteSpace(BridgeCommand))
+            entry[BridgeCommandPropertyName] = BridgeCommand;
 
         JsonObject annotations = BuildAnnotations();
         if (annotations.Count > 0)
@@ -195,13 +180,11 @@ public sealed class ToolDefinition
 
         if (OutputSchema is not null)
             entry[OutputSchemaPropertyName] = OutputSchema.DeepClone();
-
-        return entry;
     }
 
     public JsonObject BuildAnnotations()
     {
-        JsonObject annotations = AdditionalAnnotations?.DeepClone().AsObject() ?? new JsonObject();
+        JsonObject annotations = AdditionalAnnotations?.DeepClone().AsObject() ?? [];
 
         annotations[ReadOnlyHintPropertyName] = ReadOnly;
         annotations[MutatingHintPropertyName] = Mutating;
@@ -214,6 +197,12 @@ public sealed class ToolDefinition
 
         if (Tags.Count > 0)
             annotations[TagsPropertyName] = ToJsonArray(Tags);
+
+        if (Hints.Count > 0)
+            annotations[HintsPropertyName] = ToJsonArray(Hints);
+
+        if (SearchHints is not null)
+            annotations[SearchHintsPropertyName] = SearchHints.DeepClone();
 
         if (!string.IsNullOrWhiteSpace(BridgeCommand))
             annotations[BridgeCommandPropertyName] = BridgeCommand;
@@ -253,7 +242,7 @@ public sealed class ToolDefinition
 
     private static JsonArray ToJsonArray(IEnumerable<string> values)
     {
-        JsonArray array = new JsonArray();
+        JsonArray array = [];
         foreach (string value in values)
             array.Add(value);
 
@@ -263,6 +252,35 @@ public sealed class ToolDefinition
     private static bool? GetAnnotationBoolean(JsonObject? annotations, string propertyName)
     {
         return annotations?[propertyName]?.GetValue<bool>();
+    }
+
+    private ToolDefinition CopyWith(JsonObject? outputSchema = null, JsonObject? searchHints = null)
+    {
+        return new ToolDefinition(
+            Name,
+            Category,
+            Summary,
+            Description,
+            ParameterSchema,
+            ReadOnly,
+            Mutating,
+            Destructive,
+            Aliases,
+            Tags,
+            BridgeCommand,
+            Title,
+            AdditionalAnnotations,
+            outputSchema ?? OutputSchema,
+            Hints,
+            searchHints ?? SearchHints);
+    }
+
+    private static string[] NormalizeValues(IEnumerable<string>? values)
+    {
+        return values?.Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray()
+            ?? [];
     }
 
     private static bool InferReadOnly(string name)

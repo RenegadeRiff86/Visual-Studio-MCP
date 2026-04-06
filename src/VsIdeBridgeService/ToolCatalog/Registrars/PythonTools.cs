@@ -11,6 +11,10 @@ namespace VsIdeBridgeService;
 
 internal static partial class ToolCatalog
 {
+    private const string PythonExeName = "python.exe";
+    private const string PythonListEnvsTool = "python_list_envs";
+    private const string PythonListPackagesTool = "python_list_packages";
+
     private static IEnumerable<ToolEntry> PythonNativeTools() =>
         PythonDiscoveryTools()
             .Concat(PythonMutationTools())
@@ -30,7 +34,9 @@ internal static partial class ToolCatalog
                 string python = ResolvePythonInterpreterPath(id, args);
                 return await RunPythonEvalAsync(id, python, expression, timeoutMs: 5_000)
                     .ConfigureAwait(false);
-            });
+            },
+            searchHints: BuildSearchHints(
+                related: [("python_exec", "Execute a multi-line snippet instead"), (PythonListEnvsTool, "Discover available interpreters")]));
 
         yield return new("python_exec",
             "Execute a short stateless Python snippet for calculations and quick data transforms.",
@@ -44,9 +50,11 @@ internal static partial class ToolCatalog
                 string python = ResolvePythonInterpreterPath(id, args);
                 return await RunPythonExecAsync(id, python, code, timeoutMs: 10_000)
                     .ConfigureAwait(false);
-            });
+            },
+            searchHints: BuildSearchHints(
+                related: [("python_eval", "Evaluate a single expression instead"), ("read_file", "Read a Python source file before executing it"), (PythonListPackagesTool, "Check available packages before running code")]));
 
-        yield return new("python_list_envs",
+        yield return new(PythonListEnvsTool,
             "Enumerate available Python interpreters: PATH entries, common venv locations under " +
             "the solution directory, and the bridge-managed Python runtime if present.",
             EmptySchema(), Python,
@@ -55,13 +63,16 @@ internal static partial class ToolCatalog
                 string solutionDir = ServiceToolPaths.ResolveSolutionDirectory(bridge);
                 List<string> found = FindPythonInterpreters(solutionDir);
 
-                JsonArray arr = new();
+                JsonArray arr = [];
                 foreach (string p in found)
                     arr.Add(JsonValue.Create(p));
 
                 JsonObject payload = new() { ["interpreters"] = arr, ["count"] = found.Count };
                 return MakePythonResult(payload, success: true);
-            });
+            },
+            searchHints: BuildSearchHints(
+                workflow: [("python_env_info", "Get version and site-packages for a discovered interpreter"), ("python_set_project_env", "Set the active VS Python interpreter")],
+                related: [("python_eval", "Run a quick expression"), ("python_exec", "Execute a snippet")]));
 
         yield return new("python_env_info",
             "Return version, executable path, and site-packages directory for a Python interpreter.",
@@ -81,9 +92,12 @@ internal static partial class ToolCatalog
                     "}))";
                 return await RunPythonScriptAsync(id, python, script, timeoutMs: 15_000)
                     .ConfigureAwait(false);
-            });
+            },
+            searchHints: BuildSearchHints(
+                workflow: [(PythonListPackagesTool, "List installed packages for this interpreter")],
+                related: [(PythonListEnvsTool, "Discover available interpreters"), ("python_create_env", "Create a new virtual environment")]));
 
-        yield return new("python_list_packages",
+        yield return new(PythonListPackagesTool,
             "List installed packages in a Python environment using pip list --format=json.",
             ObjectSchema(Req(Path, "Absolute path to the python.exe / python3 interpreter.")),
             Python,
@@ -93,7 +107,10 @@ internal static partial class ToolCatalog
                 return await RunPythonModuleAsync(
                     id, python, "pip list --format=json", timeoutMs: 30_000)
                     .ConfigureAwait(false);
-            });
+            },
+            searchHints: BuildSearchHints(
+                workflow: [("python_install_package", "Install a missing package"), ("python_remove_package", "Remove an unused package")],
+                related: [("python_env_info", "Get interpreter version info"), ("scan_project_dependencies", "Check NuGet and project-level dependency health")]));
     }
 
     private static IEnumerable<ToolEntry> PythonMutationTools()
@@ -113,7 +130,10 @@ internal static partial class ToolCatalog
                 return await RunPythonModuleAsync(
                     id, python, $"pip install {packages}", timeoutMs: 120_000)
                     .ConfigureAwait(false);
-            });
+            },
+            searchHints: BuildSearchHints(
+                workflow: [(PythonListPackagesTool, "Verify the package was installed")],
+                related: [("python_remove_package", "Uninstall a package"), ("python_create_env", "Create a clean environment first"), (PythonListEnvsTool, "Find the right interpreter to install into")]));
 
         yield return new("python_remove_package",
             "Uninstall one or more packages from a Python environment using pip.",
@@ -128,7 +148,10 @@ internal static partial class ToolCatalog
                 return await RunPythonModuleAsync(
                     id, python, $"pip uninstall -y {packages}", timeoutMs: 60_000)
                     .ConfigureAwait(false);
-            });
+            },
+            searchHints: BuildSearchHints(
+                workflow: [(PythonListPackagesTool, "Verify the package was removed")],
+                related: [("python_install_package", "Install a package instead")]));
 
         yield return new("python_create_env",
             "Create a new virtual environment at the specified path using python -m venv.",
@@ -146,7 +169,10 @@ internal static partial class ToolCatalog
                 return await RunPythonModuleAsync(
                     id, python, $"venv \"{targetPath}\"", timeoutMs: 60_000)
                     .ConfigureAwait(false);
-            });
+            },
+            searchHints: BuildSearchHints(
+                workflow: [("python_install_package", "Install packages into the new env"), (PythonListEnvsTool, "Verify the new env is discoverable")],
+                related: [("python_env_info", "Inspect the new environment"), ("python_set_project_env", "Set the new env as the VS project interpreter")]));
     }
 
     private static IEnumerable<ToolEntry> CondaTools()
@@ -170,7 +196,10 @@ internal static partial class ToolCatalog
                     id, conda, $"install -y {envArg} {packages}".TrimEnd(),
                     workingDirectory: null, timeoutMs: 120_000)
                     .ConfigureAwait(false);
-            });
+            },
+            searchHints: BuildSearchHints(
+                workflow: [(PythonListPackagesTool, "Verify the packages were installed")],
+                related: [("conda_remove", "Remove conda packages"), (PythonListEnvsTool, "List available environments")]));
 
         yield return new("conda_remove",
             "Remove packages from a conda environment.",
@@ -191,7 +220,10 @@ internal static partial class ToolCatalog
                     id, conda, $"remove -y {envArg} {packages}".TrimEnd(),
                     workingDirectory: null, timeoutMs: 60_000)
                     .ConfigureAwait(false);
-            });
+            },
+            searchHints: BuildSearchHints(
+                workflow: [(PythonListPackagesTool, "Verify the packages were removed")],
+                related: [("conda_install", "Install conda packages instead")]));
     }
 
     // ── Python helpers ─────────────────────────────────────────────────────────────────
@@ -325,7 +357,7 @@ internal static partial class ToolCatalog
         }
 
         string managedRuntimePath = IOPath.GetFullPath(
-            IOPath.Combine(AppContext.BaseDirectory, "..", "python", "managed-runtime", "python.exe"));
+            IOPath.Combine(AppContext.BaseDirectory, "..", "python", "managed-runtime", PythonExeName));
         if (File.Exists(managedRuntimePath))
         {
             return managedRuntimePath;
@@ -342,10 +374,19 @@ internal static partial class ToolCatalog
     }
 
     private static JsonNode MakePythonResult(JsonObject payload, bool success)
-        => ToolResultFormatter.StructuredToolResult(
-            payload,
-            isError: !success,
-            successText: $"Python command completed with exit code {payload["exitCode"]?.GetValue<int>() ?? 0}.");
+    {
+        int exitCode = payload["exitCode"]?.GetValue<int>() ?? 0;
+        string? stdout = payload["stdout"]?.GetValue<string>();
+        string? stderr = payload["stderr"]?.GetValue<string>();
+        string exitText = $"Python command completed with exit code {exitCode}.";
+        string outputText = !string.IsNullOrWhiteSpace(stdout) ? stdout.TrimEnd()
+            : !string.IsNullOrWhiteSpace(stderr) ? $"stderr: {stderr.TrimEnd()}"
+            : string.Empty;
+        string successText = string.IsNullOrWhiteSpace(outputText)
+            ? exitText
+            : exitText + "\n" + outputText;
+        return ToolResultFormatter.StructuredToolResult(payload, isError: !success, successText: successText);
+    }
 
     private static string RequireArg(JsonNode? id, JsonObject? args, string name)
     {
@@ -360,7 +401,7 @@ internal static partial class ToolCatalog
 
     private static List<string> FindPythonInterpreters(string solutionDir)
     {
-        List<string> results = new();
+        List<string> results = [];
 
         // 1. PATH scan
         string? pathEnv = Environment.GetEnvironmentVariable("PATH");
@@ -369,7 +410,7 @@ internal static partial class ToolCatalog
             foreach (string dir in pathEnv.Split(IOPath.PathSeparator,
                 StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
-                foreach (string name in new[] { "python.exe", "python3.exe", "python" })
+                foreach (string name in new[] { PythonExeName, "python3.exe", "python" })
                 {
                     string candidate = IOPath.Combine(dir, name);
                     if (File.Exists(candidate) && !results.Contains(candidate))
@@ -381,7 +422,7 @@ internal static partial class ToolCatalog
         // 2. Common venv locations inside the solution directory
         foreach (string rel in new[] { ".venv", "venv", "env", ".env" })
         {
-            foreach (string name in new[] { "python.exe", "python3.exe" })
+            foreach (string name in new[] { PythonExeName, "python3.exe" })
             {
                 string candidate = IOPath.Combine(solutionDir, rel, "Scripts", name);
                 if (File.Exists(candidate) && !results.Contains(candidate))
@@ -404,7 +445,7 @@ internal static partial class ToolCatalog
             foreach (string dir in Directory.EnumerateDirectories(root, "Python*",
                 SearchOption.TopDirectoryOnly))
             {
-                string candidate = IOPath.Combine(dir, "python.exe");
+                string candidate = IOPath.Combine(dir, PythonExeName);
                 if (File.Exists(candidate) && !results.Contains(candidate))
                     results.Add(candidate);
             }
@@ -415,7 +456,7 @@ internal static partial class ToolCatalog
 
     private static string FindSystemPython()
     {
-        foreach (string name in new[] { "python.exe", "python3.exe", "python", "python3" })
+        foreach (string name in new[] { PythonExeName, "python3.exe", "python", "python3" })
         {
             string? pathEnv = Environment.GetEnvironmentVariable("PATH");
             if (string.IsNullOrWhiteSpace(pathEnv)) continue;
@@ -433,7 +474,7 @@ internal static partial class ToolCatalog
 
     // ── Conda resolution ────────────────────────────────────────────────────────────
 
-    private static string? _resolvedConda;
+    private static volatile string? _resolvedConda;
 
     private static string ResolveCondaExecutable(JsonNode? id)
     {

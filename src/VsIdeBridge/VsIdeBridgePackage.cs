@@ -49,7 +49,7 @@ public sealed class VsIdeBridgePackage : AsyncPackage, IAsyncDisposable
             runtime = await IdeBridgeRuntime.CreateAsync(this).ConfigureAwait(false);
             _runtime = runtime;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not null) // top-level package init boundary
         {
             ActivityLog.LogError(nameof(VsIdeBridgePackage), $"Runtime initialization failed: {ex}");
             return;
@@ -59,7 +59,7 @@ public sealed class VsIdeBridgePackage : AsyncPackage, IAsyncDisposable
         {
             await CommandRegistrar.InitializeAsync(this, runtime).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not null) // top-level package init boundary
         {
             ActivityLog.LogError(nameof(VsIdeBridgePackage), $"Command registration failed: {ex}");
             return;
@@ -69,7 +69,7 @@ public sealed class VsIdeBridgePackage : AsyncPackage, IAsyncDisposable
         {
             runtime.BridgeWatchdogService.Start();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not null) // best-effort watchdog startup
         {
             ActivityLog.LogWarning(nameof(VsIdeBridgePackage), $"Bridge watchdog failed to start: {ex.Message}");
         }
@@ -80,7 +80,7 @@ public sealed class VsIdeBridgePackage : AsyncPackage, IAsyncDisposable
             _pipeServer = new PipeServerService(this, runtime);
             _pipeServer.Start();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not null) // best-effort pipe server startup
         {
             ActivityLog.LogWarning(nameof(VsIdeBridgePackage), $"Pipe server failed to start: {ex.Message}");
         }
@@ -128,7 +128,7 @@ public sealed class VsIdeBridgePackage : AsyncPackage, IAsyncDisposable
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var events = dte.Events;
+        EnvDTE.Events events = dte.Events;
         _solutionEvents ??= events.SolutionEvents;
         _documentEvents ??= events.DocumentEvents;
         _windowEvents ??= events.WindowEvents;
@@ -244,42 +244,48 @@ public sealed class VsIdeBridgePackage : AsyncPackage, IAsyncDisposable
         try
         {
             await JoinableTaskFactory.SwitchToMainThreadAsync(CancellationToken.None);
-            if (await GetServiceAsync(typeof(DTE)).ConfigureAwait(true) is not DTE2 dte)
+            if (await GetServiceAsync(typeof(DTE)).ConfigureAwait(false) is not DTE2 dte)
                 return;
 
-            _dte = dte;
-            Solution? solution = dte.Solution;
-            _pipeServer?.UpdateDiscovery(solution?.FullName ?? string.Empty);
-            HookBestPracticeRefreshEvents(dte);
-
-            _noSolutionRequested = IsBridgeNoSolutionRequested();
-            if (_noSolutionRequested && solution?.IsOpen == true)
-                solution.Close(SaveFirst: false);
-
-            string? startupSolutionPath = GetBridgeStartupSolutionPath();
-            if (!_noSolutionRequested &&
-                solution is { IsOpen: false } &&
-                startupSolutionPath is string startupSolutionToOpen &&
-                File.Exists(startupSolutionToOpen))
-            {
-                solution.Open(startupSolutionToOpen);
-                _pipeServer?.UpdateDiscovery(solution.FullName ?? startupSolutionToOpen);
-            }
-
-            if (solution?.IsOpen != true)
+            if (!InitializeDteCore(dte))
                 return;
 
-            var context = new IdeCommandContext(this, dte, runtime.Logger, runtime, CancellationToken.None);
+            IdeCommandContext context = new(this, dte, runtime.Logger, runtime, CancellationToken.None);
             await runtime.ErrorListService.GetErrorListAsync(
                 context,
                 waitForIntellisense: true,
-                DiagnosticsWarmupTimeoutMilliseconds,
-                query: new ErrorListQuery { Max = 1 }).ConfigureAwait(true);
+                DiagnosticsWarmupTimeoutMilliseconds).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not null) // best-effort diagnostics warmup
         {
             ActivityLog.LogWarning(nameof(VsIdeBridgePackage), $"Diagnostics warmup failed: {ex.Message}");
         }
+    }
+
+    private bool InitializeDteCore(DTE2 dte)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        _dte = dte;
+        Solution? solution = dte.Solution;
+        _pipeServer?.UpdateDiscovery(solution?.FullName ?? string.Empty);
+        HookBestPracticeRefreshEvents(dte);
+
+        _noSolutionRequested = IsBridgeNoSolutionRequested();
+        if (_noSolutionRequested && solution?.IsOpen == true)
+            solution.Close(SaveFirst: false);
+
+        string? startupSolutionPath = GetBridgeStartupSolutionPath();
+        if (!_noSolutionRequested &&
+            solution is { IsOpen: false } &&
+            startupSolutionPath is string startupSolutionToOpen &&
+            File.Exists(startupSolutionToOpen))
+        {
+            solution.Open(startupSolutionToOpen);
+            _pipeServer?.UpdateDiscovery(solution.FullName ?? startupSolutionToOpen);
+        }
+
+        return solution?.IsOpen == true;
     }
 
     private async Task RunBestPracticeRefreshAsync(DTE2 dte, IdeBridgeRuntime runtime, bool waitForIntellisense, CancellationToken cancellationToken)
@@ -287,28 +293,30 @@ public sealed class VsIdeBridgePackage : AsyncPackage, IAsyncDisposable
         try
         {
             await Task.Delay(BestPracticeRefreshDebounceMilliseconds, cancellationToken).ConfigureAwait(false);
+            bool solutionIsOpen;
             await JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
-            if (dte.Solution?.IsOpen != true)
+            solutionIsOpen = dte.Solution?.IsOpen == true;
+            await Task.Run(static () => { }, cancellationToken).ConfigureAwait(false);
+            if (!solutionIsOpen)
                 return;
 
-            var context = new IdeCommandContext(this, dte, runtime.Logger, runtime, cancellationToken);
+            IdeCommandContext context = new(this, dte, runtime.Logger, runtime, cancellationToken);
             if (waitForIntellisense)
             {
                 await runtime.ErrorListService.GetErrorListAsync(
                     context,
                     waitForIntellisense: true,
-                    DiagnosticsWarmupTimeoutMilliseconds,
-                    query: new ErrorListQuery { Max = 1 }).ConfigureAwait(true);
+                    DiagnosticsWarmupTimeoutMilliseconds).ConfigureAwait(false);
                 return;
             }
 
-            await runtime.ErrorListService.RefreshBestPracticeDiagnosticsAsync(context).ConfigureAwait(true);
+            await runtime.ErrorListService.RefreshBestPracticeDiagnosticsAsync(context).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
             return;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not null) // best-effort diagnostics refresh boundary
         {
             ActivityLog.LogWarning(nameof(VsIdeBridgePackage), $"Best practice diagnostics refresh failed: {ex.Message}");
         }

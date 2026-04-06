@@ -2,7 +2,7 @@
 #define MyAppFolderName "VsIdeBridge"
 #define MyAppPublisher "RenegadeRiff86"
 #define MyAppURL "https://github.com/RenegadeRiff86/Visual-Studio-MCP"
-#define MyAppVersion "2.2.6"
+#define MyAppVersion "2.2.7"
 #define ServiceName "VsIdeBridgeService"
 #define VsixId "RenegadeRiff86.VsIdeBridge"
 #define LegacyVsixId "StanElston.VsIdeBridge"
@@ -324,6 +324,11 @@ begin
   Result := GetVsixLogFileArgument('vsix-uninstall-legacy.log') + ' /uninstall:{#LegacyVsixId}';
 end;
 
+function GetCurrentVsixUninstallParameters(): string;
+begin
+  Result := GetVsixLogFileArgument('vsix-uninstall.log') + ' /uninstall:{#VsixId}';
+end;
+
 function GetVsixInstallParameters(): string;
 begin
   Result := GetVsixLogFileArgument('vsix-install.log') + ' "' + ExpandConstant('{app}\vsix\VsIdeBridge.vsix') + '"';
@@ -452,7 +457,7 @@ begin
     Result := Result + 1;
 
   if HasVsixInstallerPath then
-    Result := Result + 2;
+    Result := Result + 3;
 end;
 
 procedure UpdatePostInstallProgress(const Position, Max: Integer; const Status, SubStatus: string);
@@ -611,6 +616,14 @@ begin
 
     if VsixInstallerPath <> '' then
     begin
+      RunPostInstallStep(
+        StepIndex,
+        TotalSteps,
+        'Removing current VS IDE Bridge extension identity...',
+        'VSIXInstaller /uninstall current',
+        VsixInstallerPath,
+        GetCurrentVsixUninstallParameters(),
+        False);
       RunPostInstallStep(
         StepIndex,
         TotalSteps,

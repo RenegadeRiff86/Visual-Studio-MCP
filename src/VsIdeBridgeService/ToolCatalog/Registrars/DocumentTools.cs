@@ -11,6 +11,10 @@ namespace VsIdeBridgeService;
 
 internal static partial class ToolCatalog
 {
+    private const string ApplyDiffTool = "apply_diff";
+    private const string ReadFileTool = "read_file";
+    private const string ListTabsTool = "list_tabs";
+
     private static string EncodeUtf8ToBase64(string? text)
     {
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(text ?? string.Empty));
@@ -19,7 +23,7 @@ internal static partial class ToolCatalog
     private static string BuildApplyDiffArgs(JsonObject? args)
     {
         return Build(
-            ("patch-text-base64", EncodeUtf8ToBase64(OptionalString(args, "patch"))),
+            ("patch-text-base64", EncodeUtf8ToBase64(OptionalString(args, "diff"))),
             ("open-changed-files", "true"),
             ("save-changed-files", "true"));
     }
@@ -44,9 +48,23 @@ internal static partial class ToolCatalog
         yield return new(
             ToolDefinitionCatalog.ApplyDiff(
                 ObjectSchema(
-                    Req("patch", "Patch text in editor patch or unified diff format."),
+                    Req("diff", "Editor patch text. Required format:\n" +
+                        "*** Begin Patch\\n" +
+                        "*** Update File: path/to/file.cs\\n" +
+                        "@@\\n" +
+                        " context\\n" +
+                        "-old line\\n" +
+                        "+new line\\n" +
+                        " context\\n" +
+                        "*** End Patch\n" +
+                        "Supports: *** Add File, *** Delete File, *** Update File.\n" +
+                        "Multi-file: repeat file blocks before *** End Patch (all changes are atomic).\n" +
+                        "Use this format only; do not send unified diff headers like --- / +++."),
                     OptBool(PostCheck,
-                        "Queue a quick diagnostics refresh after applying (default false)."))),
+                        "Queue a quick diagnostics refresh after applying (default false).")))
+                .WithSearchHints(BuildSearchHints(
+                    workflow: [("reload_document", "Reload the file so VS picks up the changes"), ("errors", "Check for diagnostics after applying")],
+                    related: [("write_file", "Overwrite the full file instead"), (ReadFileTool, "Read the file first to understand its current state")])),
             async (id, args, bridge) =>
             {
                 JsonObject result = await bridge.SendAsync(
@@ -57,7 +75,7 @@ internal static partial class ToolCatalog
 
                 if (ArgBuilder.OptionalBool(args, PostCheck, false))
                 {
-                    result["postCheck"] = RunDocumentPostCheck(bridge, "apply_diff");
+                    result["postCheck"] = RunDocumentPostCheck(bridge, ApplyDiffTool);
                 }
 
                 return BridgeResult(result);
@@ -68,7 +86,10 @@ internal static partial class ToolCatalog
                 ObjectSchema(
                     Req(FileArg, FileDesc),
                     Req("content", "Full UTF-8 text content to write."),
-                    OptBool(PostCheck, "Queue a quick diagnostics refresh after writing (default false)."))),
+                    OptBool(PostCheck, "Queue a quick diagnostics refresh after writing (default false).")))
+                .WithSearchHints(BuildSearchHints(
+                    workflow: [("reload_document", "Reload the file so VS picks up the changes"), ("errors", "Check for diagnostics after writing")],
+                    related: [(ApplyDiffTool, "Apply targeted changes instead of overwriting"), (ReadFileTool, "Read the current file contents first")])),
             async (id, args, bridge) =>
             {
                 JsonObject result = await bridge.SendAsync(id, "write-file", BuildWriteFileArgs(args))
@@ -95,7 +116,10 @@ internal static partial class ToolCatalog
             a => Build(
                 (FileArg, OptionalString(a, FileArg)),
                 (Line, OptionalText(a, Line)),
-                (Column, OptionalText(a, Column))));
+                (Column, OptionalText(a, Column))),
+            searchHints: BuildSearchHints(
+                workflow: [(ReadFileTool, "Read the file contents"), ("file_outline", "Get the file symbol structure")],
+                related: [("activate_document", "Switch to an already-open tab"), ("find_files", "Find the file path first")]));
 
         yield return BridgeTool("close_file",
             "Close one editor tab by exact FileArg path (preferred) or caption query. Use when you have the FileArg path.",
@@ -103,7 +127,9 @@ internal static partial class ToolCatalog
             "close-file",
             a => Build(
                 (FileArg, OptionalString(a, FileArg)),
-                (Query, OptionalString(a, Query))));
+                (Query, OptionalString(a, Query))),
+            searchHints: BuildSearchHints(
+                related: [("close_document", "Close by caption query"), ("close_others", "Close all except active"), (ListTabsTool, "List open tabs first")]));
 
         yield return BridgeTool("close_document",
             "Close editor tabs matching a caption/name query. Use all: true to close all matching tabs (e.g. all .json files).",
@@ -111,39 +137,58 @@ internal static partial class ToolCatalog
             "close-document",
             a => Build(
                 (Query, OptionalString(a, Query)),
-                BoolArg("all", a, "all", false, true)));
+                BoolArg("all", a, "all", false, true)),
+            searchHints: BuildSearchHints(
+                related: [("close_file", "Close by exact path"), ("close_others", "Close all except active"), (ListTabsTool, "List open tabs first")]));
 
         yield return BridgeTool("close_others",
             "Close all tabs except the active tab.",
             ObjectSchema(OptBool("save", "Save before closing (default false).")),
             "close-others",
-            a => Build(BoolArg("save", a, "save", false, true)));
+            a => Build(BoolArg("save", a, "save", false, true)),
+            searchHints: BuildSearchHints(
+                related: [("close_file", "Close a specific tab"), (ListTabsTool, "See what is open")]));
 
         yield return BridgeTool("save_document",
             "Save one document by path or save all open documents.",
             ObjectSchema(Opt(FileArg, "FileArg to save. Omit to save all.")),
             "save-document",
-            a => Build((FileArg, OptionalString(a, FileArg))));
+            a => Build((FileArg, OptionalString(a, FileArg))),
+            searchHints: BuildSearchHints(
+                workflow: [("errors", "Check diagnostics after saving")],
+                related: [("reload_document", "Reload after external changes"), (ApplyDiffTool, "Apply changes before saving")]));
 
         yield return BridgeTool("reload_document",
             "Reload a document from disk — required after native Edit/Write tool changes. VS does not auto-detect external writes. Call after every .cs edit, then check errors.",
             ObjectSchema(Req(FileArg, FileDesc)),
             "reload-document",
-            a => Build((FileArg, OptionalString(a, FileArg))));
+            a => Build((FileArg, OptionalString(a, FileArg))),
+            searchHints: BuildSearchHints(
+                workflow: [("errors", "Check for diagnostics after reloading")],
+                related: [("save_document", "Save before reloading"), (ApplyDiffTool, "Apply changes that need reloading")]));
 
         yield return BridgeTool("list_documents",
             "List open documents.",
-            EmptySchema(), "list-documents", _ => Empty(), Documents);
+            EmptySchema(), "list-documents", _ => Empty(), Documents,
+            searchHints: BuildSearchHints(
+                workflow: [(ReadFileTool, "Read one of the listed documents"), ("activate_document", "Switch to a document")],
+                related: [(ListTabsTool, "List open editor tabs")]));
 
-        yield return BridgeTool("list_tabs",
+        yield return BridgeTool(ListTabsTool,
             "List open editor tabs and identify the active tab.",
-            EmptySchema(), "list-tabs", _ => Empty(), Documents);
+            EmptySchema(), "list-tabs", _ => Empty(), Documents,
+            searchHints: BuildSearchHints(
+                workflow: [(ReadFileTool, "Read one of the listed files"), ("activate_document", "Switch to a tab")],
+                related: [("list_documents", "List open documents")]));
 
         yield return BridgeTool("activate_document",
             "Activate an open document tab by query.",
             ObjectSchema(Req(Query, "FileArg name or tab caption fragment.")),
             "activate-document",
-            a => Build((Query, OptionalString(a, Query))));
+            a => Build((Query, OptionalString(a, Query))),
+            searchHints: BuildSearchHints(
+                workflow: [(ReadFileTool, "Read the activated file"), ("file_outline", "Get the file structure")],
+                related: [("open_file", "Open a file that is not yet open"), (ListTabsTool, "List available tabs")]));
     }
 
     private static IEnumerable<ToolEntry> WindowCommandTools()
@@ -152,13 +197,18 @@ internal static partial class ToolCatalog
             "List Visual Studio tool windows (Solution Explorer, Error List, Output, etc.).",
             ObjectSchema(Opt(Query, "Optional caption filter.")),
             "list-windows",
-            a => Build((Query, OptionalString(a, Query))));
+            a => Build((Query, OptionalString(a, Query))),
+            searchHints: BuildSearchHints(
+                workflow: [("activate_window", "Bring a window to the foreground")],
+                related: [("list_tabs", "List editor tabs")]));
 
         yield return BridgeTool("activate_window",
             "Bring a Visual Studio tool window to the foreground by caption fragment.",
             ObjectSchema(Req("window", "Window caption fragment.")),
             "activate-window",
-            a => Build(("window", OptionalString(a, "window"))));
+            a => Build(("window", OptionalString(a, "window"))),
+            searchHints: BuildSearchHints(
+                related: [("list_windows", "List available windows"), ("execute_command", "Run a VS command")]));
 
         yield return BridgeTool("execute_command",
             "Execute an arbitrary Visual Studio command with optional arguments.",
@@ -178,7 +228,9 @@ internal static partial class ToolCatalog
                 ("document", OptionalString(a, "document")),
                 (Line, OptionalText(a, Line)),
                 (Column, OptionalText(a, Column)),
-                BoolArg("select-word", a, "select_word", false, true)));
+                BoolArg("select-word", a, "select_word", false, true)),
+            searchHints: BuildSearchHints(
+                related: [("format_document", "Format a document"), ("shell_exec", "Run an external process")]));
 
         yield return BridgeTool("format_document",
             "Format the current document or a specific FileArg.",
@@ -200,7 +252,10 @@ internal static partial class ToolCatalog
                     (FileArg, file),
                     (Line, OptionalText(a, Line)),
                     (Column, OptionalText(a, Column)));
-            });
+            },
+            searchHints: BuildSearchHints(
+                workflow: [("errors", "Check diagnostics after formatting")],
+                related: [("execute_command", "Run other VS commands"), ("apply_diff", "Make targeted edits")]));
     }
 
     private static IEnumerable<ToolEntry> FileOperationTools()
@@ -229,7 +284,15 @@ internal static partial class ToolCatalog
                     await bridge.SendAsync(id, "close-file", Build((FileArg, resolvedPath)))
                         .ConfigureAwait(false);
                 }
-                catch (Exception)
+                catch (IOException)
+                {
+                    // best-effort: ignore close errors before delete
+                }
+                catch (InvalidOperationException)
+                {
+                    // best-effort: ignore close errors before delete
+                }
+                catch (McpRequestException)
                 {
                     // best-effort: ignore close errors before delete
                 }
@@ -243,7 +306,9 @@ internal static partial class ToolCatalog
                 };
                 return ToolResultFormatter.StructuredToolResult(delPayload, args, successText: $"Deleted file '{resolvedPath}'.");
             },
-            destructive: true);
+            destructive: true,
+            searchHints: BuildSearchHints(
+                related: [("remove_file_from_project", "Remove from project first for legacy .csproj"), ("copy_file", "Copy instead of delete")]));
 
         yield return new("copy_file",
             "Copy a file to a new location on disk, creating parent directories as needed.",
@@ -281,7 +346,9 @@ internal static partial class ToolCatalog
                 return ToolResultFormatter.StructuredToolResult(copyPayload, args,
                     successText: $"Copied '{resolvedSource}' to '{resolvedDest}'.");
             },
-            mutating: true);
+            mutating: true,
+            searchHints: BuildSearchHints(
+                related: [("delete_file", "Delete the original after copying"), ("add_file_to_project", "Add the copied file to a project")]));
     }
 
     private static IEnumerable<ToolEntry> SolutionSystemTools()
@@ -294,7 +361,10 @@ internal static partial class ToolCatalog
             "open-solution",
             a => Build(
                 ("solution", OptionalString(a, "solution")),
-                BoolArg("wait-for-ready", a, "wait_for_ready", true, true)));
+                BoolArg("wait-for-ready", a, "wait_for_ready", true, true)),
+            searchHints: BuildSearchHints(
+                workflow: [("wait_for_ready", "Wait for IntelliSense to load"), ("list_projects", "Inspect the loaded projects")],
+                related: [("vs_open", "Launch a new VS instance"), ("bind_solution", "Bind to an already-open solution"), ("search_solutions", "Find the solution path")]));
 
         yield return BridgeTool("create_solution",
             "Create and open a new solution in the current Visual Studio instance.",
@@ -304,7 +374,10 @@ internal static partial class ToolCatalog
             "create-solution",
             a => Build(
                 ("directory", OptionalString(a, "directory")),
-                ("name", OptionalString(a, "name"))));
+                ("name", OptionalString(a, "name"))),
+            searchHints: BuildSearchHints(
+                workflow: [("create_project", "Add a project to the new solution"), ("list_projects", "Inspect the solution structure")],
+                related: [("open_solution", "Open an existing solution")]));
 
         yield return new("vs_close",
             "Close a Visual Studio instance by process id, or the currently bound instance.",
@@ -312,7 +385,9 @@ internal static partial class ToolCatalog
                 OptInt("process_id", "Process ID of the VS instance to close. Defaults to bound instance."),
                 OptBool("force", "Kill the process instead of gracefully closing (default false).")),
             "system",
-            (id, args, bridge) => VsCloseAsync(id, args, bridge));
+            (id, args, bridge) => VsCloseAsync(id, args, bridge),
+            searchHints: BuildSearchHints(
+                related: [("vs_open", "Launch a VS instance"), ("bridge_health", "Check binding health")]));
 
         yield return new("shell_exec",
             "Execute an arbitrary external process and capture stdout, stderr, and exit code. " +
@@ -329,14 +404,19 @@ internal static partial class ToolCatalog
                 OptInt("tail_lines", "If set, include only the last N lines of stdout and stderr. Combine with head_lines to see both ends of long output."),
                 OptInt("max_lines", "Max total lines per stream when head_lines/tail_lines are not set (default 200).")),
             "system",
-            (id, args, bridge) => ShellExecTool.ExecuteAsync(id, args, bridge));
+            (id, args, bridge) => ShellExecTool.ExecuteAsync(id, args, bridge),
+            searchHints: BuildSearchHints(
+                related: [("execute_command", "Run a VS command instead"), ("build", "Use the build tool for compilation"), ("git_status", "Use git tools for version control")]));
 
         yield return new("set_version",
             "Update the version string across all version files in the solution.",
             ObjectSchema(
                 Req("version", "New version string (e.g. 2.1.0).")),
             "system",
-            (id, args, bridge) => SetVersionTool.ExecuteAsync(id, args, bridge));
+            (id, args, bridge) => SetVersionTool.ExecuteAsync(id, args, bridge),
+            searchHints: BuildSearchHints(
+                workflow: [("build", "Rebuild after changing the version"), ("errors", "Check for version-related errors")],
+                related: [("shell_exec", "Run custom versioning scripts")]));
     }
 
     private static JsonObject RunDocumentPostCheck(BridgeConnection bridge, string sourceTool)

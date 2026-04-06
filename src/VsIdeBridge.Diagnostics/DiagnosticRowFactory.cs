@@ -13,7 +13,7 @@ internal static class DiagnosticRowFactory
         string suggestedAction = BestPracticeRuleCatalog.GetSuggestedAction(code);
         string llmFixPrompt = BestPracticeRuleCatalog.GetLlmFixPrompt(code);
 
-        JObject row = new JObject
+        JObject row = new()
         {
             [ErrorListConstants.SeverityKey] = ErrorListConstants.WarningSeverity,
             [ErrorListConstants.CodeKey] = code,

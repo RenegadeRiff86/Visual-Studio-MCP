@@ -68,8 +68,8 @@ internal sealed class BreakpointService
     public async Task<JObject> ListBreakpointsAsync(DTE2 dte)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        JArray items = new JArray(dte.Debugger.Breakpoints.Cast<Breakpoint>().Select(breakpoint => SerializeBreakpoint(breakpoint)));
-        return new JObject
+        JArray items = [..dte.Debugger.Breakpoints.Cast<Breakpoint>().Select(breakpoint => SerializeBreakpoint(breakpoint))];
+        return new()
         {
             ["count"] = items.Count,
             ["items"] = items,
@@ -81,10 +81,9 @@ internal sealed class BreakpointService
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
         string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
-        Breakpoint[] matches = dte.Debugger.Breakpoints
+        Breakpoint[] matches = [..dte.Debugger.Breakpoints
             .Cast<Breakpoint>()
-            .Where(breakpoint => MatchesBreakpointLocation(breakpoint, normalizedPath, line))
-            .ToArray();
+            .Where(breakpoint => MatchesBreakpointLocation(breakpoint, normalizedPath, line))];
 
         foreach (var breakpoint in matches)
         {
@@ -241,8 +240,7 @@ internal sealed class BreakpointService
             ["column"] = column,
             ["status"] = "bound",
             ["resolved"] = requestedPath is null || requestedLine is null
-                ? true
-                : MatchesBreakpointLocation(breakpoint, requestedPath, requestedLine.Value),
+                || MatchesBreakpointLocation(breakpoint, requestedPath, requestedLine.Value),
             ["function"] = function,
             ["enabled"] = enabled,
             ["condition"] = condition,

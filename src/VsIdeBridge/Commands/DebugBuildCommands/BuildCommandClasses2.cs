@@ -127,6 +127,24 @@ internal static partial class DebugBuildCommands
         }
     }
 
+    internal sealed class IdeGetMessagesCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0263)
+    {
+        protected override string CanonicalName => "Tools.IdeGetMessages";
+
+        protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            bool quick = args.GetBoolean("quick", false);
+            JObject messageListResult = await context.Runtime.ErrorListService.GetErrorListAsync(
+                context,
+                args.GetBoolean("wait-for-intellisense", !quick),
+                args.GetInt32(TimeoutMillisecondsArgument, GetQuickDiagnosticsTimeout(quick)),
+                quick,
+                CreateErrorListQuery(args, "message")).ConfigureAwait(true);
+
+            return new CommandExecutionResult($"Captured {messageListResult["count"]} message row(s).", messageListResult);
+        }
+    }
+
     internal sealed class IdeBuildAndCaptureErrorsCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x0214)
     {
         protected override string CanonicalName => "Tools.IdeBuildAndCaptureErrors";

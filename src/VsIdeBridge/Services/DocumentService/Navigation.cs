@@ -9,6 +9,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 
@@ -18,28 +19,8 @@ internal sealed partial class DocumentService
 {
     public async Task<JObject> OpenDocumentAsync(DTE2 dte, string filePath, int line, int column, bool allowDiskFallback = true)
     {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-        string normalizedPath = ResolveDocumentPath(dte, filePath, allowDiskFallback);
-        if (!File.Exists(normalizedPath))
-        {
-            normalizedPath = TryFindExistingOpenDocumentPathByFileName(dte, normalizedPath) ?? normalizedPath;
-            if (!File.Exists(normalizedPath))
-            {
-                throw new CommandErrorException(
-                    DocumentNotFoundCode,
-                    $"File does not exist on disk: {normalizedPath}");
-            }
-        }
-
-        Window window = dte.ItemOperations.OpenFile(normalizedPath);
-        window.Activate();
-
-        bool navigated = false;
-        if (window.Document?.Object(TextDocumentKind) is TextDocument textDocument)
-        {
-            navigated = TryNavigateToLine(textDocument, line, column);
-        }
+        (string normalizedPath, bool navigated, string windowCaption) =
+            await OpenDocumentOnMainThreadAsync(dte, filePath, line, column, allowDiskFallback).ConfigureAwait(false);
 
         return new JObject
         {
@@ -48,7 +29,7 @@ internal sealed partial class DocumentService
             ["line"] = Math.Max(1, line),
             ["column"] = Math.Max(1, column),
             ["navigated"] = navigated,
-            ["windowCaption"] = window.Caption,
+            ["windowCaption"] = windowCaption,
         };
     }
 
@@ -123,7 +104,10 @@ internal sealed partial class DocumentService
         TryShowActivePoint(selection);
         if (selectWord)
         {
-            TrySelectCurrentWord(selection);
+            if (!TrySelectIdentifierAtLocation(textDocument, selection, targetLine, targetColumn))
+            {
+                TrySelectCurrentWord(selection);
+            }
             TryShowActivePoint(selection);
         }
 
@@ -161,7 +145,7 @@ internal sealed partial class DocumentService
 
         string? activePath = TryGetDocumentFullName(dte.ActiveDocument);
         (List<Document> documents, string matchedBy) = ResolveDocumentMatches(dte, query, fallbackToActive: true, allowMultiple: closeAllMatches);
-        JArray closed = new();
+        JArray closed = [];
         foreach (Document document in documents)
         {
             JObject info = CreateDocumentInfo(document, activePath);
@@ -202,6 +186,54 @@ internal sealed partial class DocumentService
 
     public async Task<JObject> CloseAllExceptCurrentAsync(DTE2 dte, bool saveChanges)
     {
+        (string activePath, JArray closed) = await CloseAllExceptCurrentOnMainThreadAsync(dte, saveChanges).ConfigureAwait(false);
+
+        return new JObject
+        {
+            ["activePath"] = PathNormalization.NormalizeFilePath(activePath),
+            ["saveChanges"] = saveChanges,
+            ["count"] = closed.Count,
+            ["items"] = closed,
+        };
+    }
+
+    private static async Task<(string NormalizedPath, bool Navigated, string WindowCaption)> OpenDocumentOnMainThreadAsync(
+        DTE2 dte,
+        string filePath,
+        int line,
+        int column,
+        bool allowDiskFallback)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+        string normalizedPath = ResolveDocumentPath(dte, filePath, allowDiskFallback);
+        if (!File.Exists(normalizedPath))
+        {
+            normalizedPath = TryFindExistingOpenDocumentPathByFileName(dte, normalizedPath) ?? normalizedPath;
+            if (!File.Exists(normalizedPath))
+            {
+                throw new CommandErrorException(
+                    DocumentNotFoundCode,
+                    $"File does not exist on disk: {normalizedPath}");
+            }
+        }
+
+        Window window = dte.ItemOperations.OpenFile(normalizedPath);
+        window.Activate();
+
+        bool navigated = false;
+        if (window.Document?.Object(TextDocumentKind) is TextDocument textDocument)
+        {
+            navigated = TryNavigateToLine(textDocument, line, column);
+        }
+
+        string windowCaption = window.Caption;
+        await Task.Yield();
+        return (normalizedPath, navigated, windowCaption);
+    }
+
+    private static async Task<(string ActivePath, JArray Closed)> CloseAllExceptCurrentOnMainThreadAsync(DTE2 dte, bool saveChanges)
+    {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
         Document activeDocument = dte.ActiveDocument ?? throw new CommandErrorException(DocumentNotFoundCode, "There is no active document.");
@@ -211,27 +243,21 @@ internal sealed partial class DocumentService
             throw new CommandErrorException(DocumentNotFoundCode, "The active document does not have a file path.");
         }
 
-        List<Document> documentsToClose = EnumerateOpenDocuments(dte)
+        List<Document> documentsToClose = [..EnumerateOpenDocuments(dte)
             .Where(document => !string.Equals(
                 TryGetDocumentFullName(document),
                 activePath,
-                StringComparison.OrdinalIgnoreCase))
-            .ToList();
+                StringComparison.OrdinalIgnoreCase))];
 
-        JArray closed = new();
+        JArray closed = [];
         foreach (Document document in documentsToClose)
         {
             closed.Add(CreateDocumentInfo(document, activePath));
             document.Close(saveChanges ? vsSaveChanges.vsSaveChangesYes : vsSaveChanges.vsSaveChangesNo);
         }
 
-        return new JObject
-        {
-            ["activePath"] = PathNormalization.NormalizeFilePath(activePath),
-            ["saveChanges"] = saveChanges,
-            ["count"] = closed.Count,
-            ["items"] = closed,
-        };
+        await Task.Yield();
+        return (activePath!, closed);
     }
 
     public async Task<(string Path, string Text)> GetActiveDocumentTextAsync(DTE2 dte)
@@ -333,6 +359,40 @@ internal sealed partial class DocumentService
         {
             selection.MoveToLineAndOffset(originalLine, originalColumn, false);
         }
+    }
+
+    private static bool TrySelectIdentifierAtLocation(TextDocument textDocument, TextSelection selection, int lineNumber, int column)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        string lineText = GetLineText(textDocument, lineNumber);
+        if (string.IsNullOrWhiteSpace(lineText))
+        {
+            return false;
+        }
+
+        Match[] matches = [..Regex.Matches(lineText, @"\b[_\p{L}][_\p{L}\p{Nd}]*\b")
+            .Cast<Match>()];
+        if (matches.Length == 0)
+        {
+            return false;
+        }
+
+        int zeroBasedColumn = Math.Max(0, column - 1);
+        Match? targetMatch = matches.FirstOrDefault(match => zeroBasedColumn >= match.Index && zeroBasedColumn < match.Index + match.Length)
+            ?? matches.FirstOrDefault(match => match.Index >= zeroBasedColumn)
+            ?? matches.LastOrDefault(match => match.Index < zeroBasedColumn);
+        if (targetMatch is null)
+        {
+            return false;
+        }
+
+        int startColumn = targetMatch.Index + 1;
+        int endExclusiveColumn = startColumn + targetMatch.Length;
+
+        selection.MoveToLineAndOffset(lineNumber, startColumn, false);
+        selection.MoveToLineAndOffset(lineNumber, endExclusiveColumn, true);
+        return HasNavigableSymbolText(selection.Text);
     }
 
     private static bool HasNavigableSymbolText(string? text)

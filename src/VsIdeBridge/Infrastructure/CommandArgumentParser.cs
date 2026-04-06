@@ -8,7 +8,7 @@ internal static class CommandArgumentParser
     public static CommandArguments Parse(string? rawArguments)
     {
         List<string> tokens = Tokenize(rawArguments ?? string.Empty);
-        Dictionary<string, List<string>> values = new(System.StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, List<string>> values = [];
 
         for (int i = 0; i < tokens.Count; i++)
         {
@@ -18,7 +18,7 @@ internal static class CommandArgumentParser
                 throw new CommandErrorException("invalid_arguments", $"Unexpected token '{token}'. Arguments must use --name value form.");
             }
 
-            string name = token.Substring(2);
+            string name = token.Substring(2).ToLowerInvariant();
             if (string.IsNullOrWhiteSpace(name))
             {
                 throw new CommandErrorException("invalid_arguments", "Encountered an empty argument name.");

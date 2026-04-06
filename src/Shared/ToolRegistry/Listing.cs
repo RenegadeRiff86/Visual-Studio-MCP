@@ -6,88 +6,11 @@ public sealed partial class ToolRegistry
 {
     public IReadOnlyList<ToolDefinition> GetByCategory(string category)
     {
-        return _all
-            .Where(tool => string.Equals(tool.Category, category, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(static tool => tool.Name, StringComparer.Ordinal)
-            .ToArray();
-    }
-
-    public JsonObject BuildCategoryList()
-    {
-        JsonArray categories = new JsonArray();
-        foreach (ToolCategoryDefinition category in _categories)
-        {
-            int count = _all.Count(tool => string.Equals(tool.Category, category.Name, StringComparison.Ordinal));
-            categories.Add(new JsonObject
-            {
-                ["name"] = category.Name,
-                ["summary"] = category.Summary,
-                ["description"] = category.Description,
-                ["toolCount"] = count,
-            });
-        }
-
-        JsonArray featuredTools = new JsonArray();
-        foreach (string toolName in _featuredTools)
-            featuredTools.Add(toolName);
-
-        return new JsonObject
-        {
-            ["count"] = categories.Count,
-            ["categories"] = categories,
-            ["featuredTools"] = featuredTools,
-        };
-    }
-
-    public JsonObject BuildCompactToolsList()
-    {
-        JsonArray tools = new JsonArray();
-        HashSet<string> emitted = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (string featuredTool in _featuredTools)
-        {
-            if (TryGet(featuredTool, out ToolDefinition? tool) && emitted.Add(tool.Name))
-                tools.Add(tool.BuildCompactDiscoveryEntry());
-        }
-
-        foreach (ToolDefinition tool in _all)
-        {
-            if (emitted.Add(tool.Name))
-                tools.Add(tool.BuildCompactDiscoveryEntry());
-        }
-
-        return new JsonObject
-        {
-            ["navigationToolsFirst"] = true,
-            ["count"] = tools.Count,
-            ["tools"] = tools,
-        };
-    }
-
-    public JsonObject BuildToolsByCategory(string category)
-    {
-        ToolCategoryDefinition? categoryDefinition = _categories.FirstOrDefault(
-            item => string.Equals(item.Name, category, StringComparison.OrdinalIgnoreCase));
-        if (categoryDefinition is null)
-        {
-            return new JsonObject
-            {
-                ["error"] = $"Unknown category '{category}'.",
-                ["validCategories"] = new JsonArray(_categories.Select(item => JsonValue.Create(item.Name)).ToArray()),
-            };
-        }
-
-        JsonArray tools = new JsonArray();
-        foreach (ToolDefinition tool in GetByCategory(category))
-            tools.Add(tool.BuildCompactDiscoveryEntry());
-
-        return new JsonObject
-        {
-            ["category"] = categoryDefinition.Name,
-            ["summary"] = categoryDefinition.Summary,
-            ["description"] = categoryDefinition.Description,
-            ["count"] = tools.Count,
-            ["tools"] = tools,
-        };
+        return
+        [..
+            _all
+                .Where(tool => string.Equals(tool.Category, category, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(static tool => tool.Name, StringComparer.Ordinal)
+        ];
     }
 }

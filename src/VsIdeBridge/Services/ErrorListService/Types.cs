@@ -28,6 +28,21 @@ internal sealed class ErrorListQuery
     public string? Text { get; set; }
     public string? GroupBy { get; set; }
     public int? Max { get; set; }
+
+    public ErrorListQuery WithoutMax()
+    {
+        return new ErrorListQuery
+        {
+            Severity = Severity,
+            Code = Code,
+            Project = Project,
+            Path = Path,
+            Text = Text,
+            GroupBy = GroupBy,
+            Max = null,
+        };
+    }
+
     public JObject ToJson()
     {
         return new JObject
@@ -57,7 +72,7 @@ internal sealed partial class ErrorListService
 
         public IReadOnlyList<JObject> GetRows()
         {
-            List<JObject> rows = new List<JObject>();
+            List<JObject> rows = [];
 
             foreach (ITableEntry entry in _entries)
             {
@@ -244,7 +259,7 @@ internal sealed partial class ErrorListService
 
         public void UpdateRows(IReadOnlyList<JObject> rows)
         {
-            BestPracticeTableEntry[] entries = rows.Select(BestPracticeTableEntry.FromRow).ToArray();
+            BestPracticeTableEntry[] entries = [..rows.Select(BestPracticeTableEntry.FromRow)];
             _current = new BestPracticeTableEntriesSnapshot(entries, _current.VersionNumber + 1);
         }
 
@@ -306,22 +321,22 @@ internal sealed partial class ErrorListService
                     content = entry.Message;
                     return true;
                 case StandardTableKeyNames.DocumentName:
-                    content = Path.GetFileName(entry.File);
+                    content = Path.GetFileName(entry.Location.File);
                     return true;
                 case StandardTableKeyNames.Path:
-                    content = entry.File;
+                    content = entry.Location.File;
                     return true;
                 case StandardTableKeyNames.Line:
-                    content = Math.Max(0, entry.Line - 1);
+                    content = Math.Max(0, entry.Location.Line - 1);
                     return true;
                 case StandardTableKeyNames.Column:
-                    content = Math.Max(0, entry.Column - 1);
+                    content = Math.Max(0, entry.Location.Column - 1);
                     return true;
                 case StandardTableKeyNames.ProjectName:
-                    content = entry.Project;
+                    content = entry.Location.Project;
                     return true;
                 case StandardTableKeyNames.BuildTool:
-                    content = entry.Tool;
+                    content = entry.Attribution.Tool;
                     return true;
                 case StandardTableKeyNames.ErrorSource:
                     content = Microsoft.VisualStudio.Shell.TableManager.ErrorSource.Build;
@@ -330,19 +345,19 @@ internal sealed partial class ErrorListService
                     content = string.IsNullOrWhiteSpace(entry.Code) ? BestPracticeCategory : entry.Code;
                     return true;
                 case StandardTableKeyNames.HelpLink:
-                    content = entry.HelpUri;
+                    content = entry.Remediation.HelpUri;
                     return true;
                 case GuidanceKey:
-                    content = entry.Guidance;
+                    content = entry.Remediation.Guidance;
                     return true;
                 case SuggestedActionKey:
-                    content = entry.SuggestedAction;
+                    content = entry.Remediation.SuggestedAction;
                     return true;
                 case LlmFixPromptKey:
-                    content = entry.LlmFixPrompt;
+                    content = entry.Remediation.LlmFixPrompt;
                     return true;
                 case AuthorityKey:
-                    content = entry.Authority;
+                    content = entry.Attribution.Authority;
                     return true;
                 case StandardTableKeyNames.FullText:
                     content = string.IsNullOrWhiteSpace(entry.Code) ? entry.Message : $"{entry.Code}: {entry.Message}";
@@ -358,35 +373,38 @@ internal sealed partial class ErrorListService
         }
     }
 
-    private sealed class BestPracticeTableEntry(string severity, string code, string message, string file, int line, int column, string project, string tool, string helpUri, string guidance, string suggestedAction, string llmFixPrompt, string authority)
+    private sealed class BestPracticeTableLocation(string file, int line, int column, string project)
+    {
+        public string File { get; } = file;
+        public int Line { get; } = line;
+        public int Column { get; } = column;
+        public string Project { get; } = project;
+    }
+
+    private sealed class BestPracticeTableRemediation(string helpUri, string guidance, string suggestedAction, string llmFixPrompt)
+    {
+        public string HelpUri { get; } = helpUri;
+        public string Guidance { get; } = guidance;
+        public string SuggestedAction { get; } = suggestedAction;
+        public string LlmFixPrompt { get; } = llmFixPrompt;
+    }
+
+    private sealed class BestPracticeTableAttribution(string tool, string authority)
+    {
+        public string Tool { get; } = tool;
+        public string Authority { get; } = authority;
+    }
+
+    private sealed class BestPracticeTableEntry(string severity, string code, string message, BestPracticeTableLocation location, BestPracticeTableRemediation remediation, BestPracticeTableAttribution attribution)
     {
         public string Severity { get; } = severity;
-
         public string Code { get; } = code;
-
         public string Message { get; } = message;
+        public BestPracticeTableLocation Location { get; } = location;
+        public BestPracticeTableRemediation Remediation { get; } = remediation;
+        public BestPracticeTableAttribution Attribution { get; } = attribution;
 
-        public string File { get; } = file;
-
-        public int Line { get; } = line;
-
-        public int Column { get; } = column;
-
-        public string Project { get; } = project;
-
-        public string Tool { get; } = tool;
-
-        public string HelpUri { get; } = helpUri;
-
-        public string Guidance { get; } = guidance;
-
-        public string SuggestedAction { get; } = suggestedAction;
-
-        public string LlmFixPrompt { get; } = llmFixPrompt;
-
-        public string Authority { get; } = authority;
-
-        public string StableKey => string.Join("|", Severity, Code, File, Line.ToString(CultureInfo.InvariantCulture), Column.ToString(CultureInfo.InvariantCulture), Message);
+        public string StableKey => string.Join("|", Severity, Code, Location.File, Location.Line.ToString(CultureInfo.InvariantCulture), Location.Column.ToString(CultureInfo.InvariantCulture), Message);
 
         public static BestPracticeTableEntry FromRow(JObject row)
         {
@@ -394,16 +412,19 @@ internal sealed partial class ErrorListService
                 string.IsNullOrEmpty(GetRowString(row, SeverityKey)) ? WarningSeverity : GetRowString(row, SeverityKey),
                 GetRowString(row, CodeKey),
                 GetRowString(row, MessageKey),
-                GetRowString(row, FileKey),
-                Math.Max(1, GetNullableRowInt(row, LineKey) ?? 1),
-                Math.Max(1, GetNullableRowInt(row, ColumnKey) ?? 1),
-                GetRowString(row, ProjectKey),
-                string.IsNullOrEmpty(GetRowString(row, ToolKey)) ? BestPracticeCategory : GetRowString(row, ToolKey),
-                GetRowString(row, HelpUriKey),
-                GetRowString(row, GuidanceKey),
-                GetRowString(row, SuggestedActionKey),
-                GetRowString(row, LlmFixPromptKey),
-                GetRowString(row, AuthorityKey));
+                new BestPracticeTableLocation(
+                    GetRowString(row, FileKey),
+                    Math.Max(1, GetNullableRowInt(row, LineKey) ?? 1),
+                    Math.Max(1, GetNullableRowInt(row, ColumnKey) ?? 1),
+                    GetRowString(row, ProjectKey)),
+                new BestPracticeTableRemediation(
+                    GetRowString(row, HelpUriKey),
+                    GetRowString(row, GuidanceKey),
+                    GetRowString(row, SuggestedActionKey),
+                    GetRowString(row, LlmFixPromptKey)),
+                new BestPracticeTableAttribution(
+                    string.IsNullOrEmpty(GetRowString(row, ToolKey)) ? BestPracticeCategory : GetRowString(row, ToolKey),
+                    GetRowString(row, AuthorityKey)));
         }
     }
 }

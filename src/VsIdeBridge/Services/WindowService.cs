@@ -17,11 +17,13 @@ internal sealed class WindowService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        var windows = dte.Windows
-            .Cast<Window>()
-            .Select(CreateWindowInfo)
-            .Where(window => MatchesWindow(window, query))
-            .ToArray();
+        JObject[] windows =
+        [..
+            dte.Windows
+                .Cast<Window>()
+                .Select(CreateWindowInfo)
+                .Where(window => MatchesWindow(window, query))
+        ];
 
         return new JObject
         {
@@ -35,19 +37,19 @@ internal sealed class WindowService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        var window = ResolveWindow(dte, windowName, allowContains: true);
+        Window window = ResolveWindow(dte, windowName, allowContains: true);
         window.Activate();
         return CreateWindowInfo(window);
     }
 
     public async Task<JObject?> WaitForWindowAsync(DTE2 dte, string query, bool activate, int timeoutMs)
     {
-        var deadline = DateTime.UtcNow.AddMilliseconds(Math.Max(0, timeoutMs));
+        DateTime deadline = DateTime.UtcNow.AddMilliseconds(Math.Max(0, timeoutMs));
         while (true)
         {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-            var window = TryResolveWindow(dte, query, allowContains: true);
+            Window? window = TryResolveWindow(dte, query, allowContains: true);
             if (window is null && DateTime.UtcNow >= deadline)
             {
                 break;
@@ -73,13 +75,13 @@ internal sealed class WindowService
 
     private static bool MatchesWindow(JObject window, string? query)
     {
-        var text = query?.Trim();
+        string? text = query?.Trim();
         if (string.IsNullOrWhiteSpace(text))
         {
             return true;
         }
 
-        var queryText = text!;
+        string queryText = text!;
         return Contains(window["caption"], queryText) ||
                Contains(window["kind"], queryText) ||
                Contains(window["objectKind"], queryText) ||
@@ -90,12 +92,12 @@ internal sealed class WindowService
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var caption = GetWindowCaptionSafe(window);
-        var kind = GetWindowKindSafe(window);
-        var objectKind = GetWindowObjectKindSafe(window);
-        var windowType = GetWindowTypeSafe(window);
-        var visible = GetWindowVisibleSafe(window);
-        var documentPath = GetWindowDocumentPathSafe(window);
+        string caption = GetWindowCaptionSafe(window);
+        string kind = GetWindowKindSafe(window);
+        string objectKind = GetWindowObjectKindSafe(window);
+        string windowType = GetWindowTypeSafe(window);
+        bool visible = GetWindowVisibleSafe(window);
+        string documentPath = GetWindowDocumentPathSafe(window);
         return new JObject
         {
             ["caption"] = caption,
@@ -113,7 +115,7 @@ internal sealed class WindowService
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var window = TryResolveWindow(dte, query, allowContains);
+        Window? window = TryResolveWindow(dte, query, allowContains);
         if (window is not null)
         {
             return window;
@@ -126,8 +128,8 @@ internal sealed class WindowService
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var trimmed = query.Trim();
-        var windows = dte.Windows.Cast<Window>().ToArray();
+        string trimmed = query.Trim();
+        Window[] windows = [.. dte.Windows.Cast<Window>()];
 
         foreach (var window in windows)
         {
@@ -142,8 +144,7 @@ internal sealed class WindowService
             return null;
         }
 
-        var partial = windows.Where(window => MatchesWindowQuery(window, trimmed))
-            .ToArray();
+        Window[] partial = [.. windows.Where(window => MatchesWindowQuery(window, trimmed))];
 
         if (partial.Length == 1)
         {
@@ -169,10 +170,10 @@ internal sealed class WindowService
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var caption = GetWindowCaptionSafe(window);
-        var objectKind = GetWindowObjectKindSafe(window);
-        var kind = GetWindowKindSafe(window);
-        var documentPath = GetWindowDocumentPathSafe(window);
+        string caption = GetWindowCaptionSafe(window);
+        string objectKind = GetWindowObjectKindSafe(window);
+        string kind = GetWindowKindSafe(window);
+        string documentPath = GetWindowDocumentPathSafe(window);
         return string.Equals(caption, query, StringComparison.OrdinalIgnoreCase) ||
                string.Equals(objectKind, query, StringComparison.OrdinalIgnoreCase) ||
                string.Equals(kind, query, StringComparison.OrdinalIgnoreCase) ||
@@ -183,10 +184,10 @@ internal sealed class WindowService
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var caption = GetWindowCaptionSafe(window);
-        var kind = GetWindowKindSafe(window);
-        var objectKind = GetWindowObjectKindSafe(window);
-        var documentPath = GetWindowDocumentPathSafe(window);
+        string caption = GetWindowCaptionSafe(window);
+        string kind = GetWindowKindSafe(window);
+        string objectKind = GetWindowObjectKindSafe(window);
+        string documentPath = GetWindowDocumentPathSafe(window);
         return Contains(caption, query) ||
                Contains(kind, query) ||
                Contains(objectKind, query) ||
@@ -195,7 +196,7 @@ internal sealed class WindowService
 
     private static bool Contains(string? value, string query)
     {
-        var candidate = value;
+        string? candidate = value;
         if (string.IsNullOrWhiteSpace(candidate))
         {
             return false;

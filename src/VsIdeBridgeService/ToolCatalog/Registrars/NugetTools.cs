@@ -50,7 +50,10 @@ internal static partial class ToolCatalog
             summary: "Inspect one project's dependencies and highlight likely package issues.",
             readOnly: true,
             mutating: false,
-            destructive: false);
+            destructive: false,
+            searchHints: BuildSearchHints(
+                workflow: [("nuget_add_package", "Add a missing or outdated package"), ("nuget_remove_package", "Remove an unused package")],
+                related: [("query_project_references", "Raw reference list without health analysis"), ("errors", "Check NuGet restore errors")]));
 
         yield return new("nuget_add_package",
             "Add a NuGet package to a project using 'dotnet add package'. " +
@@ -71,7 +74,10 @@ internal static partial class ToolCatalog
                 string dotnetArgs = $"add \"{project}\" package {package}{versionArg}";
                 return await RunDotnetAsync(id, dotnetArgs, solutionDir, timeoutMs: 120_000)
                     .ConfigureAwait(false);
-            });
+            },
+            searchHints: BuildSearchHints(
+                workflow: [("scan_project_dependencies", "Verify the package was added"), ("build", "Build after adding the package")],
+                related: [("nuget_remove_package", "Remove a package"), ("query_project_references", "List current references")]));
 
         yield return new("nuget_remove_package",
             "Remove a NuGet package from a project using 'dotnet remove package'.",
@@ -87,7 +93,10 @@ internal static partial class ToolCatalog
                 return await RunDotnetAsync(id, $"remove \"{project}\" package {package}",
                     solutionDir, timeoutMs: 30_000)
                     .ConfigureAwait(false);
-            });
+            },
+            searchHints: BuildSearchHints(
+                workflow: [("scan_project_dependencies", "Verify the package was removed"), ("build", "Build after removing the package")],
+                related: [("nuget_add_package", "Add a package"), ("query_project_references", "List current references")]));
     }
 
     // ── NuGet helpers ─────────────────────────────────────────────────────────
@@ -137,11 +146,17 @@ internal static partial class ToolCatalog
             ["stderr"] = stderr,
         };
 
-        string successText = $"dotnet command completed with exit code {process.ExitCode}.";
+        string exitText = $"dotnet command completed with exit code {process.ExitCode}.";
+        string outputText = !string.IsNullOrWhiteSpace(stdout) ? stdout.TrimEnd()
+            : !string.IsNullOrWhiteSpace(stderr) ? $"stderr: {stderr.TrimEnd()}"
+            : string.Empty;
+        string successText = string.IsNullOrWhiteSpace(outputText)
+            ? exitText
+            : exitText + "\n" + outputText;
         return ToolResultFormatter.StructuredToolResult(payload, isError: !success, successText: successText);
     }
 
-    private static string? _resolvedDotnet;
+    private static volatile string? _resolvedDotnet;
 
     private static string ResolveDotnet()
     {
@@ -192,13 +207,13 @@ internal static partial class ToolCatalog
         JsonObject referencesResponse,
         JsonObject warningsResponse)
     {
-        JsonObject referencesData = referencesResponse["Data"] as JsonObject ?? new JsonObject();
-        JsonArray references = referencesData["references"] as JsonArray ?? new JsonArray();
-        JsonObject warningsData = warningsResponse["Data"] as JsonObject ?? new JsonObject();
-        JsonArray warningRows = warningsData["rows"] as JsonArray ?? new JsonArray();
+        JsonObject referencesData = referencesResponse["Data"] as JsonObject ?? [];
+        JsonArray references = referencesData["references"] as JsonArray ?? [];
+        JsonObject warningsData = warningsResponse["Data"] as JsonObject ?? [];
+        JsonArray warningRows = warningsData["rows"] as JsonArray ?? [];
 
-        JsonArray dependencies = new JsonArray();
-        JsonArray issues = new JsonArray();
+        JsonArray dependencies = [];
+        JsonArray issues = [];
         int packageCount = 0;
         int projectCount = 0;
         int frameworkCount = 0;
@@ -225,7 +240,7 @@ internal static partial class ToolCatalog
             AddDependencyIssues(normalized, issues);
         }
 
-        JsonArray nugetWarnings = new JsonArray();
+        JsonArray nugetWarnings = [];
         foreach (JsonNode? node in warningRows)
         {
             if (node is not JsonObject warning)
@@ -268,7 +283,7 @@ internal static partial class ToolCatalog
 
     private static JsonObject NormalizeDependency(JsonObject reference)
     {
-        JsonObject metadata = reference["metadata"] as JsonObject ?? new JsonObject();
+        JsonObject metadata = reference["metadata"] as JsonObject ?? [];
         string? name = FirstNonEmpty(
             reference["name"]?.GetValue<string>(),
             reference["identity"]?.GetValue<string>(),
@@ -314,7 +329,7 @@ internal static partial class ToolCatalog
     }
 
     private static JsonObject CreateDependencyIssue(string name, string kind, string code, string message)
-        => new JsonObject
+        => new()
         {
             ["name"] = name,
             ["kind"] = kind,
@@ -324,7 +339,7 @@ internal static partial class ToolCatalog
 
     private static string CreateDependencyScanSummary(JsonObject payload)
     {
-        JsonObject counts = payload["counts"] as JsonObject ?? new JsonObject();
+        JsonObject counts = payload["counts"] as JsonObject ?? [];
         int total = counts["total"]?.GetValue<int>() ?? 0;
         int issues = counts["issues"]?.GetValue<int>() ?? 0;
         int warnings = counts["nugetWarnings"]?.GetValue<int>() ?? 0;

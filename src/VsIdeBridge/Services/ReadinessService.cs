@@ -3,6 +3,7 @@ using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using Newtonsoft.Json.Linq;
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 
@@ -16,19 +17,14 @@ internal sealed class ReadinessService
 
     public async Task<JObject> WaitForReadyAsync(IdeCommandContext context, int timeoutMilliseconds, bool afterEdit = false)
     {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
-
-        if (context.Dte.Solution?.IsOpen != true)
-        {
-            throw new CommandErrorException("solution_not_open", "No solution is open.");
-        }
+        string solutionPath = await GetOpenSolutionPathAsync(context).ConfigureAwait(false);
 
         DateTimeOffset startedAt = DateTimeOffset.UtcNow;
-        await context.Logger.LogAsync("IDE Bridge: waiting for IntelliSense readiness", context.CancellationToken).ConfigureAwait(true);
+        await context.Logger.LogAsync("IDE Bridge: waiting for IntelliSense readiness", context.CancellationToken).ConfigureAwait(false);
         TimeSpan timeout = TimeSpan.FromMilliseconds(timeoutMilliseconds <= 0 ? DefaultReadinessTimeoutMilliseconds : timeoutMilliseconds);
-        IVsOperationProgressStatusService? service = await context.Package.GetServiceAsync(typeof(SVsOperationProgressStatusService)).ConfigureAwait(true) as IVsOperationProgressStatusService;
-        var stage = service?.GetStageStatusForSolutionLoad(CommonOperationProgressStageIds.Intellisense);
-        IVsStatusbar? statusbar = await context.Package.GetServiceAsync(typeof(SVsStatusbar)).ConfigureAwait(true) as IVsStatusbar;
+        IVsOperationProgressStatusService? service = await context.Package.GetServiceAsync(typeof(SVsOperationProgressStatusService)).ConfigureAwait(false) as IVsOperationProgressStatusService;
+        IVsOperationProgressStageStatusForSolutionLoad? stage = service?.GetStageStatusForSolutionLoad(CommonOperationProgressStageIds.Intellisense);
+        IVsStatusbar? statusbar = await GetStatusBarAsync(context).ConfigureAwait(false);
         DateTimeOffset deadline = startedAt.Add(timeout);
 
         // After an edit, VS needs a moment to schedule IntelliSense re-analysis.
@@ -37,24 +33,26 @@ internal sealed class ReadinessService
         if (afterEdit)
         {
             await Task.Delay(PollIntervalMilliseconds, context.CancellationToken).ConfigureAwait(false);
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
         }
 
         int readyStatusSamples = 0;
         string lastStatusBarText = string.Empty;
         bool statusBarReady = false;
-        bool intellisenseCompleted = stage?.IsInProgress == false;
+        bool stageInProgress = false;
+        bool intellisenseCompleted = false;
+        if (stage is not null || statusbar is not null)
+        {
+            (intellisenseCompleted, stageInProgress, lastStatusBarText, statusBarReady)
+                = await SampleReadinessStateAsync(stage, statusbar, context.CancellationToken).ConfigureAwait(false);
+        }
+
         string satisfiedBy = intellisenseCompleted ? "intellisense" : "pending";
 
         while (DateTimeOffset.UtcNow < deadline)
         {
             context.CancellationToken.ThrowIfCancellationRequested();
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
-
-            if (stage is not null)
-            {
-                intellisenseCompleted = !stage.IsInProgress;
-            }
+            (intellisenseCompleted, stageInProgress, lastStatusBarText, statusBarReady)
+                = await SampleReadinessStateAsync(stage, statusbar, context.CancellationToken).ConfigureAwait(false);
 
             if (intellisenseCompleted)
             {
@@ -62,8 +60,6 @@ internal sealed class ReadinessService
                 break;
             }
 
-            lastStatusBarText = TryGetStatusBarText(statusbar);
-            statusBarReady = IsReadyStatusText(lastStatusBarText);
             readyStatusSamples = statusBarReady ? readyStatusSamples + 1 : 0;
             if (readyStatusSamples >= StableStatusBarSampleCount)
             {
@@ -74,29 +70,58 @@ internal sealed class ReadinessService
             await Task.Delay(PollIntervalMilliseconds, context.CancellationToken).ConfigureAwait(false);
         }
 
-        var timedOut = satisfiedBy == "pending";
+        bool timedOut = satisfiedBy == "pending";
         if (timedOut)
         {
             satisfiedBy = "timeout";
         }
 
-        await context.Logger.LogAsync($"IDE Bridge: IntelliSense ready (satisfiedBy={satisfiedBy})", context.CancellationToken).ConfigureAwait(true);
+        await context.Logger.LogAsync($"IDE Bridge: IntelliSense ready (satisfiedBy={satisfiedBy})", context.CancellationToken).ConfigureAwait(false);
 
         return new JObject
         {
-            ["solutionPath"] = context.Dte.Solution.FullName,
+            ["solutionPath"] = solutionPath,
             ["serviceAvailable"] = service is not null,
             ["intellisenseStageAvailable"] = stage is not null,
             ["intellisenseCompleted"] = intellisenseCompleted,
             ["timedOut"] = timedOut,
             ["elapsedMilliseconds"] = (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds,
-            ["isInProgress"] = stage?.IsInProgress ?? false,
+            ["isInProgress"] = stageInProgress,
             ["statusBarAvailable"] = statusbar is not null,
             ["statusBarText"] = lastStatusBarText,
             ["statusBarReady"] = statusBarReady,
             ["readyStatusSamples"] = readyStatusSamples,
             ["satisfiedBy"] = satisfiedBy,
         };
+    }
+
+    private static async Task<string> GetOpenSolutionPathAsync(IdeCommandContext context)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
+        if (context.Dte.Solution?.IsOpen != true)
+        {
+            throw new CommandErrorException("solution_not_open", "No solution is open.");
+        }
+
+        return context.Dte.Solution.FullName;
+    }
+
+    private static async Task<IVsStatusbar?> GetStatusBarAsync(IdeCommandContext context)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
+        return await context.Package.GetServiceAsync(typeof(SVsStatusbar)).ConfigureAwait(true) as IVsStatusbar;
+    }
+
+    private static async Task<(bool IntellisenseCompleted, bool StageInProgress, string StatusBarText, bool StatusBarReady)> SampleReadinessStateAsync(
+        IVsOperationProgressStageStatusForSolutionLoad? stage,
+        IVsStatusbar? statusbar,
+        CancellationToken cancellationToken)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+        bool stageInProgress = stage?.IsInProgress ?? false;
+        string statusBarText = TryGetStatusBarText(statusbar);
+        bool statusBarReady = IsReadyStatusText(statusBarText);
+        return (!stageInProgress, stageInProgress, statusBarText, statusBarReady);
     }
 
     private static string TryGetStatusBarText(IVsStatusbar? statusbar)

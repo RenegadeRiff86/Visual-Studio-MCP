@@ -190,8 +190,10 @@ internal static class VsDiscovery
         try
         {
             string json = await File.ReadAllTextAsync(path).ConfigureAwait(false);
-            JsonObject? obj = JsonNode.Parse(json) as JsonObject;
-            if (obj is null) return null;
+            if (JsonNode.Parse(json) is not JsonObject obj)
+            {
+                return null;
+            }
             BridgeInstance? instance = ParseInstanceFromObject(obj, path, File.GetLastWriteTimeUtc(path));
             if (instance is null)
             {

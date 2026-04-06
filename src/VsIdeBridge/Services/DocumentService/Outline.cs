@@ -25,6 +25,25 @@ internal sealed partial class DocumentService
 
     public async Task<JObject> GetFileOutlineAsync(DTE2 dte, string? filePath, int maxDepth, string? kindFilter = null)
     {
+        (string resolvedPath, JArray symbols, int count, string? note) =
+            await GetOutlineDataOnMainThreadAsync(dte, filePath, maxDepth, kindFilter).ConfigureAwait(false);
+
+        JObject outlineResult = new()
+        {
+            [ResolvedPathProperty] = resolvedPath,
+            ["count"] = count,
+            ["symbols"] = symbols,
+        };
+        if (note is not null) outlineResult["note"] = note;
+        return outlineResult;
+    }
+
+    private static async Task<(string ResolvedPath, JArray Symbols, int Count, string? Note)> GetOutlineDataOnMainThreadAsync(
+        DTE2 dte,
+        string? filePath,
+        int maxDepth,
+        string? kindFilter)
+    {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
         string resolvedPath = ResolveDocumentPath(dte, filePath);
@@ -32,28 +51,14 @@ internal sealed partial class DocumentService
         ProjectItem? projectItem = null;
         try { projectItem = dte.Solution.FindProjectItem(resolvedPath); } catch (COMException ex) { System.Diagnostics.Debug.WriteLine(ex); }
 
-        if (projectItem is null)
-        {
-            return new JObject
-            {
-                [ResolvedPathProperty] = resolvedPath,
-                ["count"] = 0,
-                ["symbols"] = new JArray(),
-                ["note"] = "File is not part of any project or code model is unavailable.",
-            };
-        }
+        JArray symbols = [];
+        string? note = projectItem is null
+            ? "File is not part of any project or code model is unavailable."
+            : TryCollectFileCodeElements(projectItem, symbols, maxDepth, kindFilter);
 
-        JArray symbols = new();
-        string? note = TryCollectFileCodeElements(projectItem, symbols, maxDepth, kindFilter);
-
-        JObject outlineResult = new()
-        {
-            [ResolvedPathProperty] = resolvedPath,
-            ["count"] = symbols.Count,
-            ["symbols"] = symbols,
-        };
-        if (note is not null) outlineResult["note"] = note;
-        return outlineResult;
+        int count = symbols.Count;
+        await Task.Yield();
+        return (resolvedPath, symbols, count, note);
     }
 
     private static string? TryCollectFileCodeElements(ProjectItem projectItem, JArray symbols, int maxDepth, string? kindFilter)

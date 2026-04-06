@@ -84,7 +84,7 @@ internal static class GitRunner
 
     // ── Git executable resolution ─────────────────────────────────────────────
 
-    private static string? _resolvedGitExe;
+    private static volatile string? _resolvedGitExe;
 
     public static string ResolveGitExecutable()
     {

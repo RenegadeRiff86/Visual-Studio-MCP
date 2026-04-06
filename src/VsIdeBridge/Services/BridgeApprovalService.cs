@@ -18,8 +18,6 @@ internal sealed class BridgeApprovalService
 {
     public async Task<JObject> RequestApprovalAsync(IdeCommandContext context, BridgeApprovalKind kind, string? subject, string? details)
     {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
-
         if (IsAllowed(context.Runtime.UiSettings, kind))
         {
             return CreateApprovalData(kind, approval: GetApprovalMode(kind), approvalChoice: "settings", promptShown: false, resultCode: 0);

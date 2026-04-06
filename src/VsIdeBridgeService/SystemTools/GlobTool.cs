@@ -40,12 +40,14 @@ internal static class GlobTool
             ["count"] = files.Count,
             ["truncated"] = truncated,
             ["root"] = root,
-            ["files"] = new JsonArray(files.Select(f => JsonValue.Create(f)).ToArray<JsonNode?>()),
+            ["files"] = new JsonArray([.. files.Select(f => JsonValue.Create(f))]),
         };
 
-        string successText = truncated
-            ? $"Found {files.Count} file(s) for pattern '{pattern}' before reaching the max limit of {max}."
-            : $"Found {files.Count} file(s) for pattern '{pattern}'.";
+        string successText = files.Count == 0
+            ? $"No files found for pattern '{pattern}'."
+            : truncated
+                ? $"Found {files.Count} file(s) for pattern '{pattern}' (max {max} reached)."
+                : $"Found {files.Count} file(s) for pattern '{pattern}'.";
         return Task.FromResult(ToolResultFormatter.StructuredToolResult(payload, args, successText: successText));
     }
 }

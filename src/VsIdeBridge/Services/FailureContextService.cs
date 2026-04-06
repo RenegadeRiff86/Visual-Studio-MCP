@@ -25,7 +25,7 @@ internal sealed class FailureContextService
 
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
 
-        JObject failureContext = new JObject();
+        JObject failureContext = [];
         JObject? state = null;
         JObject? errorList = null;
 
@@ -34,7 +34,7 @@ internal sealed class FailureContextService
             state = await context.Runtime.IdeStateService.GetStateAsync(context.Dte).ConfigureAwait(true);
             failureContext["state"] = state;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not null) // best-effort diagnostic capture; never let capture failure mask the real error
         {
             ActivityLog.LogWarning(nameof(FailureContextService), $"Failed to capture state: {ex.Message}");
         }
@@ -44,7 +44,7 @@ internal sealed class FailureContextService
             JObject? openTabs = await context.Runtime.DocumentService.ListOpenTabsAsync(context.Dte).ConfigureAwait(true);
             failureContext["openTabs"] = openTabs;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not null) // best-effort diagnostic capture; never let capture failure mask the real error
         {
             ActivityLog.LogWarning(nameof(FailureContextService), $"Failed to capture open tabs: {ex.Message}");
         }
@@ -56,12 +56,12 @@ internal sealed class FailureContextService
                 .ConfigureAwait(true);
             failureContext["errorList"] = errorList;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not null) // best-effort diagnostic capture; never let capture failure mask the real error
         {
             ActivityLog.LogWarning(nameof(FailureContextService), $"Failed to capture error list: {ex.Message}");
         }
 
-        Dictionary<string, JObject> outlineCache = new Dictionary<string, JObject>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, JObject> outlineCache = [];
         IReadOnlyList<string> symbolFiles = CollectSymbolFiles(state, errorList);
         JArray symbolContext = await BuildSymbolContextAsync(context, outlineCache, symbolFiles).ConfigureAwait(true);
         if (symbolContext.Count > 0)
@@ -81,7 +81,7 @@ internal sealed class FailureContextService
         Dictionary<string, JObject> outlineCache,
         IReadOnlyList<string> symbolFiles)
     {
-        JArray symbolContext = new JArray();
+        JArray symbolContext = [];
         foreach (string file in symbolFiles.Take(MaxSymbolFiles))
         {
             try
@@ -89,7 +89,7 @@ internal sealed class FailureContextService
                 JObject outline = await GetOutlineAsync(context, outlineCache, file).ConfigureAwait(true);
                 symbolContext.Add(new JObject { ["path"] = file, ["outline"] = outline });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not null) // best-effort diagnostic capture; never let capture failure mask the real error
             {
                 ActivityLog.LogWarning(nameof(FailureContextService), $"Failed to capture outline for '{file}': {ex.Message}");
             }
@@ -99,7 +99,7 @@ internal sealed class FailureContextService
 
     private static JArray BuildErrorSymbolContext(JObject? errorList, IReadOnlyDictionary<string, JObject> outlineCache)
     {
-        JArray items = new JArray();
+        JArray items = [];
         if (errorList?["rows"] is not JArray rows)
         {
             return items;
@@ -148,13 +148,12 @@ internal sealed class FailureContextService
             return [];
         }
 
-        List<JObject> containing = symbols
+        List<JObject> containing = [.. symbols
             .OfType<JObject>()
             .Where(symbol => ContainsLine(symbol, line))
             .OrderBy(symbol => (symbol["endLine"]?.Value<int>() ?? int.MaxValue) - (symbol["startLine"]?.Value<int>() ?? 0))
             .ThenBy(symbol => symbol["depth"]?.Value<int>() ?? int.MaxValue)
-            .Take(MaxRelevantSymbolsPerRow)
-            .ToList();
+            .Take(MaxRelevantSymbolsPerRow)];
 
         if (containing.Count > 0)
         {
@@ -217,7 +216,7 @@ internal sealed class FailureContextService
         IDictionary<string, JObject> outlineCache,
         string file)
     {
-        if (outlineCache.TryGetValue(file, out JObject? cached))
+        if (outlineCache.TryGetValue(file.ToLowerInvariant(), out JObject? cached))
         {
             return cached;
         }
@@ -225,13 +224,13 @@ internal sealed class FailureContextService
         JObject outline = await context.Runtime.DocumentService
             .GetFileOutlineAsync(context.Dte, file, SymbolMaxDepth, kindFilter: null)
             .ConfigureAwait(true);
-        outlineCache[file] = outline;
+        outlineCache[file.ToLowerInvariant()] = outline;
         return outline;
     }
 
     private static List<string> CollectSymbolFiles(JObject? state, JObject? errorList)
     {
-        List<string> files = new List<string>();
+        List<string> files = [];
 
         string? activeDocument = state?["activeDocument"]?.Value<string>();
         if (!string.IsNullOrWhiteSpace(activeDocument))

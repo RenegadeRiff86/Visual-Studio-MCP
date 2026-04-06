@@ -15,12 +15,13 @@ public sealed partial class ToolRegistry
         IEnumerable<ToolCategoryDefinition>? categories = null,
         IEnumerable<string>? featuredTools = null)
     {
-        _all = tools.OrderBy(static tool => tool.Name, StringComparer.Ordinal).ToArray();
-        _categories = (categories ?? DefaultCategoryDefinitions)
-            .OrderBy(static category => category.Name, StringComparer.Ordinal)
-            .ToArray();
-        _featuredTools = featuredTools?.Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
-            ?? FeaturedToolNames.ToArray();
+        _all = [.. tools.OrderBy(static tool => tool.Name, StringComparer.Ordinal)];
+        _categories =
+        [.. (categories ?? DefaultCategoryDefinitions)
+            .OrderBy(static category => category.Name, StringComparer.Ordinal)];
+        _featuredTools = featuredTools is null
+            ? [.. FeaturedToolNames]
+            : [.. featuredTools.Distinct(StringComparer.OrdinalIgnoreCase)];
         _byNameOrAlias = BuildLookup(_all);
     }
 

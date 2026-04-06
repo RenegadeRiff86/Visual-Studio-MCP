@@ -1,10 +1,13 @@
 using System.Text.Json.Nodes;
 
+#nullable enable
 namespace VsIdeBridgeService;
 
 // JSON Schema builder helpers for MCP tool input schemas.
 internal static class SchemaHelpers
 {
+    private const string DescriptionPropertyName = "description";
+
     public static JsonObject EmptySchema() => new()
     {
         ["type"] = "object",
@@ -22,7 +25,7 @@ internal static class SchemaHelpers
         };
 
         JsonObject bag = (JsonObject)schema["properties"]!;
-        JsonArray required = new();
+        JsonArray required = [];
 
         foreach ((string name, JsonObject propSchema, bool isRequired) in properties)
         {
@@ -40,26 +43,40 @@ internal static class SchemaHelpers
     public static JsonObject StringSchema(string description) => new()
     {
         ["type"] = "string",
-        ["description"] = description,
+        [DescriptionPropertyName] = description,
     };
 
     public static JsonObject IntegerSchema(string description) => new()
     {
         ["type"] = "integer",
-        ["description"] = description,
+        [DescriptionPropertyName] = description,
     };
 
     public static JsonObject BooleanSchema(string description) => new()
     {
         ["type"] = "boolean",
-        ["description"] = description,
+        [DescriptionPropertyName] = description,
     };
 
     public static JsonObject ArrayOfStringsSchema(string description) => new()
     {
         ["type"] = "array",
-        ["description"] = description,
+        [DescriptionPropertyName] = description,
         ["items"] = new JsonObject { ["type"] = "string" },
+    };
+
+    public static JsonObject ArrayOfObjectsSchema(string description, JsonObject itemSchema) => new()
+    {
+        ["type"] = "array",
+        [DescriptionPropertyName] = description,
+        ["items"] = itemSchema,
+    };
+
+    public static JsonObject ArraySchema(string description, string itemType) => new()
+    {
+        ["type"] = "array",
+        [DescriptionPropertyName] = description,
+        ["items"] = new JsonObject { ["type"] = itemType },
     };
 
     // Property tuple factories — pass directly to ObjectSchema.

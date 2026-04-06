@@ -72,7 +72,7 @@ internal sealed partial class ErrorListService
 
     private static IReadOnlyList<string> ExtractSymbols(string description)
     {
-        HashSet<string> symbols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> symbols = [];
 
         foreach (Match match in Regex.Matches(description, "\"(?<doubleQuoted>[^\"]+)\"|'(?<singleQuoted>[^']+)'"))
         {

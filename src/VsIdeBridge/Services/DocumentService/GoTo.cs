@@ -185,9 +185,7 @@ internal sealed partial class DocumentService
 
     public async Task<JObject> GetDocumentSlicesAsync(DTE2 dte, JArray ranges)
     {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-        JArray results = new();
+        JArray results = [];
         foreach (JToken rangeToken in ranges)
         {
             if (rangeToken is not JObject range)
@@ -200,7 +198,7 @@ internal sealed partial class DocumentService
             try
             {
                 JObject slice = await GetDocumentSliceAsync(dte, file, startLine, endLine, includeLineNumbers: true)
-                    .ConfigureAwait(true);
+                    .ConfigureAwait(false);
                 results.Add(slice);
             }
             catch (CommandErrorException ex)
@@ -246,10 +244,8 @@ internal sealed partial class DocumentService
 
     public async Task<JObject> GetQuickInfoAsync(DTE2 dte, string? filePath, string? documentQuery, int? line, int? column, int contextLines)
     {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
         JObject sourceLocation = await PositionTextSelectionAsync(dte, filePath, documentQuery, line, column, selectWord: true)
-            .ConfigureAwait(true);
+            .ConfigureAwait(false);
 
         string sourcePath = (string?)sourceLocation[ResolvedPathProperty] ?? string.Empty;
         int sourceLine = (int?)sourceLocation["line"] ?? 0;
@@ -275,7 +271,7 @@ internal sealed partial class DocumentService
         try
         {
             (definitionFound, defLocation, definitionSlice) = await FetchDefinitionSliceAsync(
-                dte, sourcePath, sourceLine, (int?)sourceLocation["column"], contextLines).ConfigureAwait(true);
+                dte, sourcePath, sourceLine, (int?)sourceLocation["column"], contextLines).ConfigureAwait(false);
         }
         finally
         {
@@ -283,7 +279,7 @@ internal sealed partial class DocumentService
                 dte,
                 sourcePath,
                 sourceLine,
-                (int?)sourceLocation["column"] ?? column ?? 1).ConfigureAwait(true);
+                (int?)sourceLocation["column"] ?? column ?? 1).ConfigureAwait(false);
         }
 
         return new JObject
@@ -329,7 +325,7 @@ internal sealed partial class DocumentService
         int actualEnd,
         bool includeLineNumbers)
     {
-        JArray sliceLines = new();
+        JArray sliceLines = [];
         StringBuilder builder = new();
         for (int lineNumber = actualStart; lineNumber <= actualEnd && lineNumber <= lines.Count; lineNumber++)
         {
@@ -365,16 +361,23 @@ internal sealed partial class DocumentService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
+        PostGoToDefinitionOnMainThread();
+        // PostExecCommand is asynchronous — give VS a moment to navigate.
+        await Task.Delay(500).ConfigureAwait(false);
+    }
+
+    private static void PostGoToDefinitionOnMainThread()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
         try
         {
-            Guid goToDefnGuid = new Guid("{5efc7975-14bc-11cf-9b2b-00aa00573819}");
+            Guid goToDefnGuid = new("{5efc7975-14bc-11cf-9b2b-00aa00573819}");
             const uint GoToDefnId = 935;
             object? arg = null;
             IVsUIShell shell = (IVsUIShell)Package.GetGlobalService(typeof(SVsUIShell))
                 ?? throw new CommandErrorException(UnsupportedOperationCode, "IVsUIShell service not available.");
             shell.PostExecCommand(ref goToDefnGuid, GoToDefnId, 0, ref arg);
-            // PostExecCommand is asynchronous — give VS a moment to navigate.
-            await Task.Delay(500).ConfigureAwait(true);
         }
         catch (CommandErrorException)
         {

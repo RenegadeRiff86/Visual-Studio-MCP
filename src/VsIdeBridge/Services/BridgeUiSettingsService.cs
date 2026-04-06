@@ -26,7 +26,7 @@ internal sealed class BridgeUiSettingsService
     {
         try
         {
-            ShellSettingsManager settingsManager = new ShellSettingsManager(serviceProvider);
+            ShellSettingsManager settingsManager = new(serviceProvider);
             _store = settingsManager.GetWritableSettingsStore(SettingsScope.UserSettings);
             if (!_store.CollectionExists(CollectionPath))
             {
@@ -97,7 +97,7 @@ internal sealed class BridgeUiSettingsService
                     ? _store.GetBoolean(CollectionPath, name)
                     : defaultValue;
             }
-            catch (Exception ex)
+            catch (System.Runtime.InteropServices.COMException ex)
             {
                 System.Diagnostics.Debug.WriteLine(ex);
             }
@@ -115,7 +115,7 @@ internal sealed class BridgeUiSettingsService
                 _store.SetBoolean(CollectionPath, name, value);
                 return;
             }
-            catch (Exception ex)
+            catch (System.Runtime.InteropServices.COMException ex)
             {
                 System.Diagnostics.Debug.WriteLine(ex);
             }

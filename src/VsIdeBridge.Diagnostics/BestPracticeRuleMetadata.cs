@@ -5,20 +5,13 @@ namespace VsIdeBridge.Diagnostics;
 
 internal static class BestPracticeRuleMetadata
 {
-    internal sealed class RuleText
+    internal sealed class RuleText(string guidance, string suggestedAction, string llmFixPrompt)
     {
-        public RuleText(string guidance, string suggestedAction, string llmFixPrompt)
-        {
-            Guidance = guidance;
-            SuggestedAction = suggestedAction;
-            LlmFixPrompt = llmFixPrompt;
-        }
+        public string Guidance { get; } = guidance;
 
-        public string Guidance { get; }
+        public string SuggestedAction { get; } = suggestedAction;
 
-        public string SuggestedAction { get; }
-
-        public string LlmFixPrompt { get; }
+        public string LlmFixPrompt { get; } = llmFixPrompt;
     }
 
     private static readonly IReadOnlyDictionary<string, RuleText> RuleTexts = CreateRuleTexts();
@@ -28,7 +21,7 @@ internal static class BestPracticeRuleMetadata
         return RuleTexts.TryGetValue(code, out RuleText? ruleText) ? ruleText : null;
     }
 
-    private static IReadOnlyDictionary<string, RuleText> CreateRuleTexts()
+    private static Dictionary<string, RuleText> CreateRuleTexts()
     {
         return new Dictionary<string, RuleText>(StringComparer.OrdinalIgnoreCase)
         {
@@ -79,7 +72,7 @@ internal static class BestPracticeRuleMetadata
             [BestPracticeRuleCatalog.BP1012.Code] = new(
                 "This file is carrying too many responsibilities, which raises navigation cost and makes targeted changes riskier.",
                 "Split the file into smaller focused types or helpers before adding more code.",
-                "Refactor this file into smaller focused units. Extract cohesive helper types or supporting modules instead of adding more behavior to the same large file."),
+                "This file is too long. Identify cohesive groups of types or helpers that can stand alone, then use create_project to create a new class library and apply_diff to move those types out. Prioritize types with the fewest cross-file dependencies so each move is self-contained. Update any using directives and project references after each extraction."),
             [BestPracticeRuleCatalog.BP1013.Code] = new(
                 "This method is long enough that control flow and state changes are hard to reason about in one pass.",
                 "Extract smaller methods so each block has one clear job.",

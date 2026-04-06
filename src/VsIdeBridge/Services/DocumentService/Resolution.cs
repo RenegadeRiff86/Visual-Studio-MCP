@@ -11,18 +11,11 @@ namespace VsIdeBridge.Services;
 
 internal sealed partial class DocumentService
 {
-    private readonly struct DocumentFileMatch
+    private readonly struct DocumentFileMatch(string path, int score, string source)
     {
-        public DocumentFileMatch(string path, int score, string source)
-        {
-            Path = path;
-            Score = score;
-            Source = source;
-        }
-
-        public string Path { get; }
-        public int Score { get; }
-        public string Source { get; }
+        public string Path { get; } = path;
+        public int Score { get; } = score;
+        public string Source { get; } = source;
     }
 
     private static string ResolveDocumentPath(DTE2 dte, string? filePath, bool allowDiskFallback = true)
@@ -57,7 +50,7 @@ internal sealed partial class DocumentService
             return normalizedPath;
         }
 
-        DocumentFileMatch[] allMatches = SolutionFileLocator.FindMatches(dte, filePath)
+        DocumentFileMatch[] allMatches = [..SolutionFileLocator.FindMatches(dte, filePath)
             .Concat(allowDiskFallback ? SolutionFileLocator.FindDiskMatches(dte, filePath, maxResults: 250) : [])
             .GroupBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
             .Select(group => new DocumentFileMatch(
@@ -67,7 +60,7 @@ internal sealed partial class DocumentService
             .OrderByDescending(item => item.Score)
             .ThenBy(item => item.Path.Length)
             .ThenBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+            ];
 
         if (allMatches.Length == 0)
         {
@@ -82,9 +75,8 @@ internal sealed partial class DocumentService
     private static string SelectBestMatchOrThrow(DocumentFileMatch[] allMatches, string filePath)
     {
         int topScore = allMatches[0].Score;
-        DocumentFileMatch[] topMatches = allMatches
-            .Where(item => item.Score == topScore)
-            .ToArray();
+        DocumentFileMatch[] topMatches = [..allMatches
+            .Where(item => item.Score == topScore)];
         int? secondScore = allMatches.Length > topMatches.Length ? (int?)allMatches[topMatches.Length].Score : null;
         bool clearLead = secondScore is null || topScore - secondScore.Value >= 50;
 
@@ -148,7 +140,7 @@ internal sealed partial class DocumentService
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        List<string> searchRoots = new();
+        List<string> searchRoots = [];
         string solutionPath = dte.Solution?.IsOpen == true ? dte.Solution.FullName : string.Empty;
         string current = string.IsNullOrWhiteSpace(solutionPath)
             ? string.Empty
@@ -238,28 +230,28 @@ internal sealed partial class DocumentService
         if (queryLooksLikePath)
         {
             string normalizedQueryPath = PathNormalization.NormalizeFilePath(rawQuery);
-            List<Document> exactPath = documents.Where(document => MatchesDocumentExactPath(document, normalizedQueryPath)).ToList();
+            List<Document> exactPath = [..documents.Where(document => MatchesDocumentExactPath(document, normalizedQueryPath))];
             if (exactPath.Count > 0)
             {
                 return FinalizeMatches(exactPath, allowMultiple, "path");
             }
         }
 
-        List<Document> exactName = documents.Where(document => MatchesDocumentExactName(document, rawQuery)).ToList();
+        List<Document> exactName = [..documents.Where(document => MatchesDocumentExactName(document, rawQuery))];
         if (exactName.Count > 0)
         {
             exactName = PreferSingleDocumentMatch(dte, exactName);
             return FinalizeMatches(exactName, allowMultiple, "filename");
         }
 
-        List<Document> containsName = documents.Where(document => MatchesDocumentNameContains(document, rawQuery)).ToList();
+        List<Document> containsName = [..documents.Where(document => MatchesDocumentNameContains(document, rawQuery))];
         if (containsName.Count > 0)
         {
             containsName = PreferSingleDocumentMatch(dte, containsName);
             return FinalizeMatches(containsName, allowMultiple, "filename-contains");
         }
 
-        List<Document> containsPath = documents.Where(document => MatchesDocumentPathContains(document, rawQuery)).ToList();
+        List<Document> containsPath = [..documents.Where(document => MatchesDocumentPathContains(document, rawQuery))];
         if (containsPath.Count > 0)
         {
             containsPath = PreferSingleDocumentMatch(dte, containsPath);
@@ -281,7 +273,7 @@ internal sealed partial class DocumentService
         if (TryGetDocumentFullName(dte.ActiveDocument) is string activeDocumentPath &&
             !string.IsNullOrWhiteSpace(activeDocumentPath))
         {
-            List<Document> activeMatches = matches.Where(document => MatchesDocumentExactPath(document, activeDocumentPath)).ToList();
+            List<Document> activeMatches = [..matches.Where(document => MatchesDocumentExactPath(document, activeDocumentPath))];
             if (activeMatches.Count == 1)
             {
                 return activeMatches;
@@ -296,7 +288,7 @@ internal sealed partial class DocumentService
 
     private static List<Document> PreferMatches(List<Document> matches, Func<Document, bool> predicate)
     {
-        List<Document> preferred = matches.Where(predicate).ToList();
+        List<Document> preferred = [..matches.Where(predicate)];
         return preferred.Count == 0 ? matches : preferred;
     }
 

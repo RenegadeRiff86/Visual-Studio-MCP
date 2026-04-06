@@ -15,7 +15,7 @@ internal static partial class SetVersionTool
         }
 
         string solutionDirectory = ServiceToolPaths.ResolveSolutionDirectory(bridge);
-        JsonArray updatedFiles = new();
+        JsonArray updatedFiles = [];
 
         UpdateFile(
             Path.Combine(solutionDirectory, "Directory.Build.props"),

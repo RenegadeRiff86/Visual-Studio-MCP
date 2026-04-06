@@ -96,11 +96,13 @@ internal sealed class MemoryDiscoveryStore : IDisposable
         ExecuteWithStore(root =>
         {
             JArray items = GetItems(root);
-            JObject[] stale = items
-                .OfType<JObject>()
-                .Where(candidate =>
-                    string.Equals(candidate["instanceId"]?.ToString(), instanceId, StringComparison.OrdinalIgnoreCase))
-                .ToArray();
+            JObject[] stale =
+            [..
+                items
+                    .OfType<JObject>()
+                    .Where(candidate =>
+                        string.Equals(candidate["instanceId"]?.ToString(), instanceId, StringComparison.OrdinalIgnoreCase))
+            ];
 
             foreach (JObject staleRecord in stale)
             {
@@ -125,19 +127,21 @@ internal sealed class MemoryDiscoveryStore : IDisposable
     private static void PurgeExpired(JArray items)
     {
         DateTimeOffset cutoff = DateTimeOffset.UtcNow.Subtract(EntryTtl);
-        JObject[] staleItems = items
-            .OfType<JObject>()
-            .Where(item =>
-            {
-                string? updatedAtUtc = item["updatedAtUtc"]?.ToString();
-                if (string.IsNullOrWhiteSpace(updatedAtUtc))
+        JObject[] staleItems =
+        [..
+            items
+                .OfType<JObject>()
+                .Where(item =>
                 {
-                    return true;
-                }
+                    string? updatedAtUtc = item["updatedAtUtc"]?.ToString();
+                    if (string.IsNullOrWhiteSpace(updatedAtUtc))
+                    {
+                        return true;
+                    }
 
-                return !DateTimeOffset.TryParse(updatedAtUtc, out DateTimeOffset parsed) || parsed < cutoff;
-            })
-            .ToArray();
+                    return !DateTimeOffset.TryParse(updatedAtUtc, out DateTimeOffset parsed) || parsed < cutoff;
+                })
+        ];
 
         foreach (JObject stale in staleItems)
         {
@@ -181,7 +185,7 @@ internal sealed class MemoryDiscoveryStore : IDisposable
             WriteRoot(view, root, _capacityBytes);
             Trace("ExecuteWithStore write completed.");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not null) // best-effort store; discovery JSON is the compatibility fallback
         {
             // Best-effort store. Discovery JSON remains the compatibility fallback.
             Trace($"ExecuteWithStore error: {ex}");
@@ -202,7 +206,7 @@ internal sealed class MemoryDiscoveryStore : IDisposable
         {
             mutex.ReleaseMutex();
         }
-        catch (Exception ex)
+        catch (ApplicationException ex)
         {
             System.Diagnostics.Debug.WriteLine($"Mutex release failed: {ex.Message}");
         }
@@ -214,7 +218,7 @@ internal sealed class MemoryDiscoveryStore : IDisposable
         {
             return _mapFactory(_mapName, _capacityBytes);
         }
-        catch (Exception ex)
+        catch (IOException ex)
         {
             Trace($"CreateSharedMap error: {ex}");
             return null;
@@ -235,7 +239,7 @@ internal sealed class MemoryDiscoveryStore : IDisposable
             string logPath = Path.Combine(directory, "memory-discovery-trace.log");
             File.AppendAllText(logPath, $"[{DateTimeOffset.UtcNow:O}] {message}{Environment.NewLine}");
         }
-        catch (Exception ex)
+            catch (IOException ex)
         {
             System.Diagnostics.Debug.WriteLine($"Trace log write failed: {ex.Message}");
         }
@@ -252,7 +256,7 @@ internal sealed class MemoryDiscoveryStore : IDisposable
         {
             _sharedMap.Value?.Dispose();
         }
-        catch (Exception ex)
+        catch (ObjectDisposedException ex)
         {
             System.Diagnostics.Debug.WriteLine($"Shared map dispose failed: {ex.Message}");
         }
@@ -299,10 +303,12 @@ internal sealed class MemoryDiscoveryStore : IDisposable
         if (payload.Length > capacityBytes - LengthPrefixBytes)
         {
             // Keep dropping oldest entries until the payload fits.
-            List<JObject> items = GetItems(root)
-                .OfType<JObject>()
-                .OrderBy(item => item["updatedAtUtc"]?.ToString(), StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            List<JObject> items =
+            [..
+                GetItems(root)
+                    .OfType<JObject>()
+                    .OrderBy(item => item["updatedAtUtc"]?.ToString(), StringComparer.OrdinalIgnoreCase)
+            ];
 
             foreach (JObject oldestRecord in items)
             {

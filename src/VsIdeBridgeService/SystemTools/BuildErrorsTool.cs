@@ -2,30 +2,27 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
 using System.Text.Json.Nodes;
-using Microsoft.Build.Evaluation;
-using Microsoft.Build.Execution;
-using Microsoft.Build.Exceptions;
-using Microsoft.Build.Framework;
-using Microsoft.Build.Locator;
 
 namespace VsIdeBridgeService.SystemTools;
 
-internal static class BuildErrorsTool
+internal static partial class BuildErrorsTool
 {
     private const int DefaultMax = 20;
     private const int BuildTimeoutMs = 120_000;
-    private static readonly object RegistrationGate = new();
-    private static bool _msBuildRegistered;
+    [GeneratedRegex(@"^(?<file>.+?)\((?<line>\d+)(?:,(?<column>\d+))?\):\s(?<severity>error|warning)\s(?<code>[^:]+):\s(?<message>.*?)(?:\s\[(?<project>.+)\])?$", RegexOptions.IgnoreCase)]
+    private static partial Regex MsBuildDiagnosticPattern();
+
+    [GeneratedRegex(@"^(?<project>.+?)\s*:\s*(?<severity>error|warning)\s(?<code>[^:]+):\s(?<message>.+)$", RegexOptions.IgnoreCase)]
+    private static partial Regex StructuredDiagnosticPattern();
 
     public static async Task<JsonNode> ExecuteAsync(JsonNode? id, JsonObject? args, BridgeConnection bridge)
     {
         string configuration = args?["configuration"]?.GetValue<string>() ?? "Release";
         string? projectArg = args?["project"]?.GetValue<string>();
         int max = args?["max"]?.GetValue<int?>() ?? DefaultMax;
-
-        EnsureMsBuildRegistered(id);
 
         string solutionDir = ServiceToolPaths.ResolveSolutionDirectory(bridge);
         string target = string.IsNullOrWhiteSpace(projectArg)
@@ -38,13 +35,8 @@ internal static class BuildErrorsTool
                 $"Build target '{target}' was not found.");
         }
 
-        Dictionary<string, string?> globalProperties = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["Configuration"] = configuration,
-        };
-
         Stopwatch sw = Stopwatch.StartNew();
-        BuildRunResult buildRun = await RunBuildAsync(id, target, solutionDir, globalProperties)
+        BuildRunResult buildRun = await RunCliBuildAsync(id, target, configuration)
             .ConfigureAwait(false);
         sw.Stop();
 
@@ -52,13 +44,13 @@ internal static class BuildErrorsTool
         int totalErrors = allErrors.Count;
         bool truncated = totalErrors > max;
 
-        JsonArray errorArray = new();
+        JsonArray errorArray = [];
         foreach (JsonObject error in truncated ? allErrors.GetRange(0, max) : allErrors)
             errorArray.Add(error);
 
         JsonObject payload = new()
         {
-            ["success"] = totalErrors == 0 && buildRun.ResultCode == BuildResultCode.Success,
+            ["success"] = totalErrors == 0 && buildRun.ResultCode == BuildRunCode.Success,
             ["errorCount"] = totalErrors,
             ["truncated"] = truncated,
             ["errors"] = errorArray,
@@ -79,148 +71,160 @@ internal static class BuildErrorsTool
             successText: totalErrors == 0 ? successText : null);
     }
 
-    private static async Task<BuildRunResult> RunBuildAsync(
-        JsonNode? id,
-        string target,
-        string workingDirectory,
-        Dictionary<string, string?> globalProperties)
+    private static async Task<BuildRunResult> RunCliBuildAsync(JsonNode? id, string target, string configuration)
     {
-        using ProjectCollection projectCollection = new(globalProperties);
-        ErrorCaptureLogger logger = new();
-        BuildParameters parameters = new(projectCollection)
+        string dotnet = ResolveDotnetExecutable(id);
+        string arguments = $"build {QuoteArg(target)} -c {QuoteArg(configuration)} -nologo -v:minimal -p:GenerateFullPaths=true";
+
+        ProcessStartInfo startInfo = new()
         {
-            Loggers = new ILogger[] { logger },
-            MaxNodeCount = Math.Max(1, Environment.ProcessorCount),
+            FileName = dotnet,
+            Arguments = arguments,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = Path.GetDirectoryName(target) ?? string.Empty,
         };
 
-        string[] targets = ["Build"];
-        BuildRequestData request = new(target, globalProperties, toolsVersion: null, targetsToBuild: targets, hostServices: null);
-        BuildManager buildManager = BuildManager.DefaultBuildManager;
+        using Process process = Process.Start(startInfo)
+            ?? throw new McpRequestException(id, McpErrorCodes.BridgeError,
+                $"Failed to start process '{dotnet}'.");
 
-        buildManager.BeginBuild(parameters);
+        Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
+        Task<string> stderrTask = process.StandardError.ReadToEndAsync();
+        Task waitTask = process.WaitForExitAsync();
+
+        Task finished = await Task.WhenAny(waitTask, Task.Delay(BuildTimeoutMs)).ConfigureAwait(false);
+        if (!ReferenceEquals(finished, waitTask))
+        {
+            TryKillProcess(process);
+            throw new McpRequestException(id, McpErrorCodes.TimeoutError,
+                $"'{dotnet} {arguments}' timed out after {BuildTimeoutMs / 1000}s.");
+        }
+
+        string stdout = await stdoutTask.ConfigureAwait(false);
+        string stderr = await stderrTask.ConfigureAwait(false);
+        string combinedOutput = string.Join(Environment.NewLine, new[] { stdout, stderr }
+            .Where(text => !string.IsNullOrWhiteSpace(text)));
+
+        List<JsonObject> errors = ParseCliBuildErrors(combinedOutput);
+
+        BuildRunCode resultCode = process.ExitCode == 0 ? BuildRunCode.Success : BuildRunCode.Failure;
+        return new BuildRunResult(resultCode, errors);
+    }
+
+    private static void TryKillProcess(Process process)
+    {
         try
         {
-            BuildSubmission submission = buildManager.PendBuildRequest(request);
-            TaskCompletionSource<BuildResult?> completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            submission.ExecuteAsync(
-                completedSubmission => completion.TrySetResult(completedSubmission.BuildResult),
-                context: null);
-
-            Task finished = await Task.WhenAny(completion.Task, Task.Delay(BuildTimeoutMs)).ConfigureAwait(false);
-            if (!ReferenceEquals(finished, completion.Task))
-            {
-                buildManager.CancelAllSubmissions();
-                throw new McpRequestException(id, McpErrorCodes.TimeoutError,
-                    $"MSBuild timed out after {BuildTimeoutMs / 1000}s.");
-            }
-
-            BuildResult? result = await completion.Task.ConfigureAwait(false);
-            BuildResultCode resultCode = result?.OverallResult ?? BuildResultCode.Failure;
-            return new BuildRunResult(resultCode, logger.Errors);
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
         }
-        catch (McpRequestException)
+        catch
         {
-            throw;
-        }
-        catch (InvalidProjectFileException ex)
-        {
-            throw new McpRequestException(id, McpErrorCodes.BridgeError, ex.Message);
-        }
-        catch (InvalidOperationException ex)
-        {
-            throw new McpRequestException(id, McpErrorCodes.BridgeError, ex.Message);
-        }
-        catch (IOException ex)
-        {
-            throw new McpRequestException(id, McpErrorCodes.BridgeError, ex.Message);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            throw new McpRequestException(id, McpErrorCodes.BridgeError, ex.Message);
-        }
-        catch (ArgumentException ex)
-        {
-            throw new McpRequestException(id, McpErrorCodes.BridgeError, ex.Message);
-        }
-        finally
-        {
-            buildManager.EndBuild();
-            projectCollection.UnloadAllProjects();
-            Environment.CurrentDirectory = workingDirectory;
+            // Process already exited or cannot be signaled. The timeout path still returns a useful error.
         }
     }
 
-    private static void EnsureMsBuildRegistered(JsonNode? id)
+    private static List<JsonObject> ParseCliBuildErrors(string buildOutputText)
     {
-        lock (RegistrationGate)
+        List<JsonObject> diagnostics = [];
+        string[] lines = buildOutputText.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+        foreach (string line in lines)
         {
-            if (_msBuildRegistered)
-                return;
-
-            try
-            {
-                if (!MSBuildLocator.IsRegistered)
-                    MSBuildLocator.RegisterDefaults();
-
-                _msBuildRegistered = true;
-            }
-            catch (InvalidOperationException ex)
-            {
-                throw new McpRequestException(id, McpErrorCodes.BridgeError,
-                    $"Failed to initialize MSBuild APIs: {ex.Message}");
-            }
-            catch (FileNotFoundException ex)
-            {
-                throw new McpRequestException(id, McpErrorCodes.BridgeError,
-                    $"Failed to initialize MSBuild APIs: {ex.Message}");
-            }
-            catch (FileLoadException ex)
-            {
-                throw new McpRequestException(id, McpErrorCodes.BridgeError,
-                    $"Failed to initialize MSBuild APIs: {ex.Message}");
-            }
-            catch (BadImageFormatException ex)
-            {
-                throw new McpRequestException(id, McpErrorCodes.BridgeError,
-                    $"Failed to initialize MSBuild APIs: {ex.Message}");
-            }
+            JsonObject? diagnostic = TryParseMsBuildDiagnostic(line) ?? TryParseStructuredDiagnostic(line);
+            if (diagnostic is not null)
+                diagnostics.Add(diagnostic);
         }
+
+        return diagnostics;
     }
 
-    private sealed record BuildRunResult(BuildResultCode ResultCode, List<JsonObject> Errors);
-
-    private sealed class ErrorCaptureLogger : ILogger
+    private static JsonObject? TryParseMsBuildDiagnostic(string line)
     {
-        public LoggerVerbosity Verbosity { get; set; } = LoggerVerbosity.Quiet;
+        Match match = MsBuildDiagnosticPattern().Match(line);
+        if (!match.Success || !string.Equals(match.Groups["severity"].Value, "error", StringComparison.OrdinalIgnoreCase))
+            return null;
 
-        public string? Parameters { get; set; } = string.Empty;
-
-        public List<JsonObject> Errors { get; } = [];
-
-        public void Initialize(IEventSource eventSource)
-        {
-            eventSource.ErrorRaised += OnErrorRaised;
-        }
-
-        public void Shutdown()
-        {
-        }
-
-        private void OnErrorRaised(object sender, BuildErrorEventArgs args)
-        {
-            Errors.Add(new JsonObject
-            {
-                ["file"] = Path.GetFileName(args.File),
-                ["path"] = args.File,
-                ["line"] = args.LineNumber,
-                ["column"] = args.ColumnNumber,
-                ["code"] = args.Code,
-                ["message"] = args.Message,
-                ["project"] = Path.GetFileNameWithoutExtension(args.ProjectFile),
-                ["projectPath"] = args.ProjectFile,
-            });
-        }
+        string filePath = match.Groups["file"].Value;
+        string project = match.Groups["project"].Value;
+        return CreateCliDiagnostic(
+            filePath,
+            int.TryParse(match.Groups["line"].Value, out int lineNumber) ? lineNumber : 1,
+            int.TryParse(match.Groups["column"].Value, out int columnNumber) ? columnNumber : 1,
+            match.Groups["code"].Value,
+            match.Groups["message"].Value,
+            project,
+            project);
     }
+
+    private static JsonObject? TryParseStructuredDiagnostic(string line)
+    {
+        Match match = StructuredDiagnosticPattern().Match(line);
+        if (!match.Success || !string.Equals(match.Groups["severity"].Value, "error", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        string project = match.Groups["project"].Value;
+        return CreateCliDiagnostic(
+            string.Empty,
+            1,
+            1,
+            match.Groups["code"].Value,
+            match.Groups["message"].Value,
+            project,
+            project);
+    }
+
+    private static JsonObject CreateCliDiagnostic(
+        string filePath,
+        int lineNumber,
+        int columnNumber,
+        string code,
+        string message,
+        string project,
+        string projectPath)
+        => new()
+        {
+            ["file"] = string.IsNullOrWhiteSpace(filePath) ? string.Empty : Path.GetFileName(filePath),
+            ["path"] = filePath,
+            ["line"] = lineNumber,
+            ["column"] = columnNumber,
+            ["code"] = code,
+            ["message"] = message,
+            ["project"] = project,
+            ["projectPath"] = projectPath,
+        };
+
+    private static string ResolveDotnetExecutable(JsonNode? id)
+    {
+        string? explicitHost = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
+        if (!string.IsNullOrWhiteSpace(explicitHost) && File.Exists(explicitHost))
+            return explicitHost;
+
+        string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        string candidate = Path.Combine(programFiles, "dotnet", "dotnet.exe");
+        if (File.Exists(candidate))
+            return candidate;
+
+        candidate = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "dotnet", "dotnet.exe");
+        if (File.Exists(candidate))
+            return candidate;
+
+        throw new McpRequestException(id, McpErrorCodes.BridgeError,
+            "Could not locate dotnet.exe for build_errors.");
+    }
+
+    private static string QuoteArg(string value)
+        => $"\"{value.Replace("\"", "\\\"")}\"";
+
+    private enum BuildRunCode
+    {
+        Success,
+        Failure,
+    }
+
+    private sealed record BuildRunResult(BuildRunCode ResultCode, List<JsonObject> Errors);
 
     private static string FindSolutionFile(string directory)
     {

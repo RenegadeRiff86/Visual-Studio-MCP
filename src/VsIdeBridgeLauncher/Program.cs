@@ -29,41 +29,38 @@ namespace VsIdeBridgeLauncher
             }
             catch (ArgumentException ex)
             {
-                return Fail(resultFile, ex.Message);
+                return LauncherResultWriter.Fail(resultFile, ex.Message);
             }
             catch (InvalidOperationException ex)
             {
-                return Fail(resultFile, ex.Message);
+                return LauncherResultWriter.Fail(resultFile, ex.Message);
             }
             catch (IOException ex)
             {
-                return Fail(resultFile, ex.Message);
+                return LauncherResultWriter.Fail(resultFile, ex.Message);
             }
             catch (UnauthorizedAccessException ex)
             {
-                return Fail(resultFile, ex.Message);
+                return LauncherResultWriter.Fail(resultFile, ex.Message);
             }
             catch (System.ComponentModel.Win32Exception ex)
             {
-                return Fail(resultFile, ex.Message);
+                return LauncherResultWriter.Fail(resultFile, ex.Message);
             }
         }
 
         private static int Run(string[] args, ref string resultFile)
         {
             Dictionary<string, string> options = ParseOptions(args);
-            string devenvPath;
-            if (!options.TryGetValue(DevenvPathOption, out devenvPath) || string.IsNullOrWhiteSpace(devenvPath))
+            if (!options.TryGetValue(DevenvPathOption, out string devenvPath) || string.IsNullOrWhiteSpace(devenvPath))
             {
-                return Fail(resultFile, "Missing required argument '--devenv-path'.");
+                return LauncherResultWriter.Fail(resultFile, "Missing required argument '--devenv-path'.");
             }
 
-            string solutionPath;
             options.TryGetValue(ResultFileOption, out resultFile);
-            options.TryGetValue(SolutionOption, out solutionPath);
+            options.TryGetValue(SolutionOption, out string solutionPath);
 
-            string brokerPipeName;
-            if (options.TryGetValue(BrokerPipeOption, out brokerPipeName) && !string.IsNullOrWhiteSpace(brokerPipeName))
+            if (options.TryGetValue(BrokerPipeOption, out string brokerPipeName) && !string.IsNullOrWhiteSpace(brokerPipeName))
             {
                 return RunBroker(brokerPipeName);
             }
@@ -72,10 +69,10 @@ namespace VsIdeBridgeLauncher
             if (!launchAttempt.IsSuccessful || !launchAttempt.ProcessId.HasValue)
             {
                 TryTerminate(launchAttempt.LaunchedProcesses);
-                return Fail(resultFile, launchAttempt.Error ?? "Visual Studio launch failed.");
+                return LauncherResultWriter.Fail(resultFile, launchAttempt.Error ?? "Visual Studio launch failed.");
             }
 
-            WriteResult(resultFile, true, launchAttempt.ProcessId, null);
+            LauncherResultWriter.WriteResult(resultFile, true, launchAttempt.ProcessId, null);
             return 0;
         }
 
@@ -85,20 +82,19 @@ namespace VsIdeBridgeLauncher
 
             while (true)
             {
-                using (NamedPipeServerStream server = new NamedPipeServerStream(
+                using NamedPipeServerStream server = new(
                     pipeName,
                     PipeDirection.InOut,
                     1,
                     PipeTransmissionMode.Byte,
-                    PipeOptions.None))
-                {
-                    if (!TryWaitForBrokerConnection(server, ref lastActivityUtc))
-                    {
-                        return 0;
-                    }
+                    PipeOptions.None);
 
-                    HandleBrokerConnection(server);
+                if (!TryWaitForBrokerConnection(server, ref lastActivityUtc))
+                {
+                    return 0;
                 }
+
+                HandleBrokerConnection(server);
             }
         }
 
@@ -120,32 +116,31 @@ namespace VsIdeBridgeLauncher
 
         private static void HandleBrokerConnection(NamedPipeServerStream server)
         {
-            using (StreamReader reader = new StreamReader(server, Encoding.UTF8, false, 1024, true))
-            using (StreamWriter writer = new StreamWriter(server, new UTF8Encoding(false), 1024, true)
+            using StreamReader reader = new(server, Encoding.UTF8, false, 1024, true);
+            using StreamWriter writer = new(server, new UTF8Encoding(false), 1024, true)
             {
                 AutoFlush = true
-            })
+            };
+
+            BrokerRequest request = ParseBrokerRequest(reader.ReadLine());
+            if (!request.IsValid)
             {
-                BrokerRequest request = ParseBrokerRequest(reader.ReadLine());
-                if (!request.IsValid)
-                {
-                    writer.Write("error\t");
-                    writer.WriteLine(request.ErrorMessage);
-                    return;
-                }
-
-                LaunchAttemptResult launchAttempt = LaunchVisualStudio(request.DevenvPath, request.SolutionPath);
-                if (!launchAttempt.IsSuccessful || !launchAttempt.ProcessId.HasValue)
-                {
-                    writer.Write("error\t");
-                    writer.WriteLine((launchAttempt.Error ?? "Visual Studio launch failed.").Replace('\r', ' ').Replace('\n', ' '));
-                    TryTerminate(launchAttempt.LaunchedProcesses);
-                    return;
-                }
-
-                writer.Write("ok\t");
-                writer.WriteLine(launchAttempt.ProcessId.Value.ToString());
+                writer.Write("error\t");
+                writer.WriteLine(request.ErrorMessage);
+                return;
             }
+
+            LaunchAttemptResult launchAttempt = LaunchVisualStudio(request.DevenvPath, request.SolutionPath);
+            if (!launchAttempt.IsSuccessful || !launchAttempt.ProcessId.HasValue)
+            {
+                writer.Write("error\t");
+                writer.WriteLine((launchAttempt.Error ?? "Visual Studio launch failed.").Replace('\r', ' ').Replace('\n', ' '));
+                TryTerminate(launchAttempt.LaunchedProcesses);
+                return;
+            }
+
+            writer.Write("ok\t");
+            writer.WriteLine(launchAttempt.ProcessId.Value.ToString());
         }
 
         private static BrokerRequest ParseBrokerRequest(string request)
@@ -173,7 +168,7 @@ namespace VsIdeBridgeLauncher
                 return LaunchAttemptResult.Failed(string.Format("devenv.exe not found: {0}", devenvPath), new List<Process>());
             }
 
-            ProcessStartInfo startInfo = new ProcessStartInfo
+            ProcessStartInfo startInfo = new()
             {
                 FileName = devenvPath,
                 UseShellExecute = true,
@@ -187,21 +182,19 @@ namespace VsIdeBridgeLauncher
 
             HashSet<int> existingProcessIds = CaptureExistingDevenvProcessIds();
 
-            using (Process process = Process.Start(startInfo))
+            using Process process = Process.Start(startInfo);
+            if (process == null)
             {
-                if (process == null)
-                {
-                    return LaunchAttemptResult.Failed("Visual Studio launch failed: Process.Start returned null.", new List<Process>());
-                }
-
-                LaunchAttemptResult launchAttempt = WaitForVisualStudioStartup(process, existingProcessIds);
-                if (!launchAttempt.IsSuccessful)
-                {
-                    TryTerminate(process);
-                }
-
-                return launchAttempt;
+                return LaunchAttemptResult.Failed("Visual Studio launch failed: Process.Start returned null.", new List<Process>());
             }
+
+            LaunchAttemptResult launchAttempt = WaitForVisualStudioStartup(process, existingProcessIds);
+            if (!launchAttempt.IsSuccessful)
+            {
+                TryTerminate(process);
+            }
+
+            return launchAttempt;
         }
 
         private static string DecodePipeValue(string value)
@@ -217,7 +210,7 @@ namespace VsIdeBridgeLauncher
 
         private static Dictionary<string, string> ParseOptions(string[] args)
         {
-            Dictionary<string, string> options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, string> options = new(StringComparer.OrdinalIgnoreCase);
             for (int index = 0; index < args.Length; index++)
             {
                 string argument = args[index];
@@ -237,71 +230,9 @@ namespace VsIdeBridgeLauncher
             return options;
         }
 
-        private static int Fail(string resultFile, string error)
-        {
-            string detailedError = AppendLaunchEnvironmentDetails(error);
-            WriteResult(resultFile, false, null, detailedError);
-            Console.Error.WriteLine(detailedError);
-            return 1;
-        }
-
-        private static string AppendLaunchEnvironmentDetails(string error)
-        {
-            StringBuilder builder = new StringBuilder();
-            builder.Append(error);
-            builder.AppendLine();
-            builder.AppendLine();
-            builder.AppendLine("Launcher environment:");
-            AppendEnvironmentValue(builder, "CurrentDirectory", Environment.CurrentDirectory);
-            AppendEnvironmentValue(builder, "SystemRoot", Environment.GetEnvironmentVariable("SystemRoot"));
-            AppendEnvironmentValue(builder, "windir", Environment.GetEnvironmentVariable("windir"));
-            AppendEnvironmentValue(builder, "USERPROFILE", Environment.GetEnvironmentVariable("USERPROFILE"));
-            AppendEnvironmentValue(builder, "APPDATA", Environment.GetEnvironmentVariable("APPDATA"));
-            AppendEnvironmentValue(builder, "LOCALAPPDATA", Environment.GetEnvironmentVariable("LOCALAPPDATA"));
-            AppendEnvironmentValue(builder, "TEMP", Environment.GetEnvironmentVariable("TEMP"));
-            AppendEnvironmentValue(builder, "TMP", Environment.GetEnvironmentVariable("TMP"));
-            return builder.ToString();
-        }
-
-        private static void AppendEnvironmentValue(StringBuilder builder, string name, string value)
-        {
-            builder.Append("  ");
-            builder.Append(name);
-            builder.Append(" = ");
-            builder.AppendLine(string.IsNullOrWhiteSpace(value) ? "<null>" : value);
-        }
-
-        private static void WriteResult(string resultFile, bool success, int? pid, string error)
-        {
-            if (string.IsNullOrWhiteSpace(resultFile))
-            {
-                return;
-            }
-
-            string directory = Path.GetDirectoryName(resultFile);
-            if (!string.IsNullOrWhiteSpace(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            StringBuilder payload = new StringBuilder();
-            payload.Append('{');
-            payload.Append("\"success\":");
-            payload.Append(success ? "true" : "false");
-            payload.Append(',');
-            payload.Append("\"pid\":");
-            payload.Append(pid.HasValue ? pid.Value.ToString() : "null");
-            payload.Append(',');
-            payload.Append("\"error\":");
-            payload.Append(error == null ? "null" : QuoteJson(error));
-            payload.Append('}');
-
-            File.WriteAllText(resultFile, payload.ToString());
-        }
-
         private static LaunchAttemptResult WaitForVisualStudioStartup(Process process, HashSet<int> existingProcessIds)
         {
-            List<Process> launchedProcesses = new List<Process>();
+            List<Process> launchedProcesses = new();
             Stopwatch stopwatch = Stopwatch.StartNew();
             while (stopwatch.ElapsedMilliseconds < StartupValidationTimeoutMilliseconds)
             {
@@ -327,8 +258,7 @@ namespace VsIdeBridgeLauncher
                     return LaunchAttemptResult.Failed(evaluation.Error, launchedProcesses);
                 }
 
-                Process launchedProcess;
-                if (catalog.ProcessesById.TryGetValue(evaluation.ActiveProcessId, out launchedProcess))
+                if (catalog.ProcessesById.TryGetValue(evaluation.ActiveProcessId, out Process launchedProcess))
                 {
                     process = launchedProcess;
                 }
@@ -351,14 +281,12 @@ namespace VsIdeBridgeLauncher
 
         private static HashSet<int> CaptureExistingDevenvProcessIds()
         {
-            HashSet<int> processIds = new HashSet<int>();
+            HashSet<int> processIds = new();
             Process[] processes = Process.GetProcessesByName("devenv");
             for (int index = 0; index < processes.Length; index++)
             {
-                using (Process existingProcess = processes[index])
-                {
-                    processIds.Add(existingProcess.Id);
-                }
+                using Process existingProcess = processes[index];
+                processIds.Add(existingProcess.Id);
             }
 
             return processIds;
@@ -367,8 +295,8 @@ namespace VsIdeBridgeLauncher
         private static LauncherProcessCatalog CaptureLaunchedDevenvProcesses(HashSet<int> existingProcessIds, List<Process> launchedProcesses)
         {
             Process[] processes = Process.GetProcessesByName("devenv");
-            Dictionary<int, Process> candidatesById = new Dictionary<int, Process>();
-            List<LauncherProcessSnapshot> snapshots = new List<LauncherProcessSnapshot>();
+            Dictionary<int, Process> candidatesById = new();
+            List<LauncherProcessSnapshot> snapshots = new();
 
             for (int index = 0; index < processes.Length; index++)
             {
@@ -573,9 +501,75 @@ namespace VsIdeBridgeLauncher
             return string.Concat("\"", value.Replace("\\", "\\\\").Replace("\"", "\\\""), "\"");
         }
 
+    }
+
+    internal static class LauncherResultWriter
+    {
+        public static int Fail(string resultFile, string error)
+        {
+            string detailedError = AppendLaunchEnvironmentDetails(error);
+            WriteResult(resultFile, false, null, detailedError);
+            Console.Error.WriteLine(detailedError);
+            return 1;
+        }
+
+        public static void WriteResult(string resultFile, bool success, int? pid, string error)
+        {
+            if (string.IsNullOrWhiteSpace(resultFile))
+            {
+                return;
+            }
+
+            string directory = Path.GetDirectoryName(resultFile);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            StringBuilder payload = new();
+            payload.Append('{');
+            payload.Append("\"success\":");
+            payload.Append(success ? "true" : "false");
+            payload.Append(',');
+            payload.Append("\"pid\":");
+            payload.Append(pid.HasValue ? pid.Value.ToString() : "null");
+            payload.Append(',');
+            payload.Append("\"error\":");
+            payload.Append(error == null ? "null" : QuoteJson(error));
+            payload.Append('}');
+
+            File.WriteAllText(resultFile, payload.ToString());
+        }
+
+        private static string AppendLaunchEnvironmentDetails(string error)
+        {
+            StringBuilder builder = new();
+            builder.Append(error);
+            builder.AppendLine();
+            builder.AppendLine();
+            builder.AppendLine("Launcher environment:");
+            AppendEnvironmentValue(builder, "CurrentDirectory", Environment.CurrentDirectory);
+            AppendEnvironmentValue(builder, "SystemRoot", Environment.GetEnvironmentVariable("SystemRoot"));
+            AppendEnvironmentValue(builder, "windir", Environment.GetEnvironmentVariable("windir"));
+            AppendEnvironmentValue(builder, "USERPROFILE", Environment.GetEnvironmentVariable("USERPROFILE"));
+            AppendEnvironmentValue(builder, "APPDATA", Environment.GetEnvironmentVariable("APPDATA"));
+            AppendEnvironmentValue(builder, "LOCALAPPDATA", Environment.GetEnvironmentVariable("LOCALAPPDATA"));
+            AppendEnvironmentValue(builder, "TEMP", Environment.GetEnvironmentVariable("TEMP"));
+            AppendEnvironmentValue(builder, "TMP", Environment.GetEnvironmentVariable("TMP"));
+            return builder.ToString();
+        }
+
+        private static void AppendEnvironmentValue(StringBuilder builder, string name, string value)
+        {
+            builder.Append("  ");
+            builder.Append(name);
+            builder.Append(" = ");
+            builder.AppendLine(string.IsNullOrWhiteSpace(value) ? "<null>" : value);
+        }
+
         private static string QuoteJson(string value)
         {
-            StringBuilder builder = new StringBuilder();
+            StringBuilder builder = new();
             builder.Append('"');
             foreach (char character in value)
             {

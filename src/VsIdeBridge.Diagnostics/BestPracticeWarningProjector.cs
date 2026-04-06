@@ -13,7 +13,7 @@ internal static class BestPracticeWarningProjector
 
     public static JArray CreateResponseWarnings(IReadOnlyList<JObject> rows, string? projectUniqueName)
     {
-        JArray warnings = new JArray();
+        JArray warnings = [];
 
         foreach (JObject row in rows)
         {
@@ -37,7 +37,7 @@ internal static class BestPracticeWarningProjector
             ? GetString(row, ErrorListConstants.ProjectKey)
             : projectUniqueName ?? string.Empty;
 
-        JObject warning = new JObject
+        JObject warning = new()
         {
             [ErrorListConstants.SeverityKey] = row[ErrorListConstants.SeverityKey] ?? ErrorListConstants.WarningSeverity,
             [ErrorListConstants.CodeKey] = code,

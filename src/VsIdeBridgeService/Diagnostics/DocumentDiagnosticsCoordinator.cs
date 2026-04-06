@@ -2,12 +2,12 @@ using System.Text.Json.Nodes;
 
 namespace VsIdeBridgeService.Diagnostics;
 
-internal sealed class DocumentDiagnosticsCoordinator
+internal sealed class DocumentDiagnosticsCoordinator(BridgeConnection bridge)
 {
     private static readonly TimeSpan RefreshDebounceInterval = TimeSpan.FromSeconds(2);
     private const string DefaultWarningCacheMax = "50";
 
-    private readonly BridgeConnection _bridge;
+    private readonly BridgeConnection _bridge = bridge;
     private readonly object _gate = new();
 
     private Task? _refreshTask;
@@ -20,8 +20,6 @@ internal sealed class DocumentDiagnosticsCoordinator
     private DateTimeOffset? _lastCompletedUtc;
     private JsonObject? _lastErrors;
     private JsonObject? _lastWarnings;
-
-    public DocumentDiagnosticsCoordinator(BridgeConnection bridge) => _bridge = bridge;
 
     public JsonObject QueueRefreshAndGetSnapshot(string reason, bool clearCached = false)
     {
@@ -137,7 +135,7 @@ internal sealed class DocumentDiagnosticsCoordinator
                     _lastCompletedUtc = DateTimeOffset.UtcNow;
                 }
             }
-            catch (Exception ex)
+        catch (Exception ex) when (ex is not null) // background diagnostics loop boundary
             {
                 lock (_gate)
                 {
@@ -179,11 +177,17 @@ internal sealed class DocumentDiagnosticsCoordinator
             Status = _status,
             Reason = _reason,
             LastError = _lastError,
-            LastQueuedUtc = FormatUtc(_lastQueuedUtc),
-            LastStartedUtc = FormatUtc(_lastStartedUtc),
-            LastCompletedUtc = FormatUtc(_lastCompletedUtc),
-            Errors = _lastErrors,
-            Warnings = _lastWarnings,
+            Timing = new DocumentDiagnosticsTimingSnapshot
+            {
+                LastQueuedUtc = FormatUtc(_lastQueuedUtc),
+                LastStartedUtc = FormatUtc(_lastStartedUtc),
+                LastCompletedUtc = FormatUtc(_lastCompletedUtc),
+            },
+            Results = new DocumentDiagnosticsResultSnapshot
+            {
+                Errors = _lastErrors,
+                Warnings = _lastWarnings,
+            },
         };
     }
 

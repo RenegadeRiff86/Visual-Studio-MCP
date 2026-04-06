@@ -30,14 +30,14 @@ internal static class SolutionFileLocator
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var trimmedQuery = query?.Trim() ?? string.Empty;
+        string trimmedQuery = query?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(trimmedQuery))
         {
             return [];
         }
 
-        var normalizedQuery = NormalizeQuery(trimmedQuery);
-        var queryFileName = Path.GetFileName(trimmedQuery.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar));
+        string normalizedQuery = NormalizeQuery(trimmedQuery);
+        string? queryFileName = Path.GetFileName(trimmedQuery.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar));
 
         return [.. EnumerateSolutionFiles(dte)
             .Select(item => new Match
@@ -93,22 +93,22 @@ internal static class SolutionFileLocator
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        var trimmedQuery = query?.Trim() ?? string.Empty;
+        string trimmedQuery = query?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(trimmedQuery))
         {
             return [];
         }
 
-        var solutionDirectory = GetSolutionDirectory(dte);
+        string? solutionDirectory = GetSolutionDirectory(dte);
         if (string.IsNullOrWhiteSpace(solutionDirectory) || !Directory.Exists(solutionDirectory))
         {
             return [];
         }
 
-        var normalizedQuery = NormalizeQuery(trimmedQuery);
-        var queryFileName = Path.GetFileName(trimmedQuery.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar));
-        var results = new List<Match>();
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string normalizedQuery = NormalizeQuery(trimmedQuery);
+        string? queryFileName = Path.GetFileName(trimmedQuery.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar));
+        List<Match> results = [];
+        HashSet<string> visited = [];
 
         IEnumerable<string> files;
         try
@@ -132,7 +132,7 @@ internal static class SolutionFileLocator
                 continue;
             }
 
-            if (!visited.Add(normalizedPath))
+            if (!visited.Add(normalizedPath.ToLowerInvariant()))
             {
                 continue;
             }
@@ -142,7 +142,7 @@ internal static class SolutionFileLocator
                 continue;
             }
 
-            var score = ScoreMatch(normalizedPath, trimmedQuery, normalizedQuery, queryFileName);
+            int score = ScoreMatch(normalizedPath, trimmedQuery, normalizedQuery, queryFileName);
             if (score <= 0)
             {
                 continue;
@@ -171,9 +171,9 @@ internal static class SolutionFileLocator
 
     private static int ScoreMatch(string candidatePath, string rawQuery, string normalizedQuery, string queryFileName)
     {
-        var candidateKey = NormalizeQuery(candidatePath);
-        var candidateName = Path.GetFileName(candidatePath);
-        var score = 0;
+        string candidateKey = NormalizeQuery(candidatePath);
+        string? candidateName = Path.GetFileName(candidatePath);
+        int score = 0;
 
         if (Path.IsPathRooted(rawQuery) && PathNormalization.AreEquivalent(candidatePath, rawQuery))
         {
@@ -226,7 +226,7 @@ internal static class SolutionFileLocator
             return string.Empty;
         }
 
-        var normalized = Path.IsPathRooted(path)
+        string normalized = Path.IsPathRooted(path)
             ? PathNormalization.NormalizeFilePath(path)
             : path.Trim();
 
@@ -242,8 +242,8 @@ internal static class SolutionFileLocator
     {
         if (!string.IsNullOrWhiteSpace(pathFilter))
         {
-            var normalizedFilter = NormalizeQuery(pathFilter!);
-            var normalizedCandidate = NormalizeQuery(candidatePath);
+            string normalizedFilter = NormalizeQuery(pathFilter!);
+            string normalizedCandidate = NormalizeQuery(candidatePath);
             if (!normalizedCandidate.Contains(normalizedFilter, StringComparison.OrdinalIgnoreCase))
             {
                 return false;
@@ -252,15 +252,15 @@ internal static class SolutionFileLocator
 
         if (extensions is not null && extensions.Count > 0)
         {
-            var ext = Path.GetExtension(candidatePath);
+            string? ext = Path.GetExtension(candidatePath);
             if (string.IsNullOrWhiteSpace(ext))
             {
                 return false;
             }
 
-            var matched = extensions.Any(item =>
+            bool matched = extensions.Any(item =>
             {
-                var normalized = item.StartsWith(".") ? item : "." + item;
+                string normalized = item.StartsWith(".") ? item : "." + item;
                 return string.Equals(normalized, ext, StringComparison.OrdinalIgnoreCase);
             });
 
@@ -348,7 +348,7 @@ internal static class SolutionFileLocator
         {
             for (short i = 1; i <= item.FileCount; i++)
             {
-                var fileName = item.FileNames[i];
+                string fileName = item.FileNames[i];
                 if (!string.IsNullOrWhiteSpace(fileName))
                     yield return (PathNormalization.NormalizeFilePath(fileName), projectUniqueName);
             }

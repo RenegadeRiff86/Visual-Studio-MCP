@@ -16,6 +16,12 @@ internal sealed class SolutionExplorerSyncService
     public async Task TrySyncToActiveDocumentAsync(DTE2 dte, CancellationToken cancellationToken)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+        TrySyncToActiveDocumentCore(dte);
+    }
+
+    private static void TrySyncToActiveDocumentCore(DTE2 dte)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
 
         Document? activeDocument = dte.ActiveDocument;
         if (activeDocument is null || string.IsNullOrWhiteSpace(activeDocument.FullName))
@@ -36,13 +42,6 @@ internal sealed class SolutionExplorerSyncService
                 $"Solution Explorer sync failed for '{activeDocument.FullName}': {ex.Message}");
             return;
         }
-        catch (Exception ex)
-        {
-            ActivityLog.LogWarning(
-                ActivityLogSource,
-                $"Solution Explorer sync failed for '{activeDocument.FullName}': {ex.Message}");
-            return;
-        }
 
         try
         {
@@ -54,7 +53,7 @@ internal sealed class SolutionExplorerSyncService
 
             activeDocument.Activate();
         }
-        catch (Exception ex)
+        catch (COMException ex)
         {
             ActivityLog.LogWarning(
                 ActivityLogSource,

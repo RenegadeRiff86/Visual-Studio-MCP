@@ -338,32 +338,40 @@ internal static class BestPracticeRuleCatalog
     public static string GetAuthority(string code)
     {
         string helpUri = GetHelpUri(code);
-        if (helpUri.IndexOf("learn.microsoft.com", System.StringComparison.OrdinalIgnoreCase) >= 0)
+        if (ContainsUri(helpUri, "learn.microsoft.com"))
         {
             return ErrorListConstants.MicrosoftAuthority;
         }
 
-        if (helpUri.IndexOf("documentation.help/StyleCop", System.StringComparison.OrdinalIgnoreCase) >= 0)
+        if (ContainsUri(helpUri, "documentation.help/StyleCop"))
         {
             return ErrorListConstants.StyleCopAuthority;
         }
 
-        if (helpUri.IndexOf("peps.python.org", System.StringComparison.OrdinalIgnoreCase) >= 0
-            || helpUri.IndexOf("docs.python.org", System.StringComparison.OrdinalIgnoreCase) >= 0)
+        if (ContainsUri(helpUri, "peps.python.org")
+            || ContainsUri(helpUri, "docs.python.org"))
         {
             return ErrorListConstants.PythonDocsAuthority;
         }
 
-        if (helpUri.IndexOf("isocpp.github.io", System.StringComparison.OrdinalIgnoreCase) >= 0)
+        if (ContainsUri(helpUri, "isocpp.github.io"))
         {
             return ErrorListConstants.CppCoreGuidelinesAuthority;
         }
 
-        if (helpUri.IndexOf("learn.microsoft.com/en-us/powershell", System.StringComparison.OrdinalIgnoreCase) >= 0)
+        if (ContainsUri(helpUri, "learn.microsoft.com/en-us/powershell"))
         {
             return ErrorListConstants.PowerShellAuthority;
         }
 
         return ErrorListConstants.ProjectLocalAuthority;
     }
+
+#if NETFRAMEWORK
+    private static bool ContainsUri(string haystack, string needle)
+        => haystack.IndexOf(needle, System.StringComparison.OrdinalIgnoreCase) >= 0;
+#else
+    private static bool ContainsUri(string haystack, string needle)
+        => haystack.Contains(needle, System.StringComparison.OrdinalIgnoreCase);
+#endif
 }
