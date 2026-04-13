@@ -43,19 +43,24 @@ internal static partial class ToolCatalog
     private const string Python = "python";
     private const string Core = "core";
     private const string SystemCategory = "system";
+    private const string MessagesTool = "messages";
+    private const string DiagnosticsSnapshotCommand = "diagnostics-snapshot";
 
     private const string DefaultMaxRows = "50";
     private const int DefaultCompactDiagnosticsRows = 50;
     private const string Refresh = "refresh";
+    private const string PassiveDiagnosticsReadDescription = "Read the current passive diagnostics snapshot immediately. This may be stale relative to the live Error List.";
+    private const string RefreshDiagnosticsDescription = "Force the Error List to refresh before reading when you need a fresh UI read (default false).";
+    private const string PassiveSnapshotStaleWarning = "Using the passive diagnostics snapshot. This list may be stale relative to the current Visual Studio Error List. Use refresh=true for a fresh UI read.";
 
     private static ToolEntry CreateErrorsTool()
     {
         ToolDefinition errorsDefinition = ToolDefinitionCatalog.Errors(
             ObjectSchema(
                 Opt(Severity, "Optional severity filter."),
-                OptBool(WaitForIntellisense, "Wait for IntelliSense readiness first (default true)."),
-                OptBool(Quick, "Read current snapshot immediately (default false)."),
-                OptBool(Refresh, "Force the Error List to refresh before reading (default false)."),
+                OptBool(WaitForIntellisense, "Wait for IntelliSense readiness before a live filtered or refresh read (default false)."),
+                OptBool(Quick, PassiveDiagnosticsReadDescription),
+                OptBool(Refresh, RefreshDiagnosticsDescription),
                 OptInt(Max, "Max rows to return. Defaults to 50 when no filters are set."),
                 Opt(Code, "Optional diagnostic code prefix filter."),
                 Opt(Project, ProjectFilterDesc),
@@ -71,6 +76,18 @@ internal static partial class ToolCatalog
                 if (bridge.DocumentDiagnostics.TryGetCachedErrors(args, out JsonObject cachedErrors))
                 {
                     return BridgeResult(cachedErrors);
+                }
+
+                if (ShouldPreferSnapshotDiagnosticsRead(args))
+                {
+                    JsonObject snapshotResponse = await bridge.SendAsync(id, DiagnosticsSnapshotCommand, BuildPassiveDiagnosticsSnapshotArgs())
+                        .ConfigureAwait(false);
+                    JsonObject? fallback = CreateDiagnosticsResultFromSnapshot(snapshotResponse, "errors", interruptedDirectRead: false);
+                    if (fallback is not null)
+                    {
+                        CompactDiagnosticsResponse(fallback, args);
+                        return BridgeResult(fallback);
+                    }
                 }
 
                 bool hasFilters = args?[Code] is not null || args?[Severity] is not null
@@ -90,7 +107,12 @@ internal static partial class ToolCatalog
                     (Path, OptionalString(args, Path)),
                     (Text, OptionalString(args, Text)),
                     ("group-by", OptionalString(args, GroupBy)));
-                JsonObject response = await bridge.SendAsync(id, "errors", errorArgs)
+                JsonObject response = await SendDiagnosticsCommandWithSnapshotFallbackAsync(
+                        bridge,
+                        id,
+                        "errors",
+                        errorArgs,
+                        args)
                     .ConfigureAwait(false);
                 CompactDiagnosticsResponse(response, args);
                 return BridgeResult(response);
@@ -103,9 +125,9 @@ internal static partial class ToolCatalog
             "Capture warning rows with optional code/path/project filters.",
             ObjectSchema(
                 Opt(Severity, "Optional severity filter."),
-                OptBool(WaitForIntellisense, "Wait for IntelliSense readiness first (default true)."),
-                OptBool(Quick, "Read current snapshot immediately (default false)."),
-                OptBool(Refresh, "Force the Error List to refresh before reading (default false)."),
+                OptBool(WaitForIntellisense, "Wait for IntelliSense readiness before a live filtered or refresh read (default false)."),
+                OptBool(Quick, PassiveDiagnosticsReadDescription),
+                OptBool(Refresh, RefreshDiagnosticsDescription),
                 OptInt(Max, "Max rows to return. Defaults to 50 when no filters are set."),
                 Opt(Code, "Optional warning code prefix filter."),
                 Opt(Project, ProjectFilterDesc),
@@ -118,6 +140,18 @@ internal static partial class ToolCatalog
                 if (bridge.DocumentDiagnostics.TryGetCachedWarnings(args, out JsonObject cachedWarnings))
                 {
                     return BridgeResult(cachedWarnings);
+                }
+
+                if (ShouldPreferSnapshotDiagnosticsRead(args))
+                {
+                    JsonObject snapshotResponse = await bridge.SendAsync(id, DiagnosticsSnapshotCommand, BuildPassiveDiagnosticsSnapshotArgs())
+                        .ConfigureAwait(false);
+                    JsonObject? fallback = CreateDiagnosticsResultFromSnapshot(snapshotResponse, Warnings, interruptedDirectRead: false);
+                    if (fallback is not null)
+                    {
+                        CompactDiagnosticsResponse(fallback, args);
+                        return BridgeResult(fallback);
+                    }
                 }
 
                 bool hasFilters = args?[Code] is not null || args?[Severity] is not null
@@ -136,7 +170,12 @@ internal static partial class ToolCatalog
                     (Path, OptionalString(args, Path)),
                     (Text, OptionalString(args, Text)),
                     ("group-by", OptionalString(args, GroupBy)));
-                JsonObject response = await bridge.SendAsync(id, Warnings, warningArgs)
+                JsonObject response = await SendDiagnosticsCommandWithSnapshotFallbackAsync(
+                        bridge,
+                        id,
+                        Warnings,
+                        warningArgs,
+                        args)
                     .ConfigureAwait(false);
                 CompactDiagnosticsResponse(response, args);
                 return BridgeResult(response);
@@ -151,9 +190,9 @@ internal static partial class ToolCatalog
         ToolDefinition messagesDefinition = ToolDefinitionCatalog.Messages(
                 ObjectSchema(
                     Opt(Severity, "Optional severity filter."),
-                    OptBool(WaitForIntellisense, "Wait for IntelliSense readiness first (default true)."),
-                    OptBool(Quick, "Read current snapshot immediately (default false)."),
-                    OptBool(Refresh, "Force the Error List to refresh before reading (default false)."),
+                    OptBool(WaitForIntellisense, "Wait for IntelliSense readiness before a live filtered or refresh read (default false)."),
+                    OptBool(Quick, PassiveDiagnosticsReadDescription),
+                    OptBool(Refresh, RefreshDiagnosticsDescription),
                     OptInt(Max, "Max rows to return. Defaults to 50 when no filters are set."),
                     Opt(Code, "Optional message code prefix filter."),
                     Opt(Project, ProjectFilterDesc),
@@ -173,6 +212,18 @@ internal static partial class ToolCatalog
                     return BridgeResult(cachedMessages);
                 }
 
+                if (ShouldPreferSnapshotDiagnosticsRead(args))
+                {
+                    JsonObject snapshotResponse = await bridge.SendAsync(id, DiagnosticsSnapshotCommand, BuildPassiveDiagnosticsSnapshotArgs())
+                        .ConfigureAwait(false);
+                    JsonObject? fallback = CreateDiagnosticsResultFromSnapshot(snapshotResponse, MessagesTool, interruptedDirectRead: false);
+                    if (fallback is not null)
+                    {
+                        CompactDiagnosticsResponse(fallback, args);
+                        return BridgeResult(fallback);
+                    }
+                }
+
                 bool hasFilters = args?[Code] is not null || args?[Severity] is not null
                     || args?[Project] is not null || args?[Path] is not null || args?[Text] is not null;
                 string? maxValue = args?[Max] is not null ? OptionalText(args, Max) : (hasFilters ? null : DefaultMaxRows);
@@ -190,7 +241,12 @@ internal static partial class ToolCatalog
                     (Path, OptionalString(args, Path)),
                     (Text, OptionalString(args, Text)),
                     ("group-by", OptionalString(args, GroupBy)));
-                JsonObject response = await bridge.SendAsync(id, "messages", messageArgs)
+                JsonObject response = await SendDiagnosticsCommandWithSnapshotFallbackAsync(
+                        bridge,
+                        id,
+                        MessagesTool,
+                        messageArgs,
+                        args)
                     .ConfigureAwait(false);
                 CompactDiagnosticsResponse(response, args);
                 return BridgeResult(response);
@@ -210,6 +266,7 @@ internal static partial class ToolCatalog
         yield return new("diagnostics_snapshot",
             "One-shot snapshot combining IDE state, build status, debugger mode, and error/warning counts. " +
             "Use at the start of a session or after a build instead of calling errors + vs_state separately. " +
+            "This is a passive snapshot and may be stale relative to the current Error List. " +
             "With wait_for_intellisense=false it prefers the fast current snapshot; true is slower but fresher.",
             ObjectSchema(OptBool(WaitForIntellisense, "Wait for IntelliSense readiness (default false).")),
             Diagnostics,
@@ -219,8 +276,9 @@ internal static partial class ToolCatalog
                 string snapshotArgs = Build(
                     BoolArg(WaitForIntellisenseHyphen, args, WaitForIntellisense, false, true),
                     (Quick, waitForIntellisense ? null : "true"));
-                JsonObject response = await bridge.SendAsync(id, "diagnostics-snapshot", snapshotArgs)
+                JsonObject response = await bridge.SendAsync(id, DiagnosticsSnapshotCommand, snapshotArgs)
                     .ConfigureAwait(false);
+                AddPassiveSnapshotWarning(response);
                 CompactDiagnosticsResponse(response, args);
                 return BridgeResult(response, args);
             },
@@ -257,6 +315,172 @@ internal static partial class ToolCatalog
                 }
                 break;
         }
+    }
+
+    private static async Task<JsonObject> SendDiagnosticsCommandWithSnapshotFallbackAsync(
+        BridgeConnection bridge,
+        JsonNode? id,
+        string command,
+        string argsText,
+        JsonObject? args)
+    {
+        JsonObject response;
+        try
+        {
+            response = await bridge.SendAsync(id, command, argsText).ConfigureAwait(false);
+        }
+        catch (McpRequestException ex) when (IsInterruptedDiagnosticsException(ex))
+        {
+            JsonObject recoverySnapshotResponse = await bridge.SendAsync(id, DiagnosticsSnapshotCommand, BuildDiagnosticsSnapshotArgs(args)).ConfigureAwait(false);
+            JsonObject? fallbackFromException = CreateDiagnosticsResultFromSnapshot(recoverySnapshotResponse, command, interruptedDirectRead: true);
+            if (fallbackFromException is not null)
+            {
+                return fallbackFromException;
+            }
+
+            throw;
+        }
+
+        if (!IsInterruptedDiagnosticsResponse(response))
+        {
+            return response;
+        }
+
+        JsonObject fallbackSnapshotResponse = await bridge.SendAsync(id, DiagnosticsSnapshotCommand, BuildDiagnosticsSnapshotArgs(args)).ConfigureAwait(false);
+        JsonObject? fallback = CreateDiagnosticsResultFromSnapshot(fallbackSnapshotResponse, command, interruptedDirectRead: true);
+        return fallback ?? response;
+    }
+
+    private static bool IsInterruptedDiagnosticsResponse(JsonObject response)
+    {
+        if (response["Success"]?.GetValue<bool>() == true)
+        {
+            return false;
+        }
+
+        string? summary = response["Summary"]?.GetValue<string>();
+        if (string.Equals(summary, "The operation was canceled.", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        string? errorMessage = response["Error"]?["message"]?.GetValue<string>();
+        return string.Equals(errorMessage, "Bridge server interrupted: The operation was canceled.", StringComparison.Ordinal);
+    }
+
+    private static bool IsInterruptedDiagnosticsException(McpRequestException ex)
+        => string.Equals(ex.Message, "Bridge server interrupted: The operation was canceled.", StringComparison.Ordinal)
+            || string.Equals(ex.Message, "The operation was canceled.", StringComparison.Ordinal);
+
+    private static string BuildPassiveDiagnosticsSnapshotArgs()
+        => Build((Quick, "true"));
+
+    private static string BuildDiagnosticsSnapshotArgs(JsonObject? args)
+    {
+        bool waitForIntellisense = args?[WaitForIntellisense]?.GetValue<bool>() ?? false;
+        return Build(
+            BoolArg(WaitForIntellisenseHyphen, args, WaitForIntellisense, false, true),
+            (Quick, waitForIntellisense ? null : "true"));
+    }
+
+    private static bool ShouldPreferSnapshotDiagnosticsRead(JsonObject? args)
+    {
+        if (args is null)
+        {
+            return true;
+        }
+
+        bool quickRequested = args[Quick]?.GetValue<bool>() ?? true;
+
+        return args[Refresh] is null
+            && args[Code] is null
+            && args[Project] is null
+            && args[Path] is null
+            && args[Text] is null
+            && args[GroupBy] is null
+            && quickRequested;
+    }
+
+    private static JsonObject? CreateDiagnosticsResultFromSnapshot(JsonObject snapshotResponse, string command, bool interruptedDirectRead)
+    {
+        if (snapshotResponse["Success"]?.GetValue<bool>() != true || snapshotResponse["Data"] is not JsonObject snapshotData)
+        {
+            return null;
+        }
+
+        string bucketName = command switch
+        {
+            "errors" => "errors",
+            "warnings" => "warnings",
+            MessagesTool => MessagesTool,
+            _ => string.Empty,
+        };
+
+        if (string.IsNullOrWhiteSpace(bucketName) || snapshotData[bucketName] is not JsonObject bucket)
+        {
+            return null;
+        }
+
+        JsonArray warnings = snapshotResponse["Warnings"] as JsonArray is { } existingWarnings
+            ? (JsonArray)existingWarnings.DeepClone()
+            : [];
+        warnings.Add(PassiveSnapshotStaleWarning);
+        if (interruptedDirectRead)
+        {
+            warnings.Add($"Fell back to diagnostics_snapshot after the direct '{command}' read was interrupted.");
+        }
+
+        int count = bucket["count"]?.GetValue<int>() ?? 0;
+        string itemLabel = command switch
+        {
+            "errors" => "Error List row(s)",
+            "warnings" => "warning row(s)",
+            "messages" => "message row(s)",
+            _ => "row(s)",
+        };
+
+        return new JsonObject
+        {
+            ["SchemaVersion"] = snapshotResponse["SchemaVersion"]?.DeepClone(),
+            ["Command"] = command,
+            ["RequestId"] = snapshotResponse["RequestId"]?.DeepClone(),
+            ["Success"] = true,
+            ["StartedAtUtc"] = snapshotResponse["StartedAtUtc"]?.DeepClone(),
+            ["FinishedAtUtc"] = snapshotResponse["FinishedAtUtc"]?.DeepClone(),
+            ["Summary"] = $"Captured {count} {itemLabel}.",
+            ["Warnings"] = warnings,
+            ["Error"] = null,
+            ["Data"] = bucket.DeepClone(),
+            ["Cache"] = BuildPassiveSnapshotCache(command, snapshotResponse, snapshotData),
+        };
+    }
+
+    private static void AddPassiveSnapshotWarning(JsonObject response)
+    {
+        JsonArray warnings = response["Warnings"] as JsonArray is { } existingWarnings
+            ? (JsonArray)existingWarnings.DeepClone()
+            : [];
+        warnings.Add(PassiveSnapshotStaleWarning);
+        response["Warnings"] = warnings;
+    }
+
+    private static JsonObject BuildPassiveSnapshotCache(string command, JsonObject snapshotResponse, JsonObject snapshotData)
+    {
+        JsonObject cache = new()
+        {
+            ["source"] = "diagnostics-snapshot",
+            ["kind"] = command,
+            ["mayBeStale"] = true,
+        };
+
+        JsonNode? capturedAtUtc = snapshotData["lastCompletedUtc"]?.DeepClone()
+            ?? snapshotResponse["FinishedAtUtc"]?.DeepClone();
+        if (capturedAtUtc is not null)
+        {
+            cache["capturedAtUtc"] = capturedAtUtc;
+        }
+
+        return cache;
     }
 
     private static void CompactDiagnosticsObject(JsonObject obj, int maxRows)
@@ -370,6 +594,7 @@ internal static partial class ToolCatalog
                 Opt(Project, "Project name to build (e.g. VsIdeBridgeInstaller). Omit to build the entire solution."),
                 Opt(Configuration, "Optional build configuration (e.g. Release)."),
                 Opt(Platform, "Optional build platform (e.g. x64)."),
+                OptBool(RequireCleanDiagnostics, "When false, bypasses the pre-build dirty-diagnostics guard (default true)."),
                 OptInt(Max, "Max error rows to return (default 20).")),
             Diagnostics,
             async (id, args, bridge) =>
@@ -379,7 +604,7 @@ internal static partial class ToolCatalog
                     (Configuration, OptionalString(args, Configuration)),
                     (Platform, OptionalString(args, Platform)),
                     BoolArg(WaitForIntellisenseHyphen, args, WaitForIntellisense, true, true),
-                    BoolArg("require-clean-diagnostics", args, RequireCleanDiagnostics, false, true));
+                    BoolArg("require-clean-diagnostics", args, RequireCleanDiagnostics, true, true));
 
                 JsonObject response = await bridge.SendAsync(id, "build", buildArgs).ConfigureAwait(false);
 
@@ -450,7 +675,7 @@ internal static partial class ToolCatalog
             Opt(Platform, "Optional build platform (e.g. x64)."),
             OptBool(WaitForIntellisense, "Wait for IntelliSense readiness before building (default true)."),
             OptBool(WaitForCompletion, $"When false, start the operation and return immediately (default {(defaultWaitForCompletion ? "true" : "false")}). Set true to wait for completion."),
-            OptBool(RequireCleanDiagnostics, "When false, bypasses the pre-build dirty-diagnostics guard (default false)."),
+            OptBool(RequireCleanDiagnostics, "When false, bypasses the pre-build dirty-diagnostics guard (default true)."),
             OptBool(ErrorsOnly, "When true, return the build summary plus only error rows so warnings and messages do not flood the response."),
             OptInt(Max, "Max error rows to return when errors_only is true (default 50)."),
         ];
@@ -485,7 +710,7 @@ internal static partial class ToolCatalog
                     (Platform, OptionalString(args, Platform)),
                     BoolArg(WaitForIntellisenseHyphen, args, WaitForIntellisense, true, true),
                     BoolArg(WaitForCompletionHyphen, args, WaitForCompletion, defaultWaitForCompletion, true),
-                    BoolArg("require-clean-diagnostics", args, RequireCleanDiagnostics, false, true));
+                    BoolArg("require-clean-diagnostics", args, RequireCleanDiagnostics, true, true));
 
                 JsonObject response = await bridge.SendAsync(id, pipeCommand, buildArgs).ConfigureAwait(false);
 

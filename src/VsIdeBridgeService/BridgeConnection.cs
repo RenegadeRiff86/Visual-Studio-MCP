@@ -244,8 +244,23 @@ internal sealed class BridgeConnection
 
     private void RememberSolutionPath(string? path)
     {
-        if (!string.IsNullOrWhiteSpace(path))
-            lock (_gate) { _state.LastSolutionPath = path; }
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            _state.LastSolutionPath = path;
+            if (_state.Cached is not null && string.IsNullOrWhiteSpace(_state.Cached.SolutionPath))
+            {
+                _state.Cached = _state.Cached with
+                {
+                    SolutionPath = path,
+                    SolutionName = Path.GetFileName(path),
+                };
+            }
+        }
     }
 
     private void AttachPendingBindingNotice(JsonObject response)

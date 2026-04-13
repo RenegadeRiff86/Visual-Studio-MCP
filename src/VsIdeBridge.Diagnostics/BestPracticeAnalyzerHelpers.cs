@@ -92,7 +92,7 @@ internal static partial class BestPracticeAnalyzerHelpers
                 continue;
             }
 
-            return candidateLine.IndexOf("GeneratedRegex(", StringComparison.Ordinal) >= 0;
+            return candidateLine.Contains("GeneratedRegex(");
         }
 
         return false;

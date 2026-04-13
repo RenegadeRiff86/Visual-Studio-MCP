@@ -12,6 +12,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 using VsIdeBridge.Diagnostics;
@@ -253,7 +254,7 @@ internal sealed partial class ErrorListService
             IReadOnlyList<JObject>? rows = null;
             try
             {
-                rows = ReadRows(context.Dte);
+                rows = await ReadRowsAsync(context).ConfigureAwait(true);
             }
             catch (InvalidOperationException)
             {
@@ -290,19 +291,110 @@ internal sealed partial class ErrorListService
         return lastRows;
     }
 
-    private IReadOnlyList<JObject> ReadRows(DTE2 dte)
+    private async Task<IReadOnlyList<JObject>> ReadRowsAsync(IdeCommandContext context)
     {
-        ThreadHelper.ThrowIfNotOnUIThread();
+        IReadOnlyList<JObject> tableRows = await TryReadTableRowsAsync(context.CancellationToken).ConfigureAwait(false);
+        IReadOnlyList<JObject> dteRows = await ReadDteRowsAsync(context, tableRows).ConfigureAwait(false);
 
-        TryReadTableRows(out var tableRows);
+        // Table rows are preferred (richer data); merge DTE rows to fill gaps
+        // such as language-service diagnostics on Miscellaneous Files.
+        if (tableRows.Count == 0)
+            return dteRows;
 
-        Window? window = TryGetErrorListWindow(dte);
+        return MergeRows(tableRows, dteRows);
+    }
+
+    private async Task<IReadOnlyList<JObject>> TryReadTableRowsAsync(CancellationToken cancellationToken)
+    {
+        IReadOnlyList<ITableDataSource> sources = await GetErrorTableSourcesAsync(cancellationToken).ConfigureAwait(false);
+        if (sources.Count == 0)
+        {
+            return [];
+        }
+
+        using ErrorTableCollector collector = new();
+        List<IDisposable> subscriptions = await SubscribeToErrorTableSourcesAsync(sources, collector, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await collector.WaitForStabilityAsync(TableCollectorQuietPeriod, TableCollectorMaxWait, cancellationToken).ConfigureAwait(false);
+            return collector.GetRows();
+        }
+        finally
+        {
+            foreach (var subscription in subscriptions)
+            {
+                subscription.Dispose();
+            }
+        }
+    }
+
+    private async Task<IReadOnlyList<JObject>> ReadDteRowsAsync(IdeCommandContext context, IReadOnlyList<JObject> tableRows)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
+
+        Window? window = TryGetErrorListWindow(context.Dte);
         if (window?.Object is not ErrorList errorList)
         {
             if (tableRows.Count > 0)
+            {
                 return tableRows;
+            }
+
             throw new InvalidOperationException("Error List window is not available.");
         }
+
+        return CaptureDteRows(errorList);
+    }
+
+    private async Task<IReadOnlyList<ITableDataSource>> GetErrorTableSourcesAsync(CancellationToken cancellationToken)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+
+        ITableManagerProvider? tableManagerProvider = GetTableManagerProvider();
+        if (tableManagerProvider is null)
+        {
+            return [];
+        }
+
+        ITableManager tableManager = tableManagerProvider.GetTableManager(StandardTables.ErrorsTable);
+        return tableManager.Sources.Count == 0 ? [] : [.. tableManager.Sources];
+    }
+
+    private async Task<List<IDisposable>> SubscribeToErrorTableSourcesAsync(
+        IReadOnlyList<ITableDataSource> sources,
+        ErrorTableCollector collector,
+        CancellationToken cancellationToken)
+    {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+
+        List<IDisposable> subscriptions = [];
+        foreach (ITableDataSource source in sources)
+        {
+            subscriptions.Add(source.Subscribe(collector));
+        }
+
+        return subscriptions;
+    }
+
+    private static IReadOnlyList<JObject> CaptureDteRows(ErrorList errorList)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        (bool showErrors, bool showWarnings, bool showMessages) = CaptureDteSeverityVisibility(errorList);
+        try
+        {
+            SetDteSeverityVisibility(errorList, showErrors: true, showWarnings: true, showMessages: true);
+            return CaptureVisibleDteRows(errorList);
+        }
+        finally
+        {
+            SetDteSeverityVisibility(errorList, showErrors, showWarnings, showMessages);
+        }
+    }
+
+    private static IReadOnlyList<JObject> CaptureVisibleDteRows(ErrorList errorList)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
 
         ErrorItems items = errorList.ErrorItems;
         List<JObject> dteRows = [];
@@ -332,12 +424,21 @@ internal sealed partial class ErrorListService
             });
         }
 
-        // Table rows are preferred (richer data); merge DTE rows to fill gaps
-        // such as language-service diagnostics on Miscellaneous Files.
-        if (tableRows.Count == 0)
-            return dteRows;
+        return dteRows;
+    }
 
-        return MergeRows(tableRows, dteRows);
+    private static (bool showErrors, bool showWarnings, bool showMessages) CaptureDteSeverityVisibility(ErrorList errorList)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        return (errorList.ShowErrors, errorList.ShowWarnings, errorList.ShowMessages);
+    }
+
+    private static void SetDteSeverityVisibility(ErrorList errorList, bool showErrors, bool showWarnings, bool showMessages)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        errorList.ShowErrors = showErrors;
+        errorList.ShowWarnings = showWarnings;
+        errorList.ShowMessages = showMessages;
     }
 
     private bool TryReadTableRows(out IReadOnlyList<JObject> rows)

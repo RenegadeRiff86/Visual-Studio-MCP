@@ -198,7 +198,12 @@ internal sealed class DocumentDiagnosticsCoordinator(BridgeConnection bridge)
     {
         if (args is null)
         {
-            return true;
+            return false;
+        }
+
+        if (args["quick"]?.GetValue<bool>() != true)
+        {
+            return false;
         }
 
         if (args["refresh"]?.GetValue<bool>() == true)
@@ -219,7 +224,8 @@ internal sealed class DocumentDiagnosticsCoordinator(BridgeConnection bridge)
     private bool HasUsableCachedDiagnosticsLocked()
     {
         return string.Equals(_cached.Status, "completed", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(_cached.Reason, "startup", StringComparison.OrdinalIgnoreCase);
+            && !string.Equals(_cached.Reason, "startup", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(_cached.Reason, "bind", StringComparison.OrdinalIgnoreCase);
     }
 
     private DocumentDiagnosticsSnapshot CreateSnapshotLocked()
@@ -247,10 +253,20 @@ internal sealed class DocumentDiagnosticsCoordinator(BridgeConnection bridge)
     private JsonObject CreateCachedResponseLocked(JsonObject response, string kind)
     {
         JsonObject clone = response.DeepClone().AsObject();
+        JsonArray warnings = clone["Warnings"] as JsonArray is { } existingWarnings
+            ? (JsonArray)existingWarnings.DeepClone()
+            : [];
+        warnings.Add("Using the passive diagnostics cache. This list may be stale relative to the current Visual Studio Error List. Use refresh=true for a fresh UI read.");
+        clone["Warnings"] = warnings;
         clone["Cache"] = new JsonObject
         {
             ["source"] = "service-memory",
             ["kind"] = kind,
+            ["mayBeStale"] = true,
+            ["capturedAtUtc"] = FormatUtc(_timing.LastCompletedUtc),
+            ["ageMs"] = _timing.LastCompletedUtc is DateTimeOffset completedUtc
+                ? Math.Max(0, (DateTimeOffset.UtcNow - completedUtc).TotalMilliseconds)
+                : null,
             ["snapshot"] = CreateSnapshotLocked().ToJson(),
         };
         return clone;

@@ -57,9 +57,9 @@ internal sealed partial class PatchService
             return PathNormalization.NormalizeFilePath(relativeOrAbsolutePath);
         }
 
-        if (TryResolveUniqueSolutionFileByName(dte, relativeOrAbsolutePath, out string? uniqueSolutionPath, out int ambiguousMatchCount))
+        if (TryResolvePreferredSolutionFile(dte, baseDirectory, relativeOrAbsolutePath, out string? preferredSolutionPath, out int ambiguousMatchCount))
         {
-            return uniqueSolutionPath!;
+            return preferredSolutionPath!;
         }
 
         if (ambiguousMatchCount > 1)
@@ -143,7 +143,7 @@ internal sealed partial class PatchService
         return PathNormalization.NormalizeFilePath(Path.Combine(baseDirectory, relativeOrAbsolutePath));
     }
 
-    private static bool TryResolveUniqueSolutionFileByName(DTE2 dte, string relativeOrAbsolutePath, out string? resolvedPath, out int matchCount)
+    private static bool TryResolvePreferredSolutionFile(DTE2 dte, string baseDirectory, string relativeOrAbsolutePath, out string? resolvedPath, out int matchCount)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -163,8 +163,35 @@ internal sealed partial class PatchService
             return false;
         }
 
+        string? activeDocumentPath = TryGetActiveDocumentFullName(dte.ActiveDocument);
+        if (!string.IsNullOrWhiteSpace(activeDocumentPath) &&
+            string.Equals(Path.GetFileName(activeDocumentPath), targetFileName, StringComparison.OrdinalIgnoreCase) &&
+            File.Exists(activeDocumentPath))
+        {
+            resolvedPath = PathNormalization.NormalizeFilePath(activeDocumentPath);
+            matchCount = 1;
+            return true;
+        }
+
+        string solutionDirectory = dte.Solution?.IsOpen == true
+            ? Path.GetDirectoryName(dte.Solution.FullName) ?? baseDirectory
+            : baseDirectory;
+        string solutionRootCandidate = PathNormalization.NormalizeFilePath(Path.Combine(solutionDirectory, targetFileName));
+        if (File.Exists(solutionRootCandidate))
+        {
+            resolvedPath = solutionRootCandidate;
+            matchCount = 1;
+            return true;
+        }
+
+        EnvDTE.Solution? solution = dte.Solution;
+        if (solution is null)
+        {
+            return false;
+        }
+
         HashSet<string> matches = CreatePathMatchSet();
-        foreach (Project project in dte.Solution.Projects)
+        foreach (Project project in solution.Projects)
         {
             CollectMatchingProjectItemPaths(project, targetFileName, matches);
         }

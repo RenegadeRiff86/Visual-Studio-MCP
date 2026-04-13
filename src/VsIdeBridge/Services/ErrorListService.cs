@@ -56,28 +56,31 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
         IReadOnlyList<JObject> rows;
         if (quickSnapshot)
         {
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
             try
             {
-                rows = ReadRows(context.Dte);
+                rows = await ReadRowsAsync(context).ConfigureAwait(true);
             }
             catch (InvalidOperationException)
             {
                 rows = [];
             }
-
-            if (includeBuildOutputFallback && rows.Count == 0)
-            {
-                rows = ReadBuildOutputRows(context.Dte);
-            }
         }
         else
         {
             rows = await WaitForRowsAsync(context, timeoutMilliseconds, forceRefresh).ConfigureAwait(true);
-            if (includeBuildOutputFallback && rows.Count == 0)
+        }
+
+        if (includeBuildOutputFallback)
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
+            IReadOnlyList<JObject> buildOutputRows = ReadBuildOutputRows(context.Dte);
+            if (rows.Count == 0)
             {
-                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
-                rows = ReadBuildOutputRows(context.Dte);
+                rows = buildOutputRows;
+            }
+            else if (buildOutputRows.Count > 0)
+            {
+                rows = MergeRows(rows, buildOutputRows);
             }
         }
 

@@ -228,6 +228,20 @@ internal sealed partial class ErrorListService
             score += 1;
         }
 
+        if (file.IndexOf("\\src\\", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            score += 1;
+        }
+
+        if (file.IndexOf("\\build\\", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            file.IndexOf("\\bin\\", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            file.IndexOf("\\obj\\", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            file.IndexOf("\\out\\", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            file.IndexOf("\\output\\", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            score -= 1;
+        }
+
         return score;
     }
 
