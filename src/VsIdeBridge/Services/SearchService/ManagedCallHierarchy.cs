@@ -98,11 +98,8 @@ internal sealed partial class SearchService
 
         // Fetch component model and workspace on the UI thread - both are fast service lookups.
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
-        Microsoft.VisualStudio.ComponentModelHost.IComponentModel? componentModel =
-            ((System.IServiceProvider)context.Package).GetService(typeof(Microsoft.VisualStudio.ComponentModelHost.SComponentModel))
-            as Microsoft.VisualStudio.ComponentModelHost.IComponentModel;
-
-        if (componentModel is null)
+        if (((System.IServiceProvider)context.Package).GetService(typeof(Microsoft.VisualStudio.ComponentModelHost.SComponentModel))
+            is not Microsoft.VisualStudio.ComponentModelHost.IComponentModel componentModel)
         {
             return CreateManagedCallHierarchyOutcome(sourceLocation, null, 0, "component_model_missing", "SComponentModel service not available.");
         }
@@ -617,27 +614,20 @@ internal sealed partial class SearchService
 
     private static Dictionary<string, string> BuildPathToProjectFromSolution(Solution solution)
     {
-        Dictionary<string, string> pathToProject = new(StringComparer.OrdinalIgnoreCase);
-        foreach (Project project in solution.Projects)
-        {
-            string projectName = project.FilePath ?? project.Name;
-            foreach (Document document in project.Documents)
+        return solution.Projects
+            .SelectMany(project => project.Documents.Select(document => new
             {
-                string? filePath = document.FilePath;
-                if (filePath is null || !IsManagedSearchCandidate(filePath))
-                {
-                    continue;
-                }
-
-                string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
-                if (!pathToProject.ContainsKey(normalizedPath))
-                {
-                    pathToProject[normalizedPath] = projectName;
-                }
-            }
-        }
-
-        return pathToProject;
+                projectName = project.FilePath ?? project.Name,
+                filePath = document.FilePath
+            }))
+            .Where(item => item.filePath is not null && IsManagedSearchCandidate(item.filePath))
+            .Select(item => new
+            {
+                item.projectName,
+                normalizedPath = PathNormalization.NormalizeFilePath(item.filePath!)
+            })
+            .GroupBy(item => item.normalizedPath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().projectName, StringComparer.OrdinalIgnoreCase);
     }
 
     private static VisualStudioWorkspace? TryGetVisualStudioWorkspace(Microsoft.VisualStudio.ComponentModelHost.IComponentModel? componentModel)

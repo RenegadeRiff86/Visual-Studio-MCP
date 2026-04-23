@@ -630,17 +630,17 @@ internal static partial class ToolCatalog
                     TimeSpan.FromSeconds(10));
             }
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException ex)
         {
-            // Service may not be installed or visible on this machine — proceed anyway.
+            McpServerLog.WriteException("failed to start VsIdeBridgeService because the service is unavailable", ex);
         }
-        catch (Win32Exception)
+        catch (Win32Exception ex)
         {
-            // We may lack permission to control the service — proceed anyway.
+            McpServerLog.WriteException("failed to start VsIdeBridgeService because service control was denied", ex);
         }
-        catch (System.ServiceProcess.TimeoutException)
+        catch (System.ServiceProcess.TimeoutException ex)
         {
-            // Service start may take longer than our best-effort wait — proceed anyway.
+            McpServerLog.WriteException("VsIdeBridgeService did not report Running within the best-effort wait window", ex);
         }
     }
 }

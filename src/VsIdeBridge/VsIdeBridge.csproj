@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.VisualStudio.Sdk.Build">
+<Project Sdk="Microsoft.VisualStudio.Sdk.Build/17.6.2164">
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
     <AssemblyName>VsIdeBridge</AssemblyName>
@@ -18,7 +18,6 @@
     <CreateVsixContainer>true</CreateVsixContainer>
     <InstallationTargetVersion>18.0</InstallationTargetVersion>
     <VisualStudioSDKImplicitPackageVersion>17.14.40265</VisualStudioSDKImplicitPackageVersion>
-    <VSSDKBuildToolsImplicitPackageVersion>18.5.38461</VSSDKBuildToolsImplicitPackageVersion>
     <InstallationTargetProductArchitecture>amd64</InstallationTargetProductArchitecture>
   </PropertyGroup>
 

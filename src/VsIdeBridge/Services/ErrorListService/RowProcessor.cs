@@ -8,6 +8,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 using static VsIdeBridge.Diagnostics.ErrorListConstants;
+using VsIdeBridge.Infrastructure;
 
 namespace VsIdeBridge.Services;
 
@@ -257,7 +258,7 @@ internal sealed partial class ErrorListService
 
     private static void LogNonCriticalException(Exception ex)
     {
-        System.Diagnostics.Debug.WriteLine(ex);
+        BridgeActivityLog.LogWarning("ErrorListService", ex.GetType().Name, ex);
     }
 
     private static string NormalizeSeverity(string? severity)

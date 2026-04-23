@@ -278,9 +278,48 @@ internal static partial class ToolCatalog
             destructive,
             searchHints);
 
+    // Send one bridge command but keep the MCP tool distinct from the pipe
+    // command alias. Use this for convenience wrappers that target an existing
+    // bridge command with reshaped/defaulted arguments.
+    private static ToolEntry BridgeWrapperTool(
+        string name,
+        string description,
+        JsonObject schema,
+        string pipeCommand,
+        Func<JsonObject?, string> buildArgs,
+        string category = "core",
+        string? title = null,
+        JsonObject? annotations = null,
+        IEnumerable<string>? aliases = null,
+        IEnumerable<string>? tags = null,
+        string? summary = null,
+        bool? readOnly = null,
+        bool? mutating = null,
+        bool? destructive = null,
+        JsonObject? searchHints = null,
+        JsonObject? outputSchema = null)
+        => new(name, description, schema, category,
+            async (id, args, bridge) =>
+            {
+                JsonObject response = await bridge.SendAsync(id, pipeCommand, buildArgs(args))
+                    .ConfigureAwait(false);
+                return BridgeResult(response, args, dataOnly: outputSchema is not null);
+            },
+            title,
+            annotations,
+            outputSchema: outputSchema,
+            aliases,
+            tags,
+            bridgeCommand: null,
+            summary,
+            readOnly,
+            mutating,
+            destructive,
+            searchHints);
+
     private static JsonNode BridgeResult(JsonObject response, JsonObject? args = null, bool dataOnly = false)
     {
-        bool success = response["Success"]?.GetValue<bool>() ?? false;
+        bool success = (response["Success"] ?? response["success"])?.GetValue<bool>() ?? false;
         bool isError = ToolResultFormatter.ShouldTreatAsError(response, !success);
         return ToolResultFormatter.StructuredToolResult(response, args, isError: isError, dataOnly: dataOnly);
     }
@@ -569,12 +608,14 @@ internal static class ToolResultFormatter
         int totalCount = data["totalCount"]?.GetValue<int>() ?? returnedCount;
         bool truncated = data["truncated"]?.GetValue<bool>() ?? false;
         JsonArray? rows = data["rows"] as JsonArray;
+        JsonArray? groups = data["groups"] as JsonArray;
 
         string countText = totalCount == returnedCount
             ? $"rows={returnedCount}"
             : $"rows={returnedCount}, totalCount={totalCount}";
 
         string truncatedText = truncated ? ", truncated=true" : string.Empty;
+        string groupsSuffix = RenderGroupSummary(groups) is { Length: > 0 } gs ? "\n" + gs : string.Empty;
         string rowsText = RenderDiagnosticRowList(rows, MaxDiagnosticTextRows);
         string rowsSuffix = string.IsNullOrWhiteSpace(rowsText) ? string.Empty : "\n" + rowsText;
         string continuationHint = CreateDiagnosticsContinuationHint(command, returnedCount, totalCount, truncated, rows?.Count ?? 0, MaxDiagnosticTextRows);
@@ -582,10 +623,10 @@ internal static class ToolResultFormatter
 
         if (!string.IsNullOrWhiteSpace(summary))
         {
-            return $"{command}: {summary} {countText}{truncatedText}.{rowsSuffix}{continuationSuffix}";
+            return $"{command}: {summary} {countText}{truncatedText}.{groupsSuffix}{rowsSuffix}{continuationSuffix}";
         }
 
-        return $"{command}: completed successfully. {countText}{truncatedText}.{rowsSuffix}{continuationSuffix}";
+        return $"{command}: completed successfully. {countText}{truncatedText}.{groupsSuffix}{rowsSuffix}{continuationSuffix}";
     }
 
     private static string RenderDiagnosticRowList(JsonArray? rows, int maxRows)
@@ -610,6 +651,33 @@ internal static class ToolResultFormatter
         }
 
         return string.Join("\n", entries);
+    }
+
+    private static string RenderGroupSummary(JsonArray? groups)
+    {
+        if (groups is null || groups.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        string? groupBy = groups
+            .OfType<JsonObject>()
+            .FirstOrDefault()?["groupBy"]?.GetValue<string>();
+
+        string entries = string.Join("  ", groups
+            .OfType<JsonObject>()
+            .Select(static g =>
+            {
+                string key = g["key"]?.GetValue<string>() ?? "?";
+                int count = g["count"]?.GetValue<int>() ?? 0;
+                return $"{key}\u00d7{count}";
+            }));
+
+        string label = string.IsNullOrWhiteSpace(groupBy)
+            ? $"Groups ({groups.Count})"
+            : $"Groups by {groupBy} ({groups.Count})";
+
+        return $"{label}: {entries}";
     }
 
     private static string RenderDiagnosticRowEntry(JsonObject row)

@@ -35,6 +35,7 @@ internal static class BridgeConnectionArgs
         return command switch
         {
             "ready" or
+            "batch" or
             "build" or
             "rebuild" or
             "build-solution" or

@@ -1,3 +1,5 @@
+using System;
+
 namespace VsIdeBridgeService;
 
 // Builds the canonical tool execution registry for the Windows service MCP server.
@@ -6,9 +8,13 @@ namespace VsIdeBridgeService;
 // there is no real bridge command behind the MCP surface.
 internal static partial class ToolCatalog
 {
+    private static readonly Lazy<ToolExecutionRegistry> SharedRegistry = new(() => new ToolExecutionRegistry(CreateEntries()));
+
+    public static ToolExecutionRegistry Registry => SharedRegistry.Value;
+
     public static ToolExecutionRegistry CreateRegistry()
     {
-        return new ToolExecutionRegistry(CreateEntries());
+        return Registry;
     }
 
     private static IReadOnlyList<ToolEntry> CreateEntries()

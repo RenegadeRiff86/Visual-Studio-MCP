@@ -74,12 +74,34 @@ internal sealed class ToolExecutionRegistry
 
     private static Dictionary<string, ToolEntry> BuildLookup(IEnumerable<ToolEntry> entries)
     {
+        ToolEntry[] materialized = entries as ToolEntry[] ?? [.. entries];
         Dictionary<string, ToolEntry> lookup = new(StringComparer.Ordinal);
-        foreach (ToolEntry entry in entries)
+
+        // Pass 1: canonical names + explicit aliases must be unique. A
+        // collision here is a real authoring bug in the registrars and
+        // should fail loudly so it gets fixed before shipping.
+        foreach (ToolEntry entry in materialized)
         {
             AddLookupEntry(lookup, entry.Name, entry);
             foreach (string alias in entry.Definition.Aliases)
                 AddLookupEntry(lookup, alias, entry);
+        }
+
+        // Pass 2: BridgeCommand is a wire-level VS pipe address, not a
+        // unique MCP dispatch key. Convenience wrapper tools may target the
+        // same bridge command as a lower-level tool. Add the shortcut only
+        // when it does not conflict with another tool's name, alias, or
+        // earlier bridge-command shortcut. Silently dropping collisions keeps
+        // the tool catalog usable instead of crashing the entire MCP server
+        // and starving every client of every tool.
+        foreach (ToolEntry entry in materialized)
+        {
+            string? bridgeCommand = entry.Definition.BridgeCommand;
+            if (string.IsNullOrWhiteSpace(bridgeCommand))
+                continue;
+            if (lookup.ContainsKey(bridgeCommand))
+                continue;
+            lookup[bridgeCommand] = entry;
         }
 
         return lookup;
@@ -92,6 +114,11 @@ internal sealed class ToolExecutionRegistry
     {
         if (lookup.TryGetValue(key, out ToolEntry? existing))
         {
+            if (ReferenceEquals(existing, entry))
+            {
+                return;
+            }
+
             throw new InvalidOperationException(
                 $"Duplicate MCP tool lookup key '{key}' for '{existing.Name}' and '{entry.Name}'.");
         }

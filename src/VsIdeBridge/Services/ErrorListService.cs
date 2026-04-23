@@ -48,7 +48,9 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
             PublishBestPracticeRows(context.Dte, []);
         }
 
-        if (waitForIntellisense && !quickSnapshot)
+        // Readiness is allowed to delay a passive snapshot, but it must not force the
+        // active refresh path that can clear and repopulate the Error List in large C++ solutions.
+        if (waitForIntellisense)
         {
             await _readinessService.WaitForReadyAsync(context, timeoutMilliseconds, afterEdit).ConfigureAwait(true);
         }
@@ -56,13 +58,22 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
         IReadOnlyList<JObject> rows;
         if (quickSnapshot)
         {
-            try
+            EnsureErrorListWindow(context.Dte);
+            // Use the synchronous table read: subscribes and reads whatever is
+            // currently cached by each provider immediately, without holding the
+            // subscription open and waiting for WaitForStabilityAsync. That wait
+            // loop is what caused C++ projects to time out — normal IntelliSense
+            // background updates kept resetting the stability counter forever.
+            if (!TryReadTableRows(out rows) || rows.Count == 0)
             {
-                rows = await ReadRowsAsync(context).ConfigureAwait(true);
-            }
-            catch (InvalidOperationException)
-            {
-                rows = [];
+                try
+                {
+                    rows = await ReadDteRowsAsync(context, rows).ConfigureAwait(true);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    LogNonCriticalException(ex);
+                }
             }
         }
         else
@@ -77,10 +88,6 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
             if (rows.Count == 0)
             {
                 rows = buildOutputRows;
-            }
-            else if (buildOutputRows.Count > 0)
-            {
-                rows = MergeRows(rows, buildOutputRows);
             }
         }
 
@@ -124,7 +131,7 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
             ["hasWarnings"] = severityCounts["Warning"] > 0,
             ["filter"] = query?.ToJson() ?? [],
             ["rows"] = new JArray(filteredRows),
-            ["groups"] = BuildGroups(filteredRows, query?.GroupBy),
+            ["groups"] = BuildGroups(matchingRows, query?.GroupBy),
         };
     }
 

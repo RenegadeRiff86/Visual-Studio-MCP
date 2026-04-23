@@ -294,7 +294,7 @@ internal static partial class ToolCatalog
         yield return BridgeTool("smart_context",
             "First call for open-ended code exploration. " +
             "Collects focused context for a natural-language query — searches symbols, usages, and related definitions. " +
-            "Prefer over read_file + find_text when you don't know exactly where to look. It is more expensive than direct read/search tools.",
+            "Prefer over read_file + find_text when you don't know exactly where to look. It is more expensive than direct read/search tools and avoids populating the VS Find Results window unless explicitly requested.",
             ObjectSchema(
                 Req(Query, "Natural-language description of what you are looking for."),
                 OptInt("max_contexts", "Max context blocks to return (default 3).")),

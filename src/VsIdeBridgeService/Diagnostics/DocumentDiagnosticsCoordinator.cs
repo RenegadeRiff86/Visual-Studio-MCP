@@ -9,6 +9,7 @@ internal sealed class DocumentDiagnosticsCoordinator(BridgeConnection bridge)
     private static readonly TimeSpan RefreshDebounceInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan RefreshCompletionTimeout = TimeSpan.FromSeconds(10);
     private const string DefaultDiagnosticCacheMax = "50";
+    private const string ServiceCacheBypassArg = "service_cache_bypass";
 
     private readonly BridgeConnection _bridge = bridge;
     private readonly object _gate = new();
@@ -105,7 +106,7 @@ internal sealed class DocumentDiagnosticsCoordinator(BridgeConnection bridge)
     {
         lock (_gate)
         {
-            if (!CanServeCachedDiagnostics(args) || _cached.Errors is null || !HasUsableCachedDiagnosticsLocked())
+            if (!CanServeCachedDiagnostics(args, "Error") || _cached.Errors is null || !HasUsableCachedDiagnosticsLocked())
             {
                 response = [];
                 return false;
@@ -120,7 +121,7 @@ internal sealed class DocumentDiagnosticsCoordinator(BridgeConnection bridge)
     {
         lock (_gate)
         {
-            if (!CanServeCachedDiagnostics(args) || _cached.Warnings is null || !HasUsableCachedDiagnosticsLocked())
+            if (!CanServeCachedDiagnostics(args, "Warning") || _cached.Warnings is null || !HasUsableCachedDiagnosticsLocked())
             {
                 response = [];
                 return false;
@@ -135,7 +136,7 @@ internal sealed class DocumentDiagnosticsCoordinator(BridgeConnection bridge)
     {
         lock (_gate)
         {
-            if (!CanServeCachedDiagnostics(args) || _cached.Messages is null || !HasUsableCachedDiagnosticsLocked())
+            if (!CanServeCachedDiagnostics(args, "Message") || _cached.Messages is null || !HasUsableCachedDiagnosticsLocked())
             {
                 response = [];
                 return false;
@@ -166,11 +167,11 @@ internal sealed class DocumentDiagnosticsCoordinator(BridgeConnection bridge)
 
             try
             {
-                JsonObject errors = await _bridge.SendAsync(null, "errors", BuildCachedErrorArgs())
+                JsonObject errors = await _bridge.SendAsync(null, "errors", BuildCachedListArgs("Error"))
                     .ConfigureAwait(false);
-                JsonObject warnings = await _bridge.SendAsync(null, "warnings", BuildCachedListArgs())
+                JsonObject warnings = await _bridge.SendAsync(null, "warnings", BuildCachedListArgs("Warning"))
                     .ConfigureAwait(false);
-                JsonObject messages = await _bridge.SendAsync(null, "messages", BuildCachedListArgs())
+                JsonObject messages = await _bridge.SendAsync(null, "messages", BuildCachedListArgs("Message"))
                     .ConfigureAwait(false);
 
                 lock (_gate)
@@ -194,31 +195,49 @@ internal sealed class DocumentDiagnosticsCoordinator(BridgeConnection bridge)
         }
     }
 
-    private static bool CanServeCachedDiagnostics(JsonObject? args)
+    private static bool CanServeCachedDiagnostics(JsonObject? args, string expectedSeverity)
     {
-        if (args is null)
+        if (args?[ServiceCacheBypassArg]?.GetValue<bool>() == true)
         {
             return false;
         }
 
-        if (args["quick"]?.GetValue<bool>() != true)
+        if (!WantsPassiveDiagnosticsRead(args))
         {
             return false;
         }
 
-        if (args["refresh"]?.GetValue<bool>() == true)
+        if (args?["refresh"]?.GetValue<bool>() == true)
+        {
+            return false;
+        }
+
+        string? requestedSeverity = args?["severity"]?.GetValue<string>();
+        if (!string.IsNullOrWhiteSpace(requestedSeverity)
+            && !string.Equals(requestedSeverity, expectedSeverity, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
         // quick and wait_for_intellisense are timing hints, not content filters.
         // Only bypass cache when content-filtering params are present.
-        return args["severity"] is null
-            && args["code"] is null
-            && args["project"] is null
-            && args["path"] is null
-            && args["text"] is null
-            && args["group_by"] is null;
+        return (args?["severity"] is null
+            || string.Equals(requestedSeverity, expectedSeverity, StringComparison.OrdinalIgnoreCase))
+            && args?["code"] is null
+            && args?["project"] is null
+            && args?["path"] is null
+            && args?["text"] is null
+            && args?["group_by"] is null;
+    }
+
+    private static bool WantsPassiveDiagnosticsRead(JsonObject? args)
+    {
+        if (args?["quick"] is JsonNode quickNode)
+        {
+            return quickNode.GetValue<bool>();
+        }
+
+        return args?["refresh"]?.GetValue<bool>() != true;
     }
 
     private bool HasUsableCachedDiagnosticsLocked()
@@ -272,20 +291,14 @@ internal sealed class DocumentDiagnosticsCoordinator(BridgeConnection bridge)
         return clone;
     }
 
-    private static JsonObject BuildCachedErrorArgs()
+    private static JsonObject BuildCachedListArgs(string severity)
         => new()
         {
             ["quick"] = true,
             ["wait_for_intellisense"] = false,
-            ["severity"] = "Error",
-        };
-
-    private static JsonObject BuildCachedListArgs()
-        => new()
-        {
-            ["quick"] = true,
-            ["wait_for_intellisense"] = false,
+            ["severity"] = severity,
             ["max"] = DefaultDiagnosticCacheMax,
+            [ServiceCacheBypassArg] = true,
         };
 
     private static string? FormatUtc(DateTimeOffset? value)

@@ -118,7 +118,7 @@ internal static partial class DebugBuildCommands
             context,
             waitForIntellisense,
             timeoutMilliseconds,
-            quickSnapshot: false,
+            quickSnapshot: true,
             query: new ErrorListQuery { Max = args.GetNullableInt32("max") ?? DefaultBlockingDiagnosticsMax }).ConfigureAwait(true);
     }
 

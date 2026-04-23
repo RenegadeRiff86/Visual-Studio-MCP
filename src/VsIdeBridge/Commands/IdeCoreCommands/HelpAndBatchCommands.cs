@@ -49,6 +49,40 @@ internal static partial class IdeCoreCommands
             commandData);
     }
 
+    private static JArray ParseBatchSteps(string json, string sourceDescription)
+    {
+        try
+        {
+            return JArray.Parse(json);
+        }
+        catch (JsonException ex)
+        {
+            throw new CommandErrorException("invalid_json", $"Failed to parse {sourceDescription}: {ex.Message}");
+        }
+    }
+
+    private static JArray LoadBatchSteps(CommandArguments args)
+    {
+        string? inlineSteps = args.GetString("steps");
+        if (!string.IsNullOrWhiteSpace(inlineSteps))
+        {
+            return ParseBatchSteps(inlineSteps!, "batch steps");
+        }
+
+        string? batchFile = args.GetString("batch-file");
+        if (string.IsNullOrWhiteSpace(batchFile))
+        {
+            throw new CommandErrorException("invalid_arguments", "Missing required argument --steps or --batch-file.");
+        }
+
+        if (!File.Exists(batchFile))
+        {
+            throw new CommandErrorException("file_not_found", $"Batch file not found: {batchFile}");
+        }
+
+        return ParseBatchSteps(File.ReadAllText(batchFile), "batch file");
+    }
+
     private static async Task<(JObject result, bool succeeded)> ExecuteBatchStepAsync(
         IdeCommandContext context, JToken entry, int index)
     {
@@ -70,7 +104,7 @@ internal static partial class IdeCoreCommands
 
         string? stepId = (string?)step["id"];
         string commandName = (string?)step["command"] ?? string.Empty;
-        string commandArgs = (string?)step["args"] ?? string.Empty;
+        JToken? commandArgs = step["args"];
 
         if (!context.Runtime.TryGetCommand(commandName, out var cmd))
         {
@@ -381,23 +415,7 @@ internal static partial class IdeCoreCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            string batchFile = args.GetRequiredString("batch-file");
-            if (!File.Exists(batchFile))
-            {
-                throw new CommandErrorException("file_not_found", $"Batch file not found: {batchFile}");
-            }
-
-            string json = File.ReadAllText(batchFile);
-            JArray steps;
-            try
-            {
-                steps = JArray.Parse(json);
-            }
-            catch (JsonException ex)
-            {
-                throw new CommandErrorException("invalid_json", $"Failed to parse batch file: {ex.Message}");
-            }
-
+            JArray steps = LoadBatchSteps(args);
             bool stopOnError = args.GetBoolean("stop-on-error", false);
             return await ExecuteBatchAsync(context, steps, stopOnError).ConfigureAwait(true);
         }

@@ -20,6 +20,12 @@ public static partial class BridgeCommandCatalog
             case "find-files":
                 detail = ("Search Solution Explorer-style files by name or path fragment and return ranked matches. Related tools: glob, search_symbols.", ExampleCommand("find_files", @"{""query"":""CMakeLists.txt""}"));
                 return true;
+            case "glob":
+            case "glob_files":
+            case "find_by_pattern":
+            case "list_files":
+                detail = ("Find files by glob pattern under the solution root or a specific subtree. Related tools: find_files, read_file.", ExampleCommand("glob", @"{""pattern"":""src/**/*.cs"",""path"":""src\\VsIdeBridge""}"));
+                return true;
             case "find_references":
             case "find-references":
                 detail = ("Run Find All References for the symbol at a file, line, and column. Related tools: call_hierarchy, goto_definition.", ExampleCommand("find_references", @"{""file"":""" + ExampleFilePath + @""",""line"":42,""column"":13}"));
@@ -43,6 +49,10 @@ public static partial class BridgeCommandCatalog
             case "goto_implementation":
             case "goto-implementation":
                 detail = ("Navigate to one implementation of the symbol at a file, line, and column. Related tools: find_references, goto_definition.", ExampleCommand("goto_implementation", @"{""file"":""" + ExampleFilePath + @""",""line"":42,""column"":13}"));
+                return true;
+            case "peek_definition":
+            case "peek-definition":
+                detail = ("Read the definition source for the symbol at a file, line, and column without navigating away. Related tools: symbol_info, goto_definition.", ExampleCommand("peek_definition", @"{""file"":""" + ExampleFilePath + @""",""line"":42,""column"":13}"));
                 return true;
             case "file_outline":
             case "file-outline":

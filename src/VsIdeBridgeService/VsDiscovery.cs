@@ -171,8 +171,8 @@ internal static class VsDiscovery
 
                 if (instances.Count > 0) return instances;
             }
-            catch (IOException) { /* intentional: pipe directory may be inaccessible or mid-cleanup — skip this discovery path */ }
-            catch (UnauthorizedAccessException) { /* intentional: pipe directory may be inaccessible or mid-cleanup — skip this discovery path */ }
+            catch (IOException ex) { McpServerLog.WriteException($"failed to scan discovery pipe directory '{directory}'", ex); }
+            catch (UnauthorizedAccessException ex) { McpServerLog.WriteException($"failed to scan discovery pipe directory '{directory}'", ex); }
         }
 
         return [];
@@ -206,9 +206,17 @@ internal static class VsDiscovery
                 }
             }
         }
-        catch
+        catch (IOException ex)
         {
-            // Best-effort discovery only.
+            McpServerLog.WriteException($"failed to enumerate user profile temp discovery directories under '{usersRoot}'", ex);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            McpServerLog.WriteException($"failed to enumerate user profile temp discovery directories under '{usersRoot}'", ex);
+        }
+        catch (NotSupportedException ex)
+        {
+            McpServerLog.WriteException($"failed to enumerate user profile temp discovery directories under '{usersRoot}'", ex);
         }
 
         return directories;
@@ -506,8 +514,24 @@ internal static class VsDiscovery
 
             return IsWithinHeadlessGracePeriod(instance);
         }
-        catch
+        catch (ArgumentException ex)
         {
+            McpServerLog.WriteException($"failed to probe process liveness for '{instance.ProcessId}'", ex);
+            return false;
+        }
+        catch (InvalidOperationException ex)
+        {
+            McpServerLog.WriteException($"failed to probe process liveness for '{instance.ProcessId}'", ex);
+            return false;
+        }
+        catch (NotSupportedException ex)
+        {
+            McpServerLog.WriteException($"failed to probe process liveness for '{instance.ProcessId}'", ex);
+            return false;
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            McpServerLog.WriteException($"failed to probe process liveness for '{instance.ProcessId}'", ex);
             return false;
         }
     }
@@ -543,9 +567,17 @@ internal static class VsDiscovery
                 File.Delete(path);
             }
         }
-        catch
+        catch (IOException ex)
         {
-            // Best-effort cleanup only.
+            McpServerLog.WriteException($"failed to delete stale discovery file '{path}'", ex);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            McpServerLog.WriteException($"failed to delete stale discovery file '{path}'", ex);
+        }
+        catch (NotSupportedException ex)
+        {
+            McpServerLog.WriteException($"failed to delete stale discovery file '{path}'", ex);
         }
     }
 }

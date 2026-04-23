@@ -170,7 +170,7 @@ internal static partial class ToolCatalog
         yield return new("git_add",
             "Stage files for the next commit. Pass an array of paths relative to the repo root, " +
             "or [\".\" ] to stage everything.",
-            ObjectSchema(Req(Paths, "JSON array of file paths or globs to stage, e.g. [\"src/Foo.cs\"] or [\".\" ].")),
+            ObjectSchema(ReqArr(Paths, "Array of file paths or globs to stage, e.g. [\"src/Foo.cs\"] or [\".\"].")),
             Git,
             async (id, args, bridge) =>
             {
@@ -186,7 +186,7 @@ internal static partial class ToolCatalog
         yield return new("git_restore",
             "Discard working-tree changes for the specified files, restoring them to HEAD. " +
             "Does not touch the index.",
-            ObjectSchema(Req(Paths, "JSON array of file paths to restore, e.g. [\"src/Foo.cs\"].")),
+            ObjectSchema(ReqArr(Paths, "Array of file paths to restore, e.g. [\"src/Foo.cs\"].")),
             Git,
             async (id, args, bridge) =>
             {
@@ -201,15 +201,13 @@ internal static partial class ToolCatalog
 
         yield return new("git_reset",
             "Unstage files (mixed reset). If no paths are given, unstages everything.",
-            ObjectSchema(Opt(Paths, "JSON array string of paths to unstage, or omit for all.")),
+            ObjectSchema(OptArr(Paths, "Array of paths to unstage, or omit for all.")),
             Git,
             async (id, args, bridge) =>
             {
                 string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
-                string? pathsRaw = args?[Paths]?.GetValue<string>();
-                string pathSpec = string.IsNullOrWhiteSpace(pathsRaw)
-                    ? string.Empty
-                    : $"-- {BuildPathListFromJson(pathsRaw)}";
+                string pathList = BuildPathList(args, Paths);
+                string pathSpec = pathList == "." ? string.Empty : $"-- {pathList}";
                 return await GitRunner.RunAsync(id, repo, $"reset {pathSpec}".TrimEnd())
                     .ConfigureAwait(false);
             },
@@ -455,22 +453,4 @@ internal static partial class ToolCatalog
         return string.IsNullOrWhiteSpace(single) ? "." : EscapeArg(single);
     }
 
-    /// <summary>
-    /// Build a space-separated quoted path list from a raw JSON array string.
-    /// </summary>
-    private static string BuildPathListFromJson(string jsonArray)
-    {
-        try
-        {
-            JsonNode? node = System.Text.Json.JsonSerializer.Deserialize<JsonNode>(jsonArray);
-            if (node is JsonArray arr)
-                return string.Join(" ", arr.Select(n => EscapeArg(n?.GetValue<string>() ?? string.Empty)));
-        }
-        catch (System.Text.Json.JsonException)
-        {
-            // Not valid JSON — treat as a plain path.
-        }
-
-        return EscapeArg(jsonArray);
-    }
 }

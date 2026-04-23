@@ -146,7 +146,7 @@ internal sealed partial class SearchService
         {
             "document" => string.IsNullOrWhiteSpace(activeDocument.Path)
                 ? []
-                : new[] { activeDocument },
+                : [activeDocument],
             "open" => EnumerateOpenFiles(dte),
             "project" => EnumerateSolutionFiles(dte)
                 .Where(item => MatchesProjectFilter(item.ProjectUniqueName, projectUniqueName)),
@@ -168,18 +168,10 @@ internal sealed partial class SearchService
         }
 
         // Use OrdinalIgnoreCase so all lookup sites work regardless of path casing.
-        Dictionary<string, string> pathToProject = new(StringComparer.OrdinalIgnoreCase);
-        foreach ((string Path, string ProjectUniqueName) file in files)
-        {
-            if (!IsManagedSearchCandidate(file.Path) || pathToProject.ContainsKey(file.Path))
-            {
-                continue;
-            }
-
-            pathToProject[file.Path] = file.ProjectUniqueName;
-        }
-
-        return pathToProject;
+        return files
+            .Where(file => IsManagedSearchCandidate(file.Path))
+            .GroupBy(file => file.Path, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().ProjectUniqueName, StringComparer.OrdinalIgnoreCase);
     }
 
     private static bool IsManagedSearchCandidate(string path)

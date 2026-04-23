@@ -248,9 +248,9 @@ internal sealed partial class PatchService
             }
 
         }
-        catch (COMException)
+        catch (COMException ex)
         {
-            // Some project types throw while expanding items; ignore and keep searching.
+            BridgeActivityLog.LogWarning(nameof(PatchService), $"Failed to expand project items while searching for '{targetFileName}'", ex);
         }
     }
 
@@ -286,9 +286,9 @@ internal sealed partial class PatchService
                     CollectMatchingProjectItemPaths(item.SubProject, targetFileName, matches);
                 }
             }
-            catch (COMException)
+            catch (COMException ex)
             {
-                // Ignore transient/unsupported project item states and continue.
+                BridgeActivityLog.LogWarning(nameof(PatchService), $"Failed to inspect a project item while searching for '{targetFileName}'", ex);
             }
         }
     }
@@ -340,15 +340,15 @@ internal sealed partial class PatchService
                     if (bestMatch is null || docPath.Length < bestMatch.Length)
                         bestMatch = docPath;
                 }
-                catch (COMException)
+                catch (COMException ex)
                 {
-                    // Document may be in a transient state; skip it and continue searching.
+                    BridgeActivityLog.LogWarning(nameof(PatchService), $"Failed to inspect an open document while resolving suffix '{suffix}'", ex);
                 }
             }
         }
-        catch (COMException)
+        catch (COMException ex)
         {
-            // dte.Documents can throw if VS is shutting down or the collection is unavailable.
+            BridgeActivityLog.LogWarning(nameof(PatchService), $"Failed to enumerate open documents while resolving suffix '{suffix}'", ex);
         }
 
         return bestMatch is null ? null : PathNormalization.NormalizeFilePath(bestMatch);
@@ -415,15 +415,15 @@ internal sealed partial class PatchService
                         return start.GetText(textDoc.EndPoint);
                     }
                 }
-                catch (COMException)
+                catch (COMException ex)
                 {
-                    // Document may be in a transient state; skip it.
+                    BridgeActivityLog.LogWarning(nameof(PatchService), $"Failed to read editor content for '{path}' from an open document", ex);
                 }
             }
         }
-        catch (COMException)
+        catch (COMException ex)
         {
-            // dte.Documents can throw if VS is shutting down or busy.
+            BridgeActivityLog.LogWarning(nameof(PatchService), $"Failed to enumerate open documents while reading '{path}'", ex);
         }
 
         return File.Exists(path) ? File.ReadAllText(path) : string.Empty;

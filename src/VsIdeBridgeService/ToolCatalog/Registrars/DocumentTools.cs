@@ -276,7 +276,7 @@ internal static partial class ToolCatalog
             searchHints: BuildSearchHints(
                 related: [("format_document", "Format a document"), ("shell_exec", "Run an external process")]));
 
-        yield return BridgeTool("format_document",
+        yield return BridgeWrapperTool("format_document",
             "Format the current document or a specific FileArg.",
             ObjectSchema(
                 Opt(FileArg, FileDesc),
@@ -326,17 +326,17 @@ internal static partial class ToolCatalog
                     await bridge.SendAsync(id, "close-file", Build((FileArg, resolvedPath)))
                         .ConfigureAwait(false);
                 }
-                catch (IOException)
+                catch (IOException ex)
                 {
-                    // best-effort: ignore close errors before delete
+                    McpServerLog.WriteException($"failed to close '{resolvedPath}' before delete", ex);
                 }
-                catch (InvalidOperationException)
+                catch (InvalidOperationException ex)
                 {
-                    // best-effort: ignore close errors before delete
+                    McpServerLog.WriteException($"failed to close '{resolvedPath}' before delete", ex);
                 }
-                catch (McpRequestException)
+                catch (McpRequestException ex)
                 {
-                    // best-effort: ignore close errors before delete
+                    McpServerLog.WriteException($"failed to close '{resolvedPath}' before delete", ex);
                 }
 
                 System.IO.File.Delete(resolvedPath);
