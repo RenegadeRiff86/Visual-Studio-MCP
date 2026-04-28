@@ -1,12 +1,11 @@
 using System.IO.Pipes;
 using System.Text;
+using VsIdeBridge.Shared;
 
 namespace VsIdeBridgeService;
 
 internal sealed class ServiceControlClient : IAsyncDisposable
 {
-    private const string ServiceControlPipeName = "VsIdeBridgeServiceControl";
-
     private readonly NamedPipeClientStream _pipe;
     private readonly StreamWriter _writer;
     private bool _connected;
@@ -23,7 +22,7 @@ internal sealed class ServiceControlClient : IAsyncDisposable
 
     public static async Task<ServiceControlClient> ConnectAsync(CancellationToken cancellationToken = default)
     {
-        NamedPipeClientStream pipe = new(".", ServiceControlPipeName, PipeDirection.Out, PipeOptions.Asynchronous);
+        NamedPipeClientStream pipe = new(".", NamedPipeAccessDefaults.ServiceControlPipeName, PipeDirection.Out, PipeOptions.Asynchronous);
         try
         {
             await pipe.ConnectAsync(1000, cancellationToken).ConfigureAwait(false);
@@ -51,6 +50,12 @@ internal sealed class ServiceControlClient : IAsyncDisposable
 
     public async Task NotifyCommandEndAsync(CancellationToken cancellationToken = default)
         => await SendAsync("COMMAND_END", cancellationToken).ConfigureAwait(false);
+
+    public async Task NotifyHttpEnableAsync(CancellationToken cancellationToken = default)
+        => await SendAsync("HTTP_ENABLE", cancellationToken).ConfigureAwait(false);
+
+    public async Task NotifyHttpDisableAsync(CancellationToken cancellationToken = default)
+        => await SendAsync("HTTP_DISABLE", cancellationToken).ConfigureAwait(false);
 
     public async ValueTask DisposeAsync()
     {

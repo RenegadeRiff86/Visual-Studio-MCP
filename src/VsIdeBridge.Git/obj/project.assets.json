@@ -12,7 +12,7 @@
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
   },
   "project": {
-    "version": "2.2.11",
+    "version": "2.2.12",
     "restore": {
       "projectUniqueName": "C:\\Users\\elsto\\source\\repos\\vs-ide-bridge\\src\\VsIdeBridge.Git\\VsIdeBridge.Git.csproj",
       "projectName": "VsIdeBridge.Git",
@@ -75,7 +75,7 @@
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.202/PortableRuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.203/PortableRuntimeIdentifierGraph.json"
       }
     }
   }

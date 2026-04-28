@@ -97,7 +97,6 @@ internal static class Program
 
 internal sealed class BridgeService : ServiceBase
 {
-    private const string ServiceControlPipeName = "VsIdeBridgeServiceControl";
     private const int ControlPipeBufferSize = 4096;
     private const int ShutdownWaitTimeoutSeconds = 5;
 
@@ -192,10 +191,11 @@ internal sealed class BridgeService : ServiceBase
     {
         while (!cancellationToken.IsCancellationRequested)
         {
+            NamedPipeServerStream? server = null;
             try
             {
-                using NamedPipeServerStream server = NamedPipeServerStreamAcl.Create(
-                    ServiceControlPipeName,
+                server = NamedPipeServerStreamAcl.Create(
+                    NamedPipeAccessDefaults.ServiceControlPipeName,
                     PipeDirection.In,
                     NamedPipeServerStream.MaxAllowedServerInstances,
                     PipeTransmissionMode.Byte,
@@ -205,25 +205,24 @@ internal sealed class BridgeService : ServiceBase
                     CreateControlPipeSecurity());
 
                 await server.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
-                using StreamReader reader = new(server, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
 
-                while (server.IsConnected && !cancellationToken.IsCancellationRequested)
-                {
-                    string? line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-                    if (line is null)
-                    {
-                        break;
-                    }
-
-                    HandleEvent(line.Trim());
-                }
+                // Hand off the connected pipe to a per-client task and loop back
+                // immediately to accept the next client. Without this, a single
+                // long-lived control client (the stdio MCP child sending
+                // MCP_REQUEST events) blocks every other process — including
+                // http_enable / http_disable — from connecting at all.
+                NamedPipeServerStream connected = server;
+                server = null; // ownership transfers to the handler task
+                _ = ProcessControlClientAsync(connected, cancellationToken);
             }
             catch (OperationCanceledException)
             {
+                server?.Dispose();
                 break;
             }
             catch (IOException ex)
             {
+                server?.Dispose();
                 Log($"control pipe error: {ex.Message}");
                 try
                 {
@@ -236,6 +235,7 @@ internal sealed class BridgeService : ServiceBase
             }
             catch (ObjectDisposedException ex)
             {
+                server?.Dispose();
                 Log($"control pipe error: {ex.Message}");
                 try
                 {
@@ -248,6 +248,7 @@ internal sealed class BridgeService : ServiceBase
             }
             catch (InvalidOperationException ex)
             {
+                server?.Dispose();
                 Log($"control pipe error: {ex.Message}");
                 try
                 {
@@ -258,6 +259,37 @@ internal sealed class BridgeService : ServiceBase
                     break;
                 }
             }
+        }
+    }
+
+    private async Task ProcessControlClientAsync(NamedPipeServerStream pipe, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using (pipe)
+            using (StreamReader reader = new(pipe, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, leaveOpen: true))
+            {
+                while (pipe.IsConnected && !cancellationToken.IsCancellationRequested)
+                {
+                    string? line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+                    if (line is null)
+                        break;
+
+                    HandleEvent(line.Trim());
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            Log("control client cancelled (service shutting down)");
+        }
+        catch (IOException ex)
+        {
+            Log($"control client error: {ex.Message}");
+        }
+        catch (ObjectDisposedException)
+        {
+            Log("control client pipe disposed (service shutting down)");
         }
     }
 
@@ -362,10 +394,44 @@ internal sealed class BridgeService : ServiceBase
                 case "PING":
                     _lastActivityUtc = DateTime.UtcNow;
                     break;
+                case "HTTP_ENABLE":
+                    _lastActivityUtc = DateTime.UtcNow;
+                    HandleHttpEnable();
+                    break;
+                case "HTTP_DISABLE":
+                    _lastActivityUtc = DateTime.UtcNow;
+                    HandleHttpDisable();
+                    break;
                 default:
                     Log($"unknown control event '{evt}'");
                     break;
             }
+        }
+    }
+
+    private void HandleHttpEnable()
+    {
+        try
+        {
+            HttpServerController.Enable();
+            Log("control event HTTP_ENABLE handled");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            Log($"control event HTTP_ENABLE failed: {ex.Message}");
+        }
+    }
+
+    private void HandleHttpDisable()
+    {
+        try
+        {
+            HttpServerController.Disable();
+            Log("control event HTTP_DISABLE handled");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            Log($"control event HTTP_DISABLE failed: {ex.Message}");
         }
     }
 

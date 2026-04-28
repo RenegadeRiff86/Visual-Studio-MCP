@@ -107,11 +107,11 @@ internal static partial class IdeCoreCommands
         {
             if (enabled)
             {
-                HttpServerStateManager.Enable();
+                await HttpServerStateManager.EnableAndReconcileAsync().ConfigureAwait(true);
             }
             else
             {
-                HttpServerStateManager.Disable();
+                await HttpServerStateManager.DisableAndReconcileAsync().ConfigureAwait(true);
             }
 
             context.Runtime.UiSettings.HttpServerEnabled = enabled;

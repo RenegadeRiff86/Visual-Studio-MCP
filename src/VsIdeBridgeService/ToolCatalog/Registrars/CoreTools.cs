@@ -500,9 +500,9 @@ internal static partial class ToolCatalog
                 related: [("activate_window", "Bring a specific tool window forward first"), ("list_windows", "Inspect current VS windows")]));
 
         yield return new("http_enable",
-            "Start the HTTP MCP server on localhost:8080. " +
+            "Enable the shared HTTP MCP endpoint on localhost:8080. " +
             "Enables Ollama and other local LLM clients to connect directly to the bridge. " +
-            "The enabled state persists across restarts. " +
+            "The enabled state persists across restarts and, when the Windows service is installed, reconciles the service-owned listener instead of only the current process. " +
             "Clients send POST requests with JSON-RPC 2.0 bodies to http://localhost:8080/.",
             EmptySchema(), Core,
             (_, _, _) => Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(HttpServerController.Enable())),
@@ -511,14 +511,15 @@ internal static partial class ToolCatalog
                 related: [("http_disable", "Stop the HTTP server"), ("http_status", "Check server status")]));
 
         yield return new("http_disable",
-            "Stop the HTTP MCP server and persist the disabled state across restarts.",
+            "Disable the shared HTTP MCP endpoint and persist the disabled state across restarts. " +
+            "When the Windows service is installed, this reconciles the service-owned listener so the port is actually released.",
             EmptySchema(), Core,
             (_, _, _) => Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(HttpServerController.Disable())),
             searchHints: BuildSearchHints(
                 related: [("http_enable", "Start the HTTP server"), ("http_status", "Check server status")]));
 
         yield return new("http_status",
-            "Show whether the HTTP MCP server is running, its port, and the URL to connect to.",
+            "Show the persisted HTTP MCP state, the actual listener status on localhost:8080, and whether the shared enable flag is in sync with the live port probe.",
             EmptySchema(), Core,
             (_, _, _) => Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(HttpServerController.GetStatus())),
             searchHints: BuildSearchHints(
