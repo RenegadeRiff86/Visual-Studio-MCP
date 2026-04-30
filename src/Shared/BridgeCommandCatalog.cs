@@ -127,6 +127,7 @@ public static partial class BridgeCommandCatalog
             Create("Tools.IdeSmokeTest", "smoke-test"),
             Create("Tools.IdeGetState", "state"),
             Create("Tools.IdeGetUiSettings", "ui-settings"),
+            Create("Tools.IdeReadOutputWindow", "read-output"),
             Create("Tools.IdeWaitForReady", "ready"),
             Create("Tools.IdeOpenSolution", "open-solution"),
             Create("Tools.IdeCreateSolution", "create-solution"),

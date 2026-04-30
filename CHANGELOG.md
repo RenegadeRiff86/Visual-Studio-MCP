@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.13
+
+- Added paged diagnostics retrieval so large warning, error, and message sets can be read in chunks with counts, offsets, filters, and sorting instead of flooding the model with every row at once.
+- Added Visual Studio Output window capture support, including build-output panes, so diagnostics can fall back to structured output chunks when the Error List is empty, stale, or too large.
+- Updated installer Visual Studio discovery to locate `VSIXInstaller.exe` with `vswhere` across installed and prerelease VS versions, with fallback Program Files scanning for older layouts.
+
 ## 2.2.12
 
 - Made `http_enable` and `http_disable` reconcile the service-owned HTTP listener instead of only toggling local process state. When called from a short-lived stdio MCP child the toggle now reaches the long-running service over the control pipe, so the listener on `localhost:8080` actually starts or stops and the persisted enable flag stays in sync. Falls back to the in-process listener when the service is not installed.

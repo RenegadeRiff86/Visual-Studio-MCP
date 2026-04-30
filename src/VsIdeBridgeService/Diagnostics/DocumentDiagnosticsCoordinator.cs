@@ -8,7 +8,6 @@ internal sealed class DocumentDiagnosticsCoordinator(BridgeConnection bridge)
 {
     private static readonly TimeSpan RefreshDebounceInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan RefreshCompletionTimeout = TimeSpan.FromSeconds(10);
-    private const string DefaultDiagnosticCacheMax = "50";
     private const string ServiceCacheBypassArg = "service_cache_bypass";
 
     private readonly BridgeConnection _bridge = bridge;
@@ -297,7 +296,6 @@ internal sealed class DocumentDiagnosticsCoordinator(BridgeConnection bridge)
             ["quick"] = true,
             ["wait_for_intellisense"] = false,
             ["severity"] = severity,
-            ["max"] = DefaultDiagnosticCacheMax,
             [ServiceCacheBypassArg] = true,
         };
 

@@ -18,6 +18,9 @@ internal static partial class ToolCatalog
     private const string Path = "path";
     private const string Text = "text";
     private const string GroupBy = "group_by";
+    private const string ChunkSize = "chunk_size";
+    private const string SortBy = "sort_by";
+    private const string SortDirection = "sort_direction";
     private const string WaitForCompletion = "wait_for_completion";
     private const string WaitForIntellisenseHyphen = "wait-for-intellisense";
     private const string WaitForCompletionHyphen = "wait-for-completion";
@@ -45,6 +48,13 @@ internal static partial class ToolCatalog
     private const string SystemCategory = "system";
     private const string MessagesTool = "messages";
     private const string DiagnosticsSnapshotCommand = "diagnostics-snapshot";
+    private const string TailLines = "tail_lines";
+    private const string ChunkLines = "chunk_lines";
+    private const string ChunkIndex = "chunk_index";
+    private const string IncludeChunks = "include_chunks";
+    private const string MaxChars = "max_chars";
+    private const string Pane = "pane";
+    private const string Activate = "activate";
 
     private const string DefaultMaxRows = "10";
     private const int DefaultCompactDiagnosticsRows = 10;
@@ -67,7 +77,11 @@ internal static partial class ToolCatalog
                 OptBool(WaitForIntellisense, "Wait for IntelliSense readiness before a live filtered or refresh read (default false)."),
                 OptBool(Quick, PassiveDiagnosticsReadDescription),
                 OptBool(Refresh, RefreshDiagnosticsDescription),
-                OptInt(Max, "Max rows to return. Defaults to 10 when no filters are set."),
+                OptInt(Max, "Legacy alias for chunk_size. Defaults to 10 when chunk_size is omitted."),
+                OptInt(ChunkSize, "Rows per returned chunk (default 10, or max when set). Set 0 to return all filtered rows."),
+                OptInt(ChunkIndex, "Zero-based row chunk index to return (default 0)."),
+                Opt(SortBy, "Optional row sort field: severity, code, project, file/path, line, column, message, source, or tool."),
+                Opt(SortDirection, "Optional sort direction: asc or desc (default asc)."),
                 Opt(Code, "Optional diagnostic code prefix filter."),
                 Opt(Project, ProjectFilterDesc),
                 Opt(Path, "Optional path filter."),
@@ -81,12 +95,11 @@ internal static partial class ToolCatalog
             {
                 if (bridge.DocumentDiagnostics.TryGetCachedErrors(args, out JsonObject cachedErrors))
                 {
+                    CompactDiagnosticsResponse(cachedErrors, args);
                     return BridgeResult(cachedErrors);
                 }
 
-                bool hasFilters = args?[Code] is not null || args?[Severity] is not null
-                    || args?[Project] is not null || args?[Path] is not null || args?[Text] is not null;
-                string? maxValue = args?[Max] is not null ? OptionalText(args, Max) : (hasFilters ? null : DefaultMaxRows);
+                string? maxValue = GetBridgeDiagnosticsMax(args);
 
                 bool useQuick = ShouldUsePassiveDiagnosticsRead(args);
                 string? severityValue = OptionalString(args, Severity) ?? "Error";
@@ -122,7 +135,11 @@ internal static partial class ToolCatalog
                 OptBool(WaitForIntellisense, "Wait for IntelliSense readiness before a live filtered or refresh read (default false)."),
                 OptBool(Quick, PassiveDiagnosticsReadDescription),
                 OptBool(Refresh, RefreshDiagnosticsDescription),
-                OptInt(Max, "Max rows to return. Defaults to 10 when no filters are set."),
+                OptInt(Max, "Legacy alias for chunk_size. Defaults to 10 when chunk_size is omitted."),
+                OptInt(ChunkSize, "Rows per returned chunk (default 10, or max when set). Set 0 to return all filtered rows."),
+                OptInt(ChunkIndex, "Zero-based row chunk index to return (default 0)."),
+                Opt(SortBy, "Optional row sort field: severity, code, project, file/path, line, column, message, source, or tool."),
+                Opt(SortDirection, "Optional sort direction: asc or desc (default asc)."),
                 Opt(Code, "Optional warning code prefix filter."),
                 Opt(Project, ProjectFilterDesc),
                 Opt(Path, "Optional path filter."),
@@ -133,12 +150,11 @@ internal static partial class ToolCatalog
             {
                 if (bridge.DocumentDiagnostics.TryGetCachedWarnings(args, out JsonObject cachedWarnings))
                 {
+                    CompactDiagnosticsResponse(cachedWarnings, args);
                     return BridgeResult(cachedWarnings);
                 }
 
-                bool hasFilters = args?[Code] is not null || args?[Severity] is not null
-                    || args?[Project] is not null || args?[Path] is not null || args?[Text] is not null;
-                string? maxValue = args?[Max] is not null ? OptionalText(args, Max) : (hasFilters ? null : DefaultMaxRows);
+                string? maxValue = GetBridgeDiagnosticsMax(args);
 
                 bool useQuick = ShouldUsePassiveDiagnosticsRead(args);
                 string warningArgs = Build(
@@ -175,7 +191,11 @@ internal static partial class ToolCatalog
                     OptBool(WaitForIntellisense, "Wait for IntelliSense readiness before a live filtered or refresh read (default false)."),
                     OptBool(Quick, PassiveDiagnosticsReadDescription),
                     OptBool(Refresh, RefreshDiagnosticsDescription),
-                    OptInt(Max, "Max rows to return. Defaults to 10 when no filters are set."),
+                    OptInt(Max, "Legacy alias for chunk_size. Defaults to 10 when chunk_size is omitted."),
+                    OptInt(ChunkSize, "Rows per returned chunk (default 10, or max when set). Set 0 to return all filtered rows."),
+                    OptInt(ChunkIndex, "Zero-based row chunk index to return (default 0)."),
+                    Opt(SortBy, "Optional row sort field: severity, code, project, file/path, line, column, message, source, or tool."),
+                    Opt(SortDirection, "Optional sort direction: asc or desc (default asc)."),
                     Opt(Code, "Optional message code prefix filter."),
                     Opt(Project, ProjectFilterDesc),
                     Opt(Path, "Optional path filter."),
@@ -191,12 +211,11 @@ internal static partial class ToolCatalog
             {
                 if (bridge.DocumentDiagnostics.TryGetCachedMessages(args, out JsonObject cachedMessages))
                 {
+                    CompactDiagnosticsResponse(cachedMessages, args);
                     return BridgeResult(cachedMessages);
                 }
 
-                bool hasFilters = args?[Code] is not null || args?[Severity] is not null
-                    || args?[Project] is not null || args?[Path] is not null || args?[Text] is not null;
-                string? maxValue = args?[Max] is not null ? OptionalText(args, Max) : (hasFilters ? null : DefaultMaxRows);
+                string? maxValue = GetBridgeDiagnosticsMax(args);
 
                 bool useQuick = ShouldUsePassiveDiagnosticsRead(args);
                 string? severityValue = OptionalString(args, Severity) ?? "Message";
@@ -232,13 +251,20 @@ internal static partial class ToolCatalog
         yield return CreateErrorsTool();
         yield return CreateWarningsTool();
         yield return CreateMessagesTool();
+        yield return CreateReadOutputTool();
 
         yield return new("diagnostics_snapshot",
             "One-shot snapshot combining IDE state, build status, debugger mode, and error/warning counts. " +
             "Use at the start of a session or after a build instead of calling errors + vs_state separately. " +
             "This is a passive snapshot and may be stale relative to the current Error List. " +
             "With wait_for_intellisense=false it prefers the fast current snapshot; true is slower but fresher.",
-            ObjectSchema(OptBool(WaitForIntellisense, "Wait for IntelliSense readiness (default false).")),
+            ObjectSchema(
+                OptBool(WaitForIntellisense, "Wait for IntelliSense readiness (default false)."),
+                OptInt(Max, "Legacy alias for chunk_size. Defaults to 10 when chunk_size is omitted."),
+                OptInt(ChunkSize, "Rows per diagnostics bucket chunk (default 10, or max when set). Set 0 to return all filtered rows."),
+                OptInt(ChunkIndex, "Zero-based row chunk index to return from each diagnostics bucket (default 0)."),
+                Opt(SortBy, "Optional row sort field: severity, code, project, file/path, line, column, message, source, or tool."),
+                Opt(SortDirection, "Optional sort direction: asc or desc (default asc).")),
             Diagnostics,
             async (id, args, bridge) =>
             {
@@ -256,6 +282,39 @@ internal static partial class ToolCatalog
                 related: [("errors", "Get only errors"), (Warnings, "Get only warnings"), ("vs_state", "Check IDE state"), ("build", "Trigger a build")]));
     }
 
+    private static ToolEntry CreateReadOutputTool()
+    {
+        return BridgeTool("read_output",
+            "Read text from a Visual Studio Output window pane such as Build or IDE Bridge. " +
+            "Omit pane to read the active Output pane; provide pane to select by name or GUID. " +
+            "The selected chunk defaults to the last chunk while chunk metadata keeps the whole output addressable.",
+            ObjectSchema(
+                Opt(Pane, "Optional Output pane name or GUID. Omit to read the active pane, falling back to Build."),
+                OptInt(ChunkLines, "Lines per output chunk (default 200). Set 0 to keep the whole pane as one chunk."),
+                OptInt(ChunkIndex, "Zero-based chunk index to return. Omit to return the last chunk."),
+                OptBool(IncludeChunks, "Include text for every chunk in the chunks array (default false). By default chunks contain metadata only."),
+                OptInt(TailLines, "Legacy alias for chunk_lines."),
+                OptInt(MaxChars, "Maximum characters to return from the selected chunk (default 120000). Set 0 for no character cap."),
+                OptBool(Activate, "Activate the selected Output pane before reading (default false).")),
+            "read-output",
+            args => Build(
+                (Pane, OptionalString(args, Pane)),
+                ("chunk-lines", OptionalText(args, ChunkLines) ?? OptionalText(args, TailLines)),
+                ("chunk-index", OptionalText(args, ChunkIndex)),
+                ("max-chars", OptionalText(args, MaxChars)),
+                BoolArg("include-chunks", args, IncludeChunks, false, false),
+                BoolArg(Activate, args, Activate, false, false)),
+            category: Diagnostics,
+            aliases: ["read_output_window", "output_window"],
+            summary: "Read a Visual Studio Output window pane.",
+            readOnly: true,
+            mutating: false,
+            destructive: false,
+            searchHints: BuildSearchHints(
+                workflow: [("build", "Run or start a build before reading Build output"), ("errors", "Check structured Error List diagnostics")],
+                related: [("warnings", "Review warning rows"), ("messages", "Review message rows"), ("vs_state", "Check the bound IDE instance")]));
+    }
+
     private static void CompactDiagnosticsResponse(JsonObject response, JsonObject? args)
     {
         if (WantsFullDiagnosticsPayload(args) || response["Data"] is not JsonObject data)
@@ -264,8 +323,8 @@ internal static partial class ToolCatalog
         }
 
         int suppressionWarningCount = CountDiagnosticCode(data, SuppressedWarningCode);
-        int maxRows = args?[Max]?.GetValue<int>() ?? DefaultCompactDiagnosticsRows;
-        CompactDiagnosticsNode(data, maxRows);
+        DiagnosticPagingOptions paging = CreateDiagnosticPagingOptions(args);
+        CompactDiagnosticsNode(data, paging);
         AddSuppressionRepairPrompt(response, suppressionWarningCount);
     }
 
@@ -345,17 +404,17 @@ internal static partial class ToolCatalog
         => args?["verbose"]?.GetValue<bool?>() == true
             || args?["full"]?.GetValue<bool?>() == true;
 
-    private static void CompactDiagnosticsNode(JsonNode? node, int maxRows)
+    private static void CompactDiagnosticsNode(JsonNode? node, DiagnosticPagingOptions paging)
     {
         switch (node)
         {
             case JsonObject obj:
-                CompactDiagnosticsObject(obj, maxRows);
+                CompactDiagnosticsObject(obj, paging);
                 break;
             case JsonArray arr:
                 foreach (JsonNode? item in arr)
                 {
-                    CompactDiagnosticsNode(item, maxRows);
+                    CompactDiagnosticsNode(item, paging);
                 }
                 break;
         }
@@ -494,7 +553,7 @@ internal static partial class ToolCatalog
             (Path, OptionalString(args, Path)),
             (Text, OptionalString(args, Text)),
             ("group-by", OptionalString(args, GroupBy)),
-            (Max, OptionalText(args, Max)),
+            (Max, GetBridgeDiagnosticsMax(args)),
             (Quick, "true"),
             (Refresh, "false"),
             (WaitForIntellisenseHyphen, "false"));
@@ -590,30 +649,11 @@ internal static partial class ToolCatalog
         return cache;
     }
 
-    private static void CompactDiagnosticsObject(JsonObject obj, int maxRows)
+    private static void CompactDiagnosticsObject(JsonObject obj, DiagnosticPagingOptions paging)
     {
         if (obj["rows"] is JsonArray rows)
         {
-            int count = obj["count"]?.GetValue<int>() ?? rows.Count;
-            int totalCount = obj["totalCount"]?.GetValue<int>() ?? count;
-            bool truncated = count < totalCount || rows.Count > maxRows;
-
-            if (rows.Count > maxRows)
-            {
-                JsonArray compactRows = [];
-                for (int i = 0; i < maxRows; i++)
-                {
-                    compactRows.Add(rows[i]?.DeepClone());
-                }
-
-                obj["rows"] = compactRows;
-                obj["count"] = maxRows;
-            }
-
-            if (truncated)
-            {
-                obj["truncated"] = true;
-            }
+            CompactDiagnosticRows(obj, rows, paging);
         }
 
         CompactPreviewArray(obj, "openDocuments", "openDocumentCount", DefaultCompactDiagnosticsStateItems);
@@ -621,7 +661,7 @@ internal static partial class ToolCatalog
 
         foreach ((string _, JsonNode? child) in obj)
         {
-            CompactDiagnosticsNode(child, maxRows);
+            CompactDiagnosticsNode(child, paging);
         }
     }
 

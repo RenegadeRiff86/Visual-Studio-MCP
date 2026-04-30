@@ -2,7 +2,7 @@
 #define MyAppFolderName "VsIdeBridge"
 #define MyAppPublisher "RenegadeRiff86"
 #define MyAppURL "https://github.com/RenegadeRiff86/Visual-Studio-MCP"
-#define MyAppVersion "2.2.12"
+#define MyAppVersion "2.2.13"
 #define ServiceName "VsIdeBridgeService"
 #define VsixId "RenegadeRiff86.VsIdeBridge"
 #define LegacyVsixId "StanElston.VsIdeBridge"
@@ -61,7 +61,6 @@ Filename: "{code:GetVsixInstallerPath}"; Parameters: "/quiet /shutdownprocesses 
 
 [Code]
 const
-  VisualStudioMajorVersion = '18';
   InstallerLineBreak = #13#10;
   InstallerDoubleLineBreak = #13#10#13#10;
   PostInstallPageTitle = 'Configuring VS IDE Bridge';
@@ -79,11 +78,6 @@ var
   PythonSupportPage: TWizardPage;
   ManagedPythonRadioButton: TRadioButton;
   SkipManagedPythonRadioButton: TRadioButton;
-
-function GetVsInstallBasePath(): string;
-begin
-  Result := ExpandConstant('{pf}\Microsoft Visual Studio') + '\' + VisualStudioMajorVersion;
-end;
 
 function EscapeJsonString(const Value: string): string;
 begin
@@ -238,13 +232,268 @@ begin
   InitializePythonSupportPage();
 end;
 
+function AppendPath(const Base, Relative: string): string;
+begin
+  if Base = '' then
+    Result := Relative
+  else if Base[Length(Base)] = '\' then
+    Result := Base + Relative
+  else
+    Result := Base + '\' + Relative;
+end;
+
+function GetVswherePath(): string;
+var
+  Candidate: string;
+begin
+  Candidate := ExpandConstant('{pf32}\Microsoft Visual Studio\Installer\vswhere.exe');
+  if FileExists(Candidate) then
+  begin
+    Result := Candidate;
+    Exit;
+  end;
+
+  Candidate := ExpandConstant('{pf}\Microsoft Visual Studio\Installer\vswhere.exe');
+  if FileExists(Candidate) then
+  begin
+    Result := Candidate;
+    Exit;
+  end;
+
+  Result := '';
+end;
+
+function RunVswhereQuery(const Arguments: string; var Lines: TArrayOfString): Boolean;
+var
+  VswherePath: string;
+  OutputPath: string;
+  CommandLine: string;
+  ExitCode: Integer;
+begin
+  Result := False;
+  SetArrayLength(Lines, 0);
+
+  VswherePath := GetVswherePath();
+  if VswherePath = '' then
+  begin
+    Log('vswhere.exe was not found in the Visual Studio Installer directory.');
+    Exit;
+  end;
+
+  OutputPath := ExpandConstant('{tmp}\vsidebridge-vswhere.txt');
+  DeleteFile(OutputPath);
+  CommandLine := '/C ""' + VswherePath + '" ' + Arguments + ' > "' + OutputPath + '""';
+
+  Log('Running vswhere: "' + VswherePath + '" ' + Arguments);
+  if not Exec(ExpandConstant('{sys}\cmd.exe'), CommandLine, '', SW_HIDE, ewWaitUntilTerminated, ExitCode) then
+  begin
+    Log(Format('Failed to launch vswhere. Result code %d.', [ExitCode]));
+    Exit;
+  end;
+
+  if ExitCode <> 0 then
+  begin
+    Log(Format('vswhere exited with code %d.', [ExitCode]));
+    Exit;
+  end;
+
+  Result := LoadStringsFromFile(OutputPath, Lines);
+  if not Result then
+    Log('vswhere output file could not be read: ' + OutputPath);
+
+  DeleteFile(OutputPath);
+end;
+
+function FirstExistingPath(const Lines: TArrayOfString): string;
+var
+  I: Integer;
+  Candidate: string;
+begin
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    Candidate := Trim(Lines[I]);
+    if (Candidate <> '') and FileExists(Candidate) then
+    begin
+      Result := Candidate;
+      Exit;
+    end;
+  end;
+
+  Result := '';
+end;
+
+function FirstExistingVsixInstallerFromInstallPaths(const Lines: TArrayOfString): string;
+var
+  I: Integer;
+  InstallPath: string;
+  Candidate: string;
+begin
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    InstallPath := Trim(Lines[I]);
+    if InstallPath <> '' then
+    begin
+      Candidate := AppendPath(InstallPath, 'Common7\IDE\VSIXInstaller.exe');
+      if FileExists(Candidate) then
+      begin
+        Result := Candidate;
+        Exit;
+      end;
+    end;
+  end;
+
+  Result := '';
+end;
+
+function ResolveVsixInstallerFromVswhereFind(const Arguments: string): string;
+var
+  Lines: TArrayOfString;
+begin
+  if RunVswhereQuery(Arguments, Lines) then
+    Result := FirstExistingPath(Lines)
+  else
+    Result := '';
+end;
+
+function ResolveVsixInstallerFromVswhereInstallPaths(const Arguments: string): string;
+var
+  Lines: TArrayOfString;
+begin
+  if RunVswhereQuery(Arguments, Lines) then
+    Result := FirstExistingVsixInstallerFromInstallPaths(Lines)
+  else
+    Result := '';
+end;
+
+function ResolveVsixInstallerFromVisualStudioRoot(const Root: string): string;
+var
+  VersionRec: TFindRec;
+  EditionRec: TFindRec;
+  VersionPath: string;
+  EditionPath: string;
+  Candidate: string;
+begin
+  Result := '';
+  if not DirExists(Root) then
+    Exit;
+
+  if FindFirst(AppendPath(Root, '*'), VersionRec) then
+  begin
+    try
+      repeat
+        VersionPath := AppendPath(Root, VersionRec.Name);
+        if (VersionRec.Name <> '.') and (VersionRec.Name <> '..') and DirExists(VersionPath) then
+        begin
+          Candidate := AppendPath(VersionPath, 'Common7\IDE\VSIXInstaller.exe');
+          if FileExists(Candidate) then
+          begin
+            Result := Candidate;
+            Exit;
+          end;
+
+          if FindFirst(AppendPath(VersionPath, '*'), EditionRec) then
+          begin
+            try
+              repeat
+                EditionPath := AppendPath(VersionPath, EditionRec.Name);
+                if (EditionRec.Name <> '.') and (EditionRec.Name <> '..') and DirExists(EditionPath) then
+                begin
+                  Candidate := AppendPath(EditionPath, 'Common7\IDE\VSIXInstaller.exe');
+                  if FileExists(Candidate) then
+                  begin
+                    Result := Candidate;
+                    Exit;
+                  end;
+                end;
+              until not FindNext(EditionRec);
+            finally
+              FindClose(EditionRec);
+            end;
+          end;
+        end;
+      until not FindNext(VersionRec);
+    finally
+      FindClose(VersionRec);
+    end;
+  end;
+end;
+
+function ResolveVsixInstallerFromLegacyProgramFilesRoot(const Root: string): string;
+var
+  FindRec: TFindRec;
+  VisualStudioPath: string;
+  Candidate: string;
+begin
+  Result := '';
+  if not DirExists(Root) then
+    Exit;
+
+  if FindFirst(AppendPath(Root, 'Microsoft Visual Studio*'), FindRec) then
+  begin
+    try
+      repeat
+        VisualStudioPath := AppendPath(Root, FindRec.Name);
+        if (FindRec.Name <> '.') and (FindRec.Name <> '..') and DirExists(VisualStudioPath) then
+        begin
+          Candidate := AppendPath(VisualStudioPath, 'Common7\IDE\VSIXInstaller.exe');
+          if FileExists(Candidate) then
+          begin
+            Result := Candidate;
+            Exit;
+          end;
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+function ResolveVsixInstallerFromProgramFilesScan(): string;
+var
+  I: Integer;
+  Roots: array[0..1] of string;
+  Candidate: string;
+begin
+  Roots[0] := ExpandConstant('{pf}\Microsoft Visual Studio');
+  Roots[1] := ExpandConstant('{pf32}\Microsoft Visual Studio');
+
+  for I := 0 to 1 do
+  begin
+    Candidate := ResolveVsixInstallerFromVisualStudioRoot(Roots[I]);
+    if Candidate <> '' then
+    begin
+      Result := Candidate;
+      Exit;
+    end;
+  end;
+
+  Roots[0] := ExpandConstant('{pf}');
+  Roots[1] := ExpandConstant('{pf32}');
+
+  for I := 0 to 1 do
+  begin
+    Candidate := ResolveVsixInstallerFromLegacyProgramFilesRoot(Roots[I]);
+    if Candidate <> '' then
+    begin
+      Result := Candidate;
+      Exit;
+    end;
+  end;
+
+  Result := '';
+end;
+
+function CacheVsixInstallerPath(const Candidate: string): string;
+begin
+  CachedVsixInstallerPath := Candidate;
+  Log('Resolved VSIXInstaller.exe: ' + Candidate);
+  Result := Candidate;
+end;
+
 function ResolveVsixInstallerPath(): string;
 var
-  BasePath: string;
   Candidate: string;
-  I: Integer;
-  Editions: array[0..3] of string;
-  FindRec: TFindRec;
 begin
   if CachedVsixInstallerPath <> '' then
   begin
@@ -252,39 +501,35 @@ begin
     Exit;
   end;
 
-  Editions[0] := 'Enterprise';
-  Editions[1] := 'Professional';
-  Editions[2] := 'Community';
-  Editions[3] := 'Preview';
-
-  BasePath := GetVsInstallBasePath();
-
-  for I := 0 to 3 do
+  Candidate := ResolveVsixInstallerFromVswhereFind(
+    '-latest -prerelease -products * -requires Microsoft.VisualStudio.Component.CoreEditor -find Common7\IDE\VSIXInstaller.exe');
+  if Candidate <> '' then
   begin
-    Candidate := BasePath + '\' + Editions[I] + '\Common7\IDE\VSIXInstaller.exe';
-    if FileExists(Candidate) then
-    begin
-      CachedVsixInstallerPath := Candidate;
-      Result := Candidate;
-      Exit;
-    end;
+    Result := CacheVsixInstallerPath(Candidate);
+    Exit;
   end;
 
-  if FindFirst(BasePath + '\*\Common7\IDE\VSIXInstaller.exe', FindRec) then
+  Candidate := ResolveVsixInstallerFromVswhereFind(
+    '-all -prerelease -products * -requires Microsoft.VisualStudio.Component.CoreEditor -find Common7\IDE\VSIXInstaller.exe');
+  if Candidate <> '' then
   begin
-    try
-      repeat
-        Candidate := BasePath + '\' + FindRec.Name + '\Common7\IDE\VSIXInstaller.exe';
-        if FileExists(Candidate) then
-        begin
-          CachedVsixInstallerPath := Candidate;
-          Result := Candidate;
-          Exit;
-        end;
-      until not FindNext(FindRec);
-    finally
-      FindClose(FindRec);
-    end;
+    Result := CacheVsixInstallerPath(Candidate);
+    Exit;
+  end;
+
+  Candidate := ResolveVsixInstallerFromVswhereInstallPaths(
+    '-legacy -all -property installationPath');
+  if Candidate <> '' then
+  begin
+    Result := CacheVsixInstallerPath(Candidate);
+    Exit;
+  end;
+
+  Candidate := ResolveVsixInstallerFromProgramFilesScan();
+  if Candidate <> '' then
+  begin
+    Result := CacheVsixInstallerPath(Candidate);
+    Exit;
   end;
 
   Result := '';
@@ -450,7 +695,7 @@ procedure ShowVsixInstallerMissingMessage();
 begin
   Log('VSIXInstaller.exe not found; VSIX install skipped.');
   MsgBox(
-    'Visual Studio VSIXInstaller.exe was not found. The VSIX step was skipped.' + InstallerLineBreak +
+    'Visual Studio VSIXInstaller.exe was not found by vswhere or the fallback Program Files scan. The VSIX step was skipped.' + InstallerLineBreak +
     'You can install {app}\vsix\VsIdeBridge.vsix manually later.',
     mbInformation,
     MB_OK);
