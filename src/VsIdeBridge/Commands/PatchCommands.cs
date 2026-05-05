@@ -3,6 +3,7 @@ using System.Text;
 using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 using VsIdeBridge.Services;
+using VsIdeBridge.Tooling.Patches;
 
 namespace VsIdeBridge.Commands;
 
@@ -19,7 +20,10 @@ internal static class PatchCommands
             string? patchText = null;
             string? patchTextBase64 = args.GetString("patch-text-base64");
             if (!string.IsNullOrWhiteSpace(patchTextBase64))
+            {
                 patchText = DecodePatchTextBase64(patchTextBase64!);
+                ValidatePatchText(patchText);
+            }
 
             string? patchFile = args.GetString("patch-file");
             string? baseDirectory = args.GetString("base-directory");
@@ -53,6 +57,18 @@ internal static class PatchCommands
                 InvalidArguments,
                 "Value passed to --patch-text-base64 was not valid base64.",
                 new { exception = ex.Message });
+        }
+    }
+
+    private static void ValidatePatchText(string patchText)
+    {
+        try
+        {
+            _ = ApplyDiffRequest.FromPatchText(patchText);
+        }
+        catch (ApplyDiffValidationException ex)
+        {
+            throw new CommandErrorException(InvalidArguments, ex.Message);
         }
     }
 

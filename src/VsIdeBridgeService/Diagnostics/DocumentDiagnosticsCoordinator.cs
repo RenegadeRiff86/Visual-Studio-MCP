@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using VsIdeBridge.Diagnostics;
 
 using static VsIdeBridgeService.ArgBuilder;
 
@@ -101,49 +102,40 @@ internal sealed class DocumentDiagnosticsCoordinator(BridgeConnection bridge)
         }
     }
 
-    public bool TryGetCachedErrors(JsonObject? args, out JsonObject response)
+    public bool TryGetCached(string severity, JsonObject? args, out JsonObject response)
     {
         lock (_gate)
         {
-            if (!CanServeCachedDiagnostics(args, "Error") || _cached.Errors is null || !HasUsableCachedDiagnosticsLocked())
+            DiagnosticBucket? bucket = GetCachedBucket(severity, out string kind);
+            if (bucket is null || !CanServeCachedDiagnostics(args, severity) || !HasUsableCachedDiagnosticsLocked())
             {
                 response = [];
                 return false;
             }
 
-            response = CreateCachedResponseLocked(_cached.Errors, "errors");
+            response = CreateCachedResponseLocked(bucket, kind);
             return true;
         }
     }
 
-    public bool TryGetCachedWarnings(JsonObject? args, out JsonObject response)
+    private DiagnosticBucket? GetCachedBucket(string severity, out string kind)
     {
-        lock (_gate)
+        if (string.Equals(severity, "Error", StringComparison.OrdinalIgnoreCase))
         {
-            if (!CanServeCachedDiagnostics(args, "Warning") || _cached.Warnings is null || !HasUsableCachedDiagnosticsLocked())
-            {
-                response = [];
-                return false;
-            }
-
-            response = CreateCachedResponseLocked(_cached.Warnings, "warnings");
-            return true;
+            kind = "errors";
+            return _cached.Errors;
         }
-    }
 
-    public bool TryGetCachedMessages(JsonObject? args, out JsonObject response)
-    {
-        lock (_gate)
+        if (string.Equals(severity, "Warning", StringComparison.OrdinalIgnoreCase))
         {
-            if (!CanServeCachedDiagnostics(args, "Message") || _cached.Messages is null || !HasUsableCachedDiagnosticsLocked())
-            {
-                response = [];
-                return false;
-            }
-
-            response = CreateCachedResponseLocked(_cached.Messages, "messages");
-            return true;
+            kind = "warnings";
+            return _cached.Warnings;
         }
+
+        kind = "messages";
+        return string.Equals(severity, "Message", StringComparison.OrdinalIgnoreCase)
+            ? _cached.Messages
+            : null;
     }
 
     private async Task RefreshLoopAsync()
@@ -175,9 +167,9 @@ internal sealed class DocumentDiagnosticsCoordinator(BridgeConnection bridge)
 
                 lock (_gate)
                 {
-                    _cached.Errors = errors;
-                    _cached.Warnings = warnings;
-                    _cached.Messages = messages;
+                    _cached.Errors = DiagnosticBucket.FromResponse(errors);
+                    _cached.Warnings = DiagnosticBucket.FromResponse(warnings);
+                    _cached.Messages = DiagnosticBucket.FromResponse(messages);
                     _cached.Status = "completed";
                     _timing.LastCompletedUtc = DateTimeOffset.UtcNow;
                 }
@@ -218,15 +210,10 @@ internal sealed class DocumentDiagnosticsCoordinator(BridgeConnection bridge)
             return false;
         }
 
-        // quick and wait_for_intellisense are timing hints, not content filters.
-        // Only bypass cache when content-filtering params are present.
+        // quick and wait_for_intellisense are timing hints. Content filters are
+        // applied by DiagnosticCollection before the tool boundary serializes JSON.
         return (args?["severity"] is null
-            || string.Equals(requestedSeverity, expectedSeverity, StringComparison.OrdinalIgnoreCase))
-            && args?["code"] is null
-            && args?["project"] is null
-            && args?["path"] is null
-            && args?["text"] is null
-            && args?["group_by"] is null;
+            || string.Equals(requestedSeverity, expectedSeverity, StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool WantsPassiveDiagnosticsRead(JsonObject? args)
@@ -268,9 +255,9 @@ internal sealed class DocumentDiagnosticsCoordinator(BridgeConnection bridge)
         };
     }
 
-    private JsonObject CreateCachedResponseLocked(JsonObject response, string kind)
+    private JsonObject CreateCachedResponseLocked(DiagnosticBucket bucket, string kind)
     {
-        JsonObject clone = response.DeepClone().AsObject();
+        JsonObject clone = bucket.ToResponseJson();
         JsonArray warnings = clone["Warnings"] as JsonArray is { } existingWarnings
             ? (JsonArray)existingWarnings.DeepClone()
             : [];
@@ -316,8 +303,8 @@ internal sealed class DocumentDiagnosticsCoordinator(BridgeConnection bridge)
         public string Status { get; set; } = "idle";
         public string? Reason { get; set; }
         public string? LastError { get; set; }
-        public JsonObject? Errors { get; set; }
-        public JsonObject? Warnings { get; set; }
-        public JsonObject? Messages { get; set; }
+        public DiagnosticBucket? Errors { get; set; }
+        public DiagnosticBucket? Warnings { get; set; }
+        public DiagnosticBucket? Messages { get; set; }
     }
 }

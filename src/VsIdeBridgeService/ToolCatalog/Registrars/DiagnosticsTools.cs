@@ -1,8 +1,8 @@
 using System.Text.Json.Nodes;
 using static VsIdeBridgeService.ArgBuilder;
 using static VsIdeBridgeService.SchemaHelpers;
+using VsIdeBridge.Diagnostics;
 using VsIdeBridge.Shared;
-using VsIdeBridgeService.Diagnostics;
 using VsIdeBridgeService.SystemTools;
 
 namespace VsIdeBridgeService;
@@ -70,176 +70,106 @@ internal static partial class ToolCatalog
     private const int SuppressionPromptUserThreshold = 10;
 
     private static ToolEntry CreateErrorsTool()
-    {
-        ToolDefinition errorsDefinition = ToolDefinitionCatalog.Errors(
-            ObjectSchema(
-                Opt(Severity, "Optional severity filter."),
-                OptBool(WaitForIntellisense, "Wait for IntelliSense readiness before a live filtered or refresh read (default false)."),
-                OptBool(Quick, PassiveDiagnosticsReadDescription),
-                OptBool(Refresh, RefreshDiagnosticsDescription),
-                OptInt(Max, "Legacy alias for chunk_size. Defaults to 10 when chunk_size is omitted."),
-                OptInt(ChunkSize, "Rows per returned chunk (default 10, or max when set). Set 0 to return all filtered rows."),
-                OptInt(ChunkIndex, "Zero-based row chunk index to return (default 0)."),
-                Opt(SortBy, "Optional row sort field: severity, code, project, file/path, line, column, message, source, or tool."),
-                Opt(SortDirection, "Optional sort direction: asc or desc (default asc)."),
-                Opt(Code, "Optional diagnostic code prefix filter."),
-                Opt(Project, ProjectFilterDesc),
-                Opt(Path, "Optional path filter."),
-                Opt(Text, "Optional message text filter."),
-                Opt(GroupBy, "Optional grouping mode.")))
-            .WithSearchHints(BuildSearchHints(
+        => new DiagnosticRowsToolView(
+            "errors",
+            ToolDefinitionCatalog.Errors,
+            cacheSeverity: "Error",
+            defaultSeverity: "Error",
+            codeFilterDescription: "Optional diagnostic code prefix filter.",
+            groupByDescription: "Optional grouping mode.",
+            searchHints: BuildSearchHints(
                 workflow: [(ReadFileTool, "Read the file containing the error"), ("goto_definition", "Navigate to the error location"), ("apply_diff", "Fix the error")],
-                related: [(Warnings, "Check warnings instead"), ("diagnostics_snapshot", "Get a combined IDE + error snapshot"), ("build_errors", "Run MSBuild directly for a definitive build result")]));
-        return new(errorsDefinition,
-            async (id, args, bridge) =>
-            {
-                if (bridge.DocumentDiagnostics.TryGetCachedErrors(args, out JsonObject cachedErrors))
-                {
-                    CompactDiagnosticsResponse(cachedErrors, args);
-                    return BridgeResult(cachedErrors);
-                }
-
-                string? maxValue = GetBridgeDiagnosticsMax(args);
-
-                bool useQuick = ShouldUsePassiveDiagnosticsRead(args);
-                string? severityValue = OptionalString(args, Severity) ?? "Error";
-                string errorArgs = Build(
-                    (Severity, severityValue),
-                    BoolArg(WaitForIntellisenseHyphen, args, WaitForIntellisense, false, true),
-                    BoolArg(Quick, args, Quick, useQuick, true),
-                    BoolArg(Refresh, args, Refresh, false, true),
-                    (Max, maxValue),
-                    (Code, OptionalString(args, Code)),
-                    (Project, OptionalString(args, Project)),
-                    (Path, OptionalString(args, Path)),
-                    (Text, OptionalString(args, Text)),
-                    ("group-by", OptionalString(args, GroupBy)));
-                JsonObject response = await SendDiagnosticsCommandWithSnapshotFallbackAsync(
-                        bridge,
-                        id,
-                        "errors",
-                        errorArgs,
-                        args)
-                    .ConfigureAwait(false);
-                CompactDiagnosticsResponse(response, args);
-                return BridgeResult(response);
-            });
-    }
+                related: [(Warnings, "Check warnings instead"), ("diagnostics_snapshot", "Get a combined IDE + error snapshot"), ("build_errors", "Run MSBuild directly for a definitive build result")]))
+        .Create();
 
     private static ToolEntry CreateWarningsTool()
-    {
-        return new(Warnings,
-            "Capture warning rows with optional code/path/project filters.",
-            ObjectSchema(
-                Opt(Severity, "Optional severity filter."),
-                OptBool(WaitForIntellisense, "Wait for IntelliSense readiness before a live filtered or refresh read (default false)."),
-                OptBool(Quick, PassiveDiagnosticsReadDescription),
-                OptBool(Refresh, RefreshDiagnosticsDescription),
-                OptInt(Max, "Legacy alias for chunk_size. Defaults to 10 when chunk_size is omitted."),
-                OptInt(ChunkSize, "Rows per returned chunk (default 10, or max when set). Set 0 to return all filtered rows."),
-                OptInt(ChunkIndex, "Zero-based row chunk index to return (default 0)."),
-                Opt(SortBy, "Optional row sort field: severity, code, project, file/path, line, column, message, source, or tool."),
-                Opt(SortDirection, "Optional sort direction: asc or desc (default asc)."),
-                Opt(Code, "Optional warning code prefix filter."),
-                Opt(Project, ProjectFilterDesc),
-                Opt(Path, "Optional path filter."),
-                Opt(Text, "Optional message text filter."),
-                Opt(GroupBy, "Optional grouping mode (e.g. code).")),
-            Diagnostics,
-            async (id, args, bridge) =>
-            {
-                if (bridge.DocumentDiagnostics.TryGetCachedWarnings(args, out JsonObject cachedWarnings))
-                {
-                    CompactDiagnosticsResponse(cachedWarnings, args);
-                    return BridgeResult(cachedWarnings);
-                }
-
-                string? maxValue = GetBridgeDiagnosticsMax(args);
-
-                bool useQuick = ShouldUsePassiveDiagnosticsRead(args);
-                string warningArgs = Build(
-                    (Severity, OptionalString(args, Severity)),
-                    BoolArg(WaitForIntellisenseHyphen, args, WaitForIntellisense, false, true),
-                    BoolArg(Quick, args, Quick, useQuick, true),
-                    BoolArg(Refresh, args, Refresh, false, true),
-                    (Max, maxValue),
-                    (Code, OptionalString(args, Code)),
-                    (Project, OptionalString(args, Project)),
-                    (Path, OptionalString(args, Path)),
-                    (Text, OptionalString(args, Text)),
-                    ("group-by", OptionalString(args, GroupBy)));
-                JsonObject response = await SendDiagnosticsCommandWithSnapshotFallbackAsync(
-                        bridge,
-                        id,
-                        Warnings,
-                        warningArgs,
-                        args)
-                    .ConfigureAwait(false);
-                CompactDiagnosticsResponse(response, args);
-                return BridgeResult(response);
-            },
+        => new DiagnosticRowsToolView(
+            Warnings,
+            ToolDefinitionCatalog.Warnings,
+            cacheSeverity: "Warning",
+            defaultSeverity: "Warning",
+            codeFilterDescription: "Optional warning code prefix filter.",
+            groupByDescription: "Optional grouping mode (e.g. code).",
             searchHints: BuildSearchHints(
                 workflow: [(ReadFileTool, "Read the file with the warning"), ("goto_definition", "Navigate to the warning location")],
-                related: [("errors", "Check errors instead"), ("diagnostics_snapshot", "Get a combined IDE + diagnostics snapshot")]));
-    }
+                related: [("errors", "Check errors instead"), ("diagnostics_snapshot", "Get a combined IDE + diagnostics snapshot")]))
+        .Create();
 
     private static ToolEntry CreateMessagesTool()
+        => new DiagnosticRowsToolView(
+            MessagesTool,
+            ToolDefinitionCatalog.Messages,
+            cacheSeverity: "Message",
+            defaultSeverity: "Message",
+            codeFilterDescription: "Optional message code prefix filter.",
+            groupByDescription: "Optional grouping mode (e.g. code).",
+            searchHints: BuildSearchHints(
+                workflow: [(ReadFileTool, "Read the file behind the message"), ("goto_definition", "Navigate to the message location")],
+                related: [(Warnings, "Check warnings instead"), ("errors", "Check errors instead"), ("diagnostics_snapshot", "Get a combined IDE + diagnostics snapshot")]))
+        .Create();
+
+    private static JsonObject DiagnosticRowsSchema(string codeFilterDescription, string groupByDescription)
+        => ObjectSchema(
+            Opt(Severity, "Optional severity filter."),
+            OptBool(WaitForIntellisense, "Wait for IntelliSense readiness before a live filtered or refresh read (default false)."),
+            OptBool(Quick, PassiveDiagnosticsReadDescription),
+            OptBool(Refresh, RefreshDiagnosticsDescription),
+            OptInt(Max, "Legacy alias for chunk_size. Defaults to 10 when chunk_size is omitted."),
+            OptInt(ChunkSize, "Rows per returned chunk (default 10, or max when set). Set 0 to return all filtered rows."),
+            OptInt(ChunkIndex, "Zero-based row chunk index to return (default 0)."),
+            Opt(SortBy, "Optional row sort field: severity, code, project, file/path, line, column, message, source, or tool."),
+            Opt(SortDirection, "Optional sort direction: asc or desc (default asc)."),
+            Opt(Code, codeFilterDescription),
+            Opt(Project, ProjectFilterDesc),
+            Opt(Path, "Optional path filter."),
+            Opt(Text, "Optional message text filter."),
+            Opt(GroupBy, groupByDescription));
+
+    private sealed class DiagnosticRowsToolView(
+        string commandName,
+        Func<JsonObject, ToolDefinition> definitionFactory,
+        string cacheSeverity,
+        string? defaultSeverity,
+        string codeFilterDescription,
+        string groupByDescription,
+        JsonObject searchHints)
     {
-        ToolDefinition messagesDefinition = ToolDefinitionCatalog.Messages(
-                ObjectSchema(
-                    Opt(Severity, "Optional severity filter."),
-                    OptBool(WaitForIntellisense, "Wait for IntelliSense readiness before a live filtered or refresh read (default false)."),
-                    OptBool(Quick, PassiveDiagnosticsReadDescription),
-                    OptBool(Refresh, RefreshDiagnosticsDescription),
-                    OptInt(Max, "Legacy alias for chunk_size. Defaults to 10 when chunk_size is omitted."),
-                    OptInt(ChunkSize, "Rows per returned chunk (default 10, or max when set). Set 0 to return all filtered rows."),
-                    OptInt(ChunkIndex, "Zero-based row chunk index to return (default 0)."),
-                    Opt(SortBy, "Optional row sort field: severity, code, project, file/path, line, column, message, source, or tool."),
-                    Opt(SortDirection, "Optional sort direction: asc or desc (default asc)."),
-                    Opt(Code, "Optional message code prefix filter."),
-                    Opt(Project, ProjectFilterDesc),
-                    Opt(Path, "Optional path filter."),
-                    Opt(Text, "Optional message text filter."),
-                    Opt(GroupBy, "Optional grouping mode (e.g. code).")))
-            .WithSearchHints(
-                BuildSearchHints(
-                    workflow: [(ReadFileTool, "Read the file behind the message"), ("goto_definition", "Navigate to the message location")],
-                related: [(Warnings, "Check warnings instead"), ("errors", "Check errors instead"), ("diagnostics_snapshot", "Get a combined IDE + diagnostics snapshot")]));
+        public ToolEntry Create()
+        {
+            ToolDefinition definition = definitionFactory(DiagnosticRowsSchema(codeFilterDescription, groupByDescription))
+                .WithSearchHints(searchHints);
+            return new(definition, HandleAsync);
+        }
 
-        return new(messagesDefinition,
-            async (id, args, bridge) =>
+        private async Task<JsonNode> HandleAsync(JsonNode? id, JsonObject? args, BridgeConnection bridge)
+        {
+            if (bridge.DocumentDiagnostics.TryGetCached(cacheSeverity, args, out JsonObject cachedDiagnostics))
             {
-                if (bridge.DocumentDiagnostics.TryGetCachedMessages(args, out JsonObject cachedMessages))
-                {
-                    CompactDiagnosticsResponse(cachedMessages, args);
-                    return BridgeResult(cachedMessages);
-                }
+                CompactDiagnosticsResponse(cachedDiagnostics, args);
+                return BridgeResult(cachedDiagnostics);
+            }
 
-                string? maxValue = GetBridgeDiagnosticsMax(args);
-
-                bool useQuick = ShouldUsePassiveDiagnosticsRead(args);
-                string? severityValue = OptionalString(args, Severity) ?? "Message";
-                string messageArgs = Build(
-                    (Severity, severityValue),
-                    BoolArg(WaitForIntellisenseHyphen, args, WaitForIntellisense, false, true),
-                    BoolArg(Quick, args, Quick, useQuick, true),
-                    BoolArg(Refresh, args, Refresh, false, true),
-                    (Max, maxValue),
-                    (Code, OptionalString(args, Code)),
-                    (Project, OptionalString(args, Project)),
-                    (Path, OptionalString(args, Path)),
-                    (Text, OptionalString(args, Text)),
-                    ("group-by", OptionalString(args, GroupBy)));
-                JsonObject response = await SendDiagnosticsCommandWithSnapshotFallbackAsync(
-                        bridge,
-                        id,
-                        MessagesTool,
-                        messageArgs,
-                        args)
-                    .ConfigureAwait(false);
-                CompactDiagnosticsResponse(response, args);
-                return BridgeResult(response);
-            });
+            string diagnosticsArgs = Build(
+                (Severity, OptionalString(args, Severity) ?? defaultSeverity),
+                BoolArg(WaitForIntellisenseHyphen, args, WaitForIntellisense, false, true),
+                BoolArg(Quick, args, Quick, ShouldUsePassiveDiagnosticsRead(args), true),
+                BoolArg(Refresh, args, Refresh, false, true),
+                (Max, GetBridgeDiagnosticsMax(args)),
+                (Code, OptionalString(args, Code)),
+                (Project, OptionalString(args, Project)),
+                (Path, OptionalString(args, Path)),
+                (Text, OptionalString(args, Text)),
+                ("group-by", OptionalString(args, GroupBy)));
+            JsonObject response = await SendDiagnosticsCommandWithSnapshotFallbackAsync(
+                    bridge,
+                    id,
+                    commandName,
+                    diagnosticsArgs,
+                    args)
+                .ConfigureAwait(false);
+            CompactDiagnosticsResponse(response, args);
+            return BridgeResult(response);
+        }
     }
 
     private static IEnumerable<ToolEntry> DiagnosticsTools() =>
@@ -323,7 +253,7 @@ internal static partial class ToolCatalog
         }
 
         int suppressionWarningCount = CountDiagnosticCode(data, SuppressedWarningCode);
-        DiagnosticPagingOptions paging = CreateDiagnosticPagingOptions(args);
+        DiagnosticQueryOptions paging = CreateDiagnosticQueryOptions(args);
         CompactDiagnosticsNode(data, paging);
         AddSuppressionRepairPrompt(response, suppressionWarningCount);
     }
@@ -404,7 +334,7 @@ internal static partial class ToolCatalog
         => args?["verbose"]?.GetValue<bool?>() == true
             || args?["full"]?.GetValue<bool?>() == true;
 
-    private static void CompactDiagnosticsNode(JsonNode? node, DiagnosticPagingOptions paging)
+    private static void CompactDiagnosticsNode(JsonNode? node, DiagnosticQueryOptions paging)
     {
         switch (node)
         {
@@ -649,11 +579,11 @@ internal static partial class ToolCatalog
         return cache;
     }
 
-    private static void CompactDiagnosticsObject(JsonObject obj, DiagnosticPagingOptions paging)
+    private static void CompactDiagnosticsObject(JsonObject obj, DiagnosticQueryOptions paging)
     {
-        if (obj["rows"] is JsonArray rows)
+        if (obj["rows"] is JsonArray)
         {
-            CompactDiagnosticRows(obj, rows, paging);
+            DiagnosticCollection.FromJsonObject(obj).WriteTo(obj, paging);
         }
 
         CompactPreviewArray(obj, "openDocuments", "openDocumentCount", DefaultCompactDiagnosticsStateItems);

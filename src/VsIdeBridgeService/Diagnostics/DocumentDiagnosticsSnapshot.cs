@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using VsIdeBridge.Diagnostics;
 
 namespace VsIdeBridgeService.Diagnostics;
 
@@ -48,17 +49,17 @@ internal sealed class DocumentDiagnosticsSnapshot
 
         if (Results.Errors is not null)
         {
-            json["errors"] = Results.Errors.DeepClone();
+            json["errors"] = Results.Errors.ToDataJson();
         }
 
         if (Results.Warnings is not null)
         {
-            json["warnings"] = Results.Warnings.DeepClone();
+            json["warnings"] = Results.Warnings.ToDataJson();
         }
 
         if (Results.Messages is not null)
         {
-            json["messages"] = Results.Messages.DeepClone();
+            json["messages"] = Results.Messages.ToDataJson();
         }
 
         return json;
@@ -76,9 +77,9 @@ internal sealed class DocumentDiagnosticsTimingSnapshot
 
 internal sealed class DocumentDiagnosticsResultSnapshot
 {
-    public JsonObject? Errors { get; init; }
+    public DiagnosticBucket? Errors { get; init; }
 
-    public JsonObject? Warnings { get; init; }
+    public DiagnosticBucket? Warnings { get; init; }
 
-    public JsonObject? Messages { get; init; }
+    public DiagnosticBucket? Messages { get; init; }
 }

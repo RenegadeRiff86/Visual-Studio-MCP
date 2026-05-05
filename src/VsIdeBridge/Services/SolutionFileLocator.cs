@@ -239,9 +239,15 @@ internal static class SolutionFileLocator
             score = Math.Max(score, 300);
         }
 
-        score += GetPathPreferenceScore(candidatePath);
+        // The path-preference score (+30 for /src/, -30 for /build/, /bin/, etc.) is a tiebreaker
+        // bonus, not a match indicator. Apply it only when the query actually matched something —
+        // otherwise files with no real match leak through the Score > 0 filter as score=30 noise.
+        if (score == 0)
+        {
+            return 0;
+        }
 
-        return score;
+        return score + GetPathPreferenceScore(candidatePath);
     }
 
     private static int GetPathPreferenceScore(string candidatePath)

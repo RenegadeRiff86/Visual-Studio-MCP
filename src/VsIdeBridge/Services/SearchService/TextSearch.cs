@@ -125,6 +125,17 @@ internal sealed partial class SearchService
             ? allFiles
             : [.. allFiles.Where(file => MatchesPathFilter(file.Path, normalizedPathFilter))];
 
+        // Dedupe by physical path. The same file can appear in EnumerateSolutionFiles twice
+        // (once under a real csproj, once under VS's <MiscFiles> project), which would cause
+        // SearchTextMatchesInSnapshots to scan the file twice and emit duplicate hits.
+        // Prefer the entry whose ProjectUniqueName is NOT the <MiscFiles> placeholder.
+        files =
+        [.. files
+            .GroupBy(file => file.Path, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderBy(file => string.Equals(file.ProjectUniqueName, "<MiscFiles>", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+                .First())];
+
         Dictionary<string, string[]> openDocumentSnapshots = CaptureOpenDocumentSnapshots(context.Dte, files.Select(file => file.Path));
         return await Task.Run(
             () => BuildSearchFileSnapshots(files, openDocumentSnapshots, context.CancellationToken),

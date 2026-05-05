@@ -507,7 +507,14 @@ internal sealed partial class PatchService
             if (line[i] == '\\' && i + 1 < line.Length)
             {
                 char next = line[i + 1];
-                if (next == '"' || next == '\\' || next == 'n' || next == 'r' || next == 't')
+                if (next == 't')
+                {
+                    sb.Append('\t');
+                    i++;
+                    continue;
+                }
+
+                if (next == '"' || next == '\\' || next == 'n' || next == 'r')
                 {
                     sb.Append(next);
                     i++;

@@ -233,12 +233,18 @@ internal static partial class ToolCatalog
         ToolDefinition definition,
         string pipeCommand,
         Func<JsonObject?, string> buildArgs,
-        JsonObject? searchHints = null)
+        JsonObject? searchHints = null,
+        Func<JsonObject, JsonObject?, JsonObject>? transformResponse = null)
         => new(searchHints is not null ? definition.WithSearchHints(searchHints) : definition,
             async (id, args, bridge) =>
             {
                 JsonObject response = await bridge.SendAsync(id, pipeCommand, buildArgs(args))
                     .ConfigureAwait(false);
+                if (transformResponse is not null)
+                {
+                    response = transformResponse(response, args);
+                }
+
                 return BridgeResult(response, args);
             });
 
@@ -258,12 +264,18 @@ internal static partial class ToolCatalog
         bool? mutating = null,
         bool? destructive = null,
         JsonObject? searchHints = null,
-        JsonObject? outputSchema = null)
+        JsonObject? outputSchema = null,
+        Func<JsonObject, JsonObject?, JsonObject>? transformResponse = null)
         => new(name, description, schema, category,
             async (id, args, bridge) =>
             {
                 JsonObject response = await bridge.SendAsync(id, pipeCommand, buildArgs(args))
                     .ConfigureAwait(false);
+                if (transformResponse is not null)
+                {
+                    response = transformResponse(response, args);
+                }
+
                 return BridgeResult(response, args, dataOnly: outputSchema is not null);
             },
             title,
@@ -297,12 +309,18 @@ internal static partial class ToolCatalog
         bool? mutating = null,
         bool? destructive = null,
         JsonObject? searchHints = null,
-        JsonObject? outputSchema = null)
+        JsonObject? outputSchema = null,
+        Func<JsonObject, JsonObject?, JsonObject>? transformResponse = null)
         => new(name, description, schema, category,
             async (id, args, bridge) =>
             {
                 JsonObject response = await bridge.SendAsync(id, pipeCommand, buildArgs(args))
                     .ConfigureAwait(false);
+                if (transformResponse is not null)
+                {
+                    response = transformResponse(response, args);
+                }
+
                 return BridgeResult(response, args, dataOnly: outputSchema is not null);
             },
             title,
@@ -320,8 +338,7 @@ internal static partial class ToolCatalog
     private static JsonNode BridgeResult(JsonObject response, JsonObject? args = null, bool dataOnly = false)
     {
         bool success = (response["Success"] ?? response["success"])?.GetValue<bool>() ?? false;
-        bool isError = ToolResultFormatter.ShouldTreatAsError(response, !success);
-        return ToolResultFormatter.StructuredToolResult(response, args, isError: isError, dataOnly: dataOnly);
+        return ToolResultFormatter.StructuredToolResult(response, args, isError: !success, dataOnly: dataOnly);
     }
 }
 
@@ -329,27 +346,6 @@ internal static class ToolResultFormatter
 {
     private const string FormatterWarningsCommand = "warnings";
     private const string TotalCountProperty = "totalCount";
-
-    internal static bool ShouldTreatAsError(JsonObject response, bool defaultIsError)
-    {
-        if (defaultIsError)
-        {
-            return true;
-        }
-
-        string? command = response["Command"]?.GetValue<string>();
-        if (!string.Equals(command, FormatterWarningsCommand, StringComparison.OrdinalIgnoreCase)
-            || response["Data"] is not JsonObject data)
-        {
-            return false;
-        }
-
-        int totalCount = data[TotalCountProperty]?.GetValue<int>()
-            ?? data["count"]?.GetValue<int>()
-            ?? 0;
-
-        return totalCount > 0;
-    }
 
     internal static JsonNode StructuredToolResult(
         JsonObject response,
@@ -365,8 +361,8 @@ internal static class ToolResultFormatter
             string? errorCode = response["Error"]?["code"]?.GetValue<string>();
             string? errorMsg = response["Error"]?["message"]?.GetValue<string>();
             string? summary = response["Summary"]?.GetValue<string>();
-            // If no actual error message exists (e.g. warnings flagged as error for attention),
-            // use the diagnostics success text so row data is visible in the response.
+            // If an error-shaped diagnostics response lacks an Error message,
+            // keep the rendered rows visible in the response.
             string? diagnosticsText = errorMsg is null ? CreateDiagnosticsSuccessText(response) : null;
             string baseText = diagnosticsText ?? errorMsg ?? summary ?? response.ToJsonString();
             string? hint = GetErrorHint(errorCode);

@@ -3,12 +3,14 @@ using System.Text.Json.Nodes;
 using static VsIdeBridgeService.ArgBuilder;
 using static VsIdeBridgeService.SchemaHelpers;
 using VsIdeBridge.Shared;
+using VsIdeBridge.Tooling.Batch;
 
 namespace VsIdeBridgeService;
 
 internal static partial class ToolCatalog
 {
     private const string BindSolutionToolName = "bind_solution";
+    private const int DefaultBatchChunkSize = 10;
     private const string ListInstancesToolName = "list_instances";
     private const string VsStateToolName = "vs_state";
     private const string WaitForReadyToolName = "wait_for_ready";
@@ -110,7 +112,16 @@ internal static partial class ToolCatalog
                         ["minItems"] = 1,
                     },
                     true)),
-                OptBool("stop_on_error", "Stop after the first failing step (default false).")),
+                OptBool("stop_on_error", "Stop after the first failing step (default false)."),
+                OptInt("chunk_size", "Step results per returned chunk (default 10). Set 0 to return all filtered step results."),
+                OptInt("chunk_index", "Zero-based step-result chunk index to return (default 0)."),
+                Opt("sort_by", "Optional step sort field: index, id, command, success, summary, warnings, or error."),
+                Opt("sort_direction", "Optional sort direction: asc or desc (default asc)."),
+                Opt("command", "Optional command-name filter applied to batch step results."),
+                OptBool("success", "Optional success filter applied to batch step results."),
+                Opt("text", "Optional text filter applied to command, id, summary, and error text."),
+                Opt("group_by", "Optional grouping mode: command, success, or error."),
+                Opt("data_mode", "Nested step data mode: summary (default), full, or none. Use full only when you need each raw step payload.")),
             Core,
             ExecuteBatchToolAsync,
             searchHints: BuildSearchHints(
@@ -122,10 +133,23 @@ internal static partial class ToolCatalog
 
         bool stopOnError = args?["stop_on_error"]?.GetValue<bool>() ?? false;
         JsonObject response = await ExecuteBatchLocallyAsync(id, steps, stopOnError, bridge).ConfigureAwait(false);
+        response = CompactBatchResponse(response, args);
         return ToolResultFormatter.StructuredToolResult(
             response,
             args,
             successText: response["Summary"]?.GetValue<string>());
+    }
+
+    private static JsonObject CompactBatchResponse(JsonObject response, JsonObject? args)
+    {
+        if (response["Data"] is not JsonObject data || !BatchResultCollection.TryFromJsonObject(data, out BatchResultCollection collection))
+        {
+            return response;
+        }
+
+        BatchQueryOptions options = BatchQueryOptions.FromJsonObject(args, DefaultBatchChunkSize);
+        response["Data"] = collection.ToJsonObject(options, data);
+        return response;
     }
 
     private static JsonArray ReadStepsArgument(JsonNode? id, JsonObject? args)

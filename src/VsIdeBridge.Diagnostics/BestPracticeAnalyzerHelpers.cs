@@ -9,6 +9,10 @@ namespace VsIdeBridge.Diagnostics;
 
 internal static partial class BestPracticeAnalyzerHelpers
 {
+    private const int TwoCharacterDelimiterLength = 2;
+    private const int EllipsisLength = 3;
+    private const int MarkupCommentStartOffset = EllipsisLength;
+
     internal static int CountBracedBlockLines(string[] lines, int startIndex)
     {
         int depth = 0;
@@ -205,27 +209,247 @@ internal static partial class BestPracticeAnalyzerHelpers
             }
         }
 
-        return quoteCount % 2 == 1;
+        return quoteCount % TwoCharacterDelimiterLength == 1;
     }
 
     internal static bool IsInsideLineComment(string content, int index)
+        => IsInsideComment(content, index, CodeLanguage.CSharp);
+
+    internal static bool IsInsideComment(string content, int index, CodeLanguage language)
     {
-        int lineStart = content.LastIndexOf('\n', index > 0 ? index - 1 : 0) + 1;
-        bool inString = false;
-        for (int i = lineStart; i < index - 1; i++)
+        if (index <= 0 || string.IsNullOrEmpty(content))
         {
-            if (content[i] == '"' && (i == lineStart || content[i - 1] != '\\'))
+            return false;
+        }
+
+        int limit = Math.Min(index, content.Length);
+        CommentSyntax syntax = GetCommentSyntax(language);
+        CommentScanState state = new();
+
+        for (int i = 0; i < limit; i++)
+        {
+            char ch = content[i];
+            char next = i + 1 < content.Length ? content[i + 1] : '\0';
+
+            if (ScanActiveComment(content, ref i, ch, next, ref state)
+                || ScanActiveString(ref i, ch, ref state)
+                || TryStartString(ch, syntax, ref state))
             {
-                inString = !inString;
+                continue;
             }
 
-            if (!inString && content[i] == '/' && content[i + 1] == '/')
+            TryStartComment(content, ref i, ch, next, syntax, ref state);
+        }
+
+        return state.IsInsideComment;
+    }
+
+    private static CommentSyntax GetCommentSyntax(CodeLanguage language)
+        => new(
+            slashLine: language is CodeLanguage.CSharp or CodeLanguage.Cpp or CodeLanguage.FSharp or CodeLanguage.Unknown,
+            slashBlock: language is CodeLanguage.CSharp or CodeLanguage.Cpp or CodeLanguage.Unknown,
+            hashLine: language is CodeLanguage.Python or CodeLanguage.PowerShell or CodeLanguage.Unknown,
+            vbLine: language == CodeLanguage.VisualBasic,
+            fsharpBlock: language is CodeLanguage.FSharp or CodeLanguage.Unknown,
+            markupBlock: language == CodeLanguage.Unknown,
+            semicolonLine: language == CodeLanguage.Unknown,
+            singleQuotedStrings: language is CodeLanguage.CSharp or CodeLanguage.Cpp or CodeLanguage.FSharp or CodeLanguage.Python or CodeLanguage.PowerShell or CodeLanguage.Unknown);
+
+    private static bool ScanActiveComment(string content, ref int index, char ch, char next, ref CommentScanState state)
+    {
+        if (state.InLineComment)
+        {
+            if (ch == '\r' || ch == '\n')
             {
-                return true;
+                state.InLineComment = false;
             }
+
+            return true;
+        }
+
+        if (state.InSlashBlockComment)
+        {
+            if (ch == '*' && next == '/')
+            {
+                state.InSlashBlockComment = false;
+                index++;
+            }
+
+            return true;
+        }
+
+        if (state.FSharpBlockDepth > 0)
+        {
+            ScanActiveFSharpBlock(ref index, ch, next, ref state);
+            return true;
+        }
+
+        if (state.InMarkupComment)
+        {
+            if (IsMarkupCommentEnd(content, index, ch, next))
+            {
+                state.InMarkupComment = false;
+                index += TwoCharacterDelimiterLength;
+            }
+
+            return true;
         }
 
         return false;
+    }
+
+    private static void ScanActiveFSharpBlock(ref int index, char ch, char next, ref CommentScanState state)
+    {
+        if (ch == '(' && next == '*')
+        {
+            state.FSharpBlockDepth++;
+            index++;
+            return;
+        }
+
+        if (ch == '*' && next == ')')
+        {
+            state.FSharpBlockDepth--;
+            index++;
+        }
+    }
+
+    private static bool ScanActiveString(ref int index, char ch, ref CommentScanState state)
+    {
+        if (state.InDoubleString)
+        {
+            if (ch == '\\')
+            {
+                index++;
+                return true;
+            }
+
+            if (ch == '"')
+            {
+                state.InDoubleString = false;
+            }
+
+            return true;
+        }
+
+        if (!state.InSingleString)
+        {
+            return false;
+        }
+
+        if (ch == '\\')
+        {
+            index++;
+            return true;
+        }
+
+        if (ch == '\'')
+        {
+            state.InSingleString = false;
+        }
+
+        return true;
+    }
+
+    private static bool TryStartString(char ch, CommentSyntax syntax, ref CommentScanState state)
+    {
+        if (ch == '"')
+        {
+            state.InDoubleString = true;
+            return true;
+        }
+
+        if (syntax.SingleQuotedStrings && ch == '\'')
+        {
+            state.InSingleString = true;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static void TryStartComment(string content, ref int index, char ch, char next, CommentSyntax syntax, ref CommentScanState state)
+    {
+        if (syntax.SlashLine && ch == '/' && next == '/')
+        {
+            state.InLineComment = true;
+            index++;
+            return;
+        }
+
+        if (syntax.SlashBlock && ch == '/' && next == '*')
+        {
+            state.InSlashBlockComment = true;
+            index++;
+            return;
+        }
+
+        if (syntax.HashLine && ch == '#')
+        {
+            state.InLineComment = true;
+            return;
+        }
+
+        if (syntax.VbLine && ch == '\'')
+        {
+            state.InLineComment = true;
+            return;
+        }
+
+        if (syntax.FSharpBlock && ch == '(' && next == '*')
+        {
+            state.FSharpBlockDepth = 1;
+            index++;
+            return;
+        }
+
+        if (syntax.MarkupBlock && IsMarkupCommentStart(content, index, ch, next))
+        {
+            state.InMarkupComment = true;
+            index += MarkupCommentStartOffset;
+            return;
+        }
+
+        if (syntax.SemicolonLine && ch == ';')
+        {
+            state.InLineComment = true;
+        }
+    }
+
+    private static bool IsMarkupCommentStart(string content, int index, char ch, char next)
+        => ch == '<'
+            && next == '!'
+            && index + MarkupCommentStartOffset < content.Length
+            && content[index + TwoCharacterDelimiterLength] == '-'
+            && content[index + MarkupCommentStartOffset] == '-';
+
+    private static bool IsMarkupCommentEnd(string content, int index, char ch, char next)
+        => ch == '-'
+            && next == '-'
+            && index + TwoCharacterDelimiterLength < content.Length
+            && content[index + TwoCharacterDelimiterLength] == '>';
+
+    private readonly struct CommentSyntax(bool slashLine, bool slashBlock, bool hashLine, bool vbLine, bool fsharpBlock, bool markupBlock, bool semicolonLine, bool singleQuotedStrings)
+    {
+        public bool SlashLine { get; } = slashLine;
+        public bool SlashBlock { get; } = slashBlock;
+        public bool HashLine { get; } = hashLine;
+        public bool VbLine { get; } = vbLine;
+        public bool FSharpBlock { get; } = fsharpBlock;
+        public bool MarkupBlock { get; } = markupBlock;
+        public bool SemicolonLine { get; } = semicolonLine;
+        public bool SingleQuotedStrings { get; } = singleQuotedStrings;
+    }
+
+    private struct CommentScanState
+    {
+        public bool InDoubleString { get; set; }
+        public bool InSingleString { get; set; }
+        public bool InLineComment { get; set; }
+        public bool InSlashBlockComment { get; set; }
+        public bool InMarkupComment { get; set; }
+        public int FSharpBlockDepth { get; set; }
+        public readonly bool IsInsideComment => InLineComment || InSlashBlockComment || FSharpBlockDepth > 0 || InMarkupComment;
     }
 
     internal static bool IsTrulyUsefulComment(string comment)
@@ -316,9 +540,9 @@ internal static partial class BestPracticeAnalyzerHelpers
         }
 
 #if NET5_0_OR_GREATER
-        return string.Concat(text.AsSpan(0, maxLength - 3), "...");
+        return string.Concat(text.AsSpan(0, maxLength - EllipsisLength), "...");
 #else
-        return text.Substring(0, maxLength - 3) + "...";
+        return text.Substring(0, maxLength - EllipsisLength) + "...";
 #endif
     }
 
@@ -346,8 +570,8 @@ internal static partial class BestPracticeAnalyzerHelpers
         }
 
         string body = block.Substring(openBraceIndex + 1, closeBraceIndex - openBraceIndex - 1);
-        bool hadComment = body.IndexOf("//", StringComparison.Ordinal) >= 0 || body.IndexOf("/*", StringComparison.Ordinal) >= 0;
-        string stripped = Regex.Replace(body, @"//.*?$|/\*.*?\*/", string.Empty, RegexOptions.Multiline | RegexOptions.Singleline);
+        bool hadComment = body.Contains("//", StringComparison.Ordinal) || body.Contains("/*", StringComparison.Ordinal);
+        string stripped = CommentTextRegex().Replace(body, string.Empty);
         if (!string.IsNullOrWhiteSpace(stripped))
         {
             message = string.Empty;
@@ -359,6 +583,15 @@ internal static partial class BestPracticeAnalyzerHelpers
             : "Empty catch block swallows exceptions silently. Log the exception with context or rethrow it.";
         return true;
     }
+
+#if NET8_0_OR_GREATER
+    [GeneratedRegex(@"//.*?$|/\*.*?\*/", RegexOptions.Multiline | RegexOptions.Singleline)]
+    private static partial Regex CommentTextRegex();
+#else
+    private static readonly Regex CommentTextRegexInstance = new(@"//.*?$|/\*.*?\*/", RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.Compiled);
+
+    private static Regex CommentTextRegex() => CommentTextRegexInstance;
+#endif
 
     private static (int Depth, bool FoundOpen) ScanLineForBraces(string line, int depth, bool foundOpen)
     {
