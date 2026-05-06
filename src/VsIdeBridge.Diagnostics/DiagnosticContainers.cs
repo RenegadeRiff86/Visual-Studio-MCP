@@ -372,7 +372,14 @@ public sealed class DiagnosticCollection
 
         if (!string.IsNullOrWhiteSpace(options.GroupBy))
         {
-            target[DiagnosticJsonNames.Groups] = sorted.GroupBy(options.GroupBy);
+            // Suppress individual rows when grouping — the compact group summary (key, count,
+            // sampleMessage, sampleFile, sampleCode) is all a model needs to orient itself.
+            // To drill into a specific group's rows, call again with a path/code/project filter
+            // and no group_by.
+            JsonArray groupArray = sorted.GroupBy(options.GroupBy);
+            target[DiagnosticJsonNames.Groups] = groupArray;
+            target[DiagnosticJsonNames.Rows] = new JsonArray();
+            target[DiagnosticJsonNames.Count] = groupArray.Count;
         }
     }
 

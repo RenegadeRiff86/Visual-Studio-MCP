@@ -142,6 +142,13 @@ internal static partial class BestPracticeAnalyzer
 
     public static IEnumerable<JObject> FindRepeatedStringLiterals(string file, string content)
     {
+        // Test files use inline string literals by convention — test inputs and expected values
+        // are deliberately repeated across test methods and should not be extracted to constants.
+        if (IsTestFile(file))
+        {
+            yield break;
+        }
+
         IEnumerable<IGrouping<string, Match>> occurrences = StringLiteralPattern().Matches(content)
             .Cast<Match>()
             .Where(m => !IsInsideStringLiteral(content, m.Index))
@@ -168,6 +175,12 @@ internal static partial class BestPracticeAnalyzer
 
     public static IEnumerable<JObject> FindMagicNumbers(string file, string content)
     {
+        // Same rationale as BP1001: test methods use literal numbers as inputs/assertions.
+        if (IsTestFile(file))
+        {
+            yield break;
+        }
+
         CodeLanguage language = GetLanguage(file);
         IEnumerable<IGrouping<string, (Match Match, string Value)>> matches =
             NumberLiteralPattern().Matches(content)

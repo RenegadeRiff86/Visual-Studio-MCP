@@ -393,12 +393,42 @@ internal sealed class BuildService(ReadinessService readinessService)
         ThreadHelper.ThrowIfNotOnUIThread();
         foreach (EnvDTE.Project project in dte.Solution.Projects)
         {
-            if (string.Equals(project.Name, projectName, StringComparison.OrdinalIgnoreCase)
-                || (project.UniqueName?.EndsWith(projectName, StringComparison.OrdinalIgnoreCase) == true))
+            string? found = FindUniqueNameInProjectTree(project, projectName);
+            if (found is not null)
             {
-                return project.UniqueName;
+                return found;
             }
         }
+        return null;
+    }
+
+    // Recursively walks solution folders, matching by display name, unique name, or full path.
+    private static string? FindUniqueNameInProjectTree(EnvDTE.Project project, string projectName)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        if (string.Equals(project.Kind, ProjectKinds.vsProjectKindSolutionFolder, StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (EnvDTE.ProjectItem item in project.ProjectItems)
+            {
+                if (item.SubProject is { } sub)
+                {
+                    string? found = FindUniqueNameInProjectTree(sub, projectName);
+                    if (found is not null)
+                    {
+                        return found;
+                    }
+                }
+            }
+            return null;
+        }
+
+        if (string.Equals(project.Name, projectName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(project.UniqueName, projectName, StringComparison.OrdinalIgnoreCase)
+            || (project.FullName is { Length: > 0 } && PathNormalization.AreEquivalent(project.FullName, projectName)))
+        {
+            return project.UniqueName;
+        }
+
         return null;
     }
 

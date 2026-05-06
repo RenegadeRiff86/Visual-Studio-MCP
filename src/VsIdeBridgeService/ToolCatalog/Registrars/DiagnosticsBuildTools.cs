@@ -9,6 +9,7 @@ internal static partial class ToolCatalog
 {
     private const string FinishedAtUtcProperty = "FinishedAtUtc";
     private const int BuildCourtesyWaitMilliseconds = 10_000;
+    private const int BuildExplicitWaitMilliseconds = 600_000;
     private const string BackgroundOperationProperty = "backgroundOperation";
     private const string BackgroundOperationStatusCompleted = "completed";
     private const string BackgroundOperationStatusFailed = "failed";
@@ -22,7 +23,7 @@ internal static partial class ToolCatalog
             Opt(Configuration, "Optional build configuration (e.g. Release)."),
             Opt(Platform, "Optional build platform (e.g. x64)."),
             OptBool(WaitForIntellisense, "Wait for IntelliSense readiness before building (default true)."),
-            OptBool(WaitForCompletion, $"When false, start the operation and return immediately (default {(defaultWaitForCompletion ? "true" : "false")}). Set true to wait for completion. Solution-wide builds stop waiting after 10 seconds and tell the model to prompt the user before waiting longer."),
+            OptBool(WaitForCompletion, $"When false, start the operation and return immediately (default {(defaultWaitForCompletion ? "true" : "false")}). When explicitly set to true, solution-wide builds wait up to {BuildExplicitWaitMilliseconds / 60_000} minutes for completion. When using the default value, they stop waiting after {BuildCourtesyWaitMilliseconds / 1_000} seconds and prompt the model to ask the user before waiting longer."),
             OptBool(RequireCleanDiagnostics, "When false, bypasses the pre-build dirty-diagnostics guard (default true)."),
             OptBool(ErrorsOnly, "When true, return the build summary plus only error rows so warnings and messages do not flood the response."),
             OptInt(Max, "Max error rows to return when errors_only is true (default 50)."),
@@ -58,6 +59,9 @@ internal static partial class ToolCatalog
     {
         bool waitForCompletion = OptionalBool(args, WaitForCompletion, defaultWaitForCompletion);
         bool errorsOnly = args?[ErrorsOnly]?.GetValue<bool>() ?? false;
+        // Detect whether the caller explicitly provided wait_for_completion (vs. accepting the default).
+        // Explicit callers get a 10-minute poll window; default callers get the 10-second courtesy wait.
+        bool waitForCompletionExplicit = args?[WaitForCompletion] is not null;
         if (!waitForCompletion && errorsOnly)
         {
             throw new McpRequestException(id, McpErrorCodes.InvalidParams, $"'{ErrorsOnly}' requires '{WaitForCompletion}=true'.");
@@ -70,6 +74,7 @@ internal static partial class ToolCatalog
 
         JsonObject? preBuild = errorsOnly || !waitForCompletion ? null : await TryCapturePreBuildDiagnosticsAsync(id, bridge).ConfigureAwait(false);
         bool useCourtesyWait = waitForCompletion && IsSolutionWideBuild(includeProject, args);
+        int waitTimeoutMs = waitForCompletionExplicit ? BuildExplicitWaitMilliseconds : BuildCourtesyWaitMilliseconds;
         JsonObject response = await bridge.SendAsync(
                 id,
                 pipeCommand,
@@ -90,12 +95,13 @@ internal static partial class ToolCatalog
                     bridge,
                     id,
                     expectedOperation,
-                    expectedStartedAtUtc)
+                    expectedStartedAtUtc,
+                    waitTimeoutMs)
                 .ConfigureAwait(false);
 
             if (promptUser)
             {
-                AnnotateLongRunningBuildResponse(response, backgroundOperation, errorsOnly);
+                AnnotateLongRunningBuildResponse(response, backgroundOperation, errorsOnly, waitTimeoutMs);
                 return response;
             }
 
@@ -148,9 +154,10 @@ internal static partial class ToolCatalog
         BridgeConnection bridge,
         JsonNode? id,
         string expectedOperation,
-        string? expectedStartedAtUtc)
+        string? expectedStartedAtUtc,
+        int timeoutMs = BuildCourtesyWaitMilliseconds)
     {
-        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddMilliseconds(BuildCourtesyWaitMilliseconds);
+        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeoutMs);
         JsonObject? lastBackgroundOperation = null;
 
         while (true)
@@ -222,11 +229,11 @@ internal static partial class ToolCatalog
         return string.Equals(status, BackgroundOperationStatusFailed, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void AnnotateLongRunningBuildResponse(JsonObject response, JsonObject? backgroundOperation, bool errorsOnly)
+    private static void AnnotateLongRunningBuildResponse(JsonObject response, JsonObject? backgroundOperation, bool errorsOnly, int timeoutMs = BuildCourtesyWaitMilliseconds)
     {
         JsonObject data = response["Data"] as JsonObject ?? [];
         data["courtesyWaitExceeded"] = true;
-        data["courtesyWaitMilliseconds"] = BuildCourtesyWaitMilliseconds;
+        data["courtesyWaitMilliseconds"] = timeoutMs;
         data["promptUserToContinue"] = true;
         data["followUpHint"] = "The build is still running. Prompt the user before waiting longer, then read errors, warnings, messages, or diagnostics_snapshot when it finishes.";
         if (errorsOnly)
@@ -240,8 +247,11 @@ internal static partial class ToolCatalog
         }
 
         response["Data"] = data;
-        AppendSummaryPrompt(response, "The build is still running after 10 seconds. Prompt the user before waiting longer.");
-        AppendResponseWarning(response, "The build is still running after 10 seconds. Prompt the user before waiting longer.");
+        string timeoutDesc = timeoutMs >= 60_000
+            ? $"{timeoutMs / 60_000} minutes"
+            : $"{timeoutMs / 1_000} seconds";
+        AppendSummaryPrompt(response, $"The build is still running after {timeoutDesc}. Prompt the user before waiting longer.");
+        AppendResponseWarning(response, $"The build is still running after {timeoutDesc}. Prompt the user before waiting longer.");
     }
 
     private static void ApplyCompletedBackgroundBuildResponse(JsonObject response, JsonObject buildResult)

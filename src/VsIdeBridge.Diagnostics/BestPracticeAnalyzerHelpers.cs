@@ -520,6 +520,24 @@ internal static partial class BestPracticeAnalyzerHelpers
         return redundantPhrases.Any(phrase => lower.Contains(phrase));
     }
 
+    internal static bool IsTestFile(string file)
+    {
+        string fileName = Path.GetFileNameWithoutExtension(file);
+        if (fileName.EndsWith("Tests", StringComparison.OrdinalIgnoreCase)
+            || fileName.EndsWith("Test", StringComparison.OrdinalIgnoreCase)
+            || fileName.EndsWith("Spec", StringComparison.OrdinalIgnoreCase)
+            || fileName.EndsWith("Specs", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // Catch project-level test folders: Foo.Tests\, Foo.UnitTests\, Foo.IntegrationTests\, Tests\
+        string fullPath = Path.GetFullPath(file);
+        return fullPath.IndexOf(".Tests", StringComparison.OrdinalIgnoreCase) >= 0
+            || fullPath.IndexOf($"{Path.DirectorySeparatorChar}Tests{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) >= 0
+            || fullPath.IndexOf($"{Path.AltDirectorySeparatorChar}Tests{Path.AltDirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
     internal static int GetLineNumber(string content, int index)
     {
         int line = 1;

@@ -76,7 +76,7 @@ internal static partial class ToolCatalog
             cacheSeverity: "Error",
             defaultSeverity: "Error",
             codeFilterDescription: "Optional diagnostic code prefix filter.",
-            groupByDescription: "Optional grouping mode.",
+            groupByDescription: "Optional grouping mode (e.g. file, code). Returns compact group summaries (key, count, sample) without individual rows. Use path/code/project filters without group_by to drill into a specific group.",
             searchHints: BuildSearchHints(
                 workflow: [(ReadFileTool, "Read the file containing the error"), ("goto_definition", "Navigate to the error location"), ("apply_diff", "Fix the error")],
                 related: [(Warnings, "Check warnings instead"), ("diagnostics_snapshot", "Get a combined IDE + error snapshot"), ("build_errors", "Run MSBuild directly for a definitive build result")]))
@@ -89,7 +89,7 @@ internal static partial class ToolCatalog
             cacheSeverity: "Warning",
             defaultSeverity: "Warning",
             codeFilterDescription: "Optional warning code prefix filter.",
-            groupByDescription: "Optional grouping mode (e.g. code).",
+            groupByDescription: "Optional grouping mode (e.g. file, code). Returns compact group summaries (key, count, sample) without individual rows. Use path/code/project filters without group_by to drill into a specific group.",
             searchHints: BuildSearchHints(
                 workflow: [(ReadFileTool, "Read the file with the warning"), ("goto_definition", "Navigate to the warning location")],
                 related: [("errors", "Check errors instead"), ("diagnostics_snapshot", "Get a combined IDE + diagnostics snapshot")]))
@@ -102,7 +102,7 @@ internal static partial class ToolCatalog
             cacheSeverity: "Message",
             defaultSeverity: "Message",
             codeFilterDescription: "Optional message code prefix filter.",
-            groupByDescription: "Optional grouping mode (e.g. code).",
+            groupByDescription: "Optional grouping mode (e.g. file, code). Returns compact group summaries (key, count, sample) without individual rows. Use path/code/project filters without group_by to drill into a specific group.",
             searchHints: BuildSearchHints(
                 workflow: [(ReadFileTool, "Read the file behind the message"), ("goto_definition", "Navigate to the message location")],
                 related: [(Warnings, "Check warnings instead"), ("errors", "Check errors instead"), ("diagnostics_snapshot", "Get a combined IDE + diagnostics snapshot")]))

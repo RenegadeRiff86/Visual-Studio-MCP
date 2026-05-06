@@ -285,6 +285,16 @@ dotnet build
 
 Open `VsIdeBridge.sln` in Visual Studio to work on the extension. The VSIX project sets up the experimental instance automatically for F5 debugging.
 
+### Building the installer
+
+Open `VsIdeBridge.sln` in Visual Studio and run **Build → Rebuild Solution**. The post-build step invokes Inno Setup automatically and produces the setup executable at:
+
+```
+installer\output\vs-ide-bridge-setup-<version>.exe
+```
+
+Run that installer to deploy the updated extension and service. Visual Studio must be closed before installing so the extension DLL is not locked.
+
 ## Third-Party Notices
 
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for license information covering third-party components used in this project.
