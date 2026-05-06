@@ -10,7 +10,8 @@ public static partial class ToolDefinitionCatalog
             "documents",
             "Apply the default targeted edit patch for one or multiple files.",
             "Apply an editor patch to code files through the live editor. Use *** Begin Patch / *** Update File: path / @@ / -old / +new / *** End Patch. " +
-            "Use this as the default in-solution edit tool after you inspect the target with read_file, search_symbols, find_text, or file_outline. " +
+            "ALWAYS call read_file on the target section first — copy context lines verbatim from its output, whitespace-exact. Never retype or paraphrase them; any difference will cause a match failure. " +
+            "Use this as the default in-solution edit tool after inspecting with read_file, search_symbols, find_text, or file_outline. " +
             "Supports *** Add File, *** Delete File, and *** Update File blocks. Multiple files apply atomically, and changed files open automatically. " +
             "Do not send unified diff headers like --- or +++.",
             parameterSchema,

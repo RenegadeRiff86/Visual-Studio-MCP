@@ -93,7 +93,7 @@ internal static partial class ToolCatalog
         yield return new(
             ToolDefinitionCatalog.ApplyDiff(
                 ObjectSchema(
-                    Req("diff", "Editor patch text. Required format:\n" +
+                    Opt("diff", "Editor patch text. Format:\n" +
                         "*** Begin Patch\\n" +
                         "*** Update File: path/to/file.cs\\n" +
                         "@@\\n" +
@@ -104,7 +104,11 @@ internal static partial class ToolCatalog
                         "*** End Patch\n" +
                         "Supports: *** Add File, *** Delete File, *** Update File.\n" +
                         "Multi-file: repeat file blocks before *** End Patch (all changes are atomic).\n" +
-                        "Use this format only; do not send unified diff headers like --- / +++."),
+                        "Alternatively pass file + old_content + new_content for a targeted simple replacement.\n" +
+                        "Use editor patch format only; do not send unified diff headers like --- / +++."),
+                    Opt(FileArg, "File path for targeted simple replacement. Use with old_content and new_content."),
+                    Opt("old_content", "Exact text to replace for targeted simple replacement."),
+                    Opt("new_content", "Replacement text for targeted simple replacement."),
                     OptBool(PostCheck,
                         "Queue a quick diagnostics refresh after applying (default false).")))
                 .WithSearchHints(BuildSearchHints(
@@ -219,7 +223,7 @@ internal static partial class ToolCatalog
                 related: [("reload_document", "Reload after external changes"), (ApplyDiffTool, "Apply changes before saving")]));
 
         yield return BridgeTool("reload_document",
-            "Reload a document from disk — required after native Edit/Write tool changes. VS does not auto-detect external writes. Call after every .cs edit, then check errors.",
+            "Reload a document from disk — required after native Edit/Write tool changes. VS does not auto-detect external writes. The file must already be open in an editor tab; call open_file first if it is not open, or check list_documents. Call after every external edit, then check errors.",
             ObjectSchema(Req(FileArg, FileDesc)),
             "reload-document",
             a => Build((FileArg, OptionalString(a, FileArg))),
@@ -450,7 +454,8 @@ internal static partial class ToolCatalog
             "Use for build scripts, test runners, package tools, and CLI utilities. " +
             "Prefer named tools for common operations: git_* for version control, " +
             "build / build_errors for compilation, delete_file / copy_file for FileArg operations. " +
-            "Working directory defaults to the solution directory.",
+            "Working directory defaults to the directory containing the .sln file. " +
+            "For files in subdirectories use paths relative to that root (e.g. 'src/Foo/Bar.cs'), or pass cwd explicitly.",
             ObjectSchema(
                 Req("exe", "Executable path or name (e.g. 'powershell', 'cmd', 'ISCC.exe')."),
                 Opt("args", "Arguments string to pass to the executable."),
