@@ -3,6 +3,103 @@
   <Extern href="stdidcmd.h" />
   <Extern href="vsshlids.h" />
 
+  <Symbols>
+    <GuidSymbol name="guidVsIdeBridgePackage" value="{D8F750B1-5FB7-4A52-8D75-ED5A7F576088}" />
+    <GuidSymbol name="guidVsIdeBridgeMenu" value="{B5B178A2-82AB-4B20-AC1B-A7B2AA637325}">
+      <IDSymbol name="BridgeMenu" value="0x1000" />
+    </GuidSymbol>
+    <GuidSymbol name="guidVsIdeBridgeCommandSet" value="{5C519A88-1F81-402D-BD2A-A0110F704494}">
+      <IDSymbol name="BridgeMenuGroup" value="0x1010" />
+      <IDSymbol name="BridgeCommandGroup" value="0x1020" />
+      <IDSymbol name="cmdidIdeHelp" value="0x0100" />
+      <IDSymbol name="cmdidIdeSmokeTest" value="0x0101" />
+      <IDSymbol name="cmdidIdeHelpMenu" value="0x0102" />
+      <IDSymbol name="cmdidIdeToggleHttpServerMenu" value="0x010B" />
+      <IDSymbol name="cmdidIdeGetState" value="0x0200" />
+      <IDSymbol name="cmdidIdeWaitForReady" value="0x0201" />
+      <IDSymbol name="cmdidIdeFindText" value="0x0202" />
+      <IDSymbol name="cmdidIdeFindFiles" value="0x0203" />
+      <IDSymbol name="cmdidIdeOpenDocument" value="0x0204" />
+      <IDSymbol name="cmdidIdeListDocuments" value="0x0216" />
+      <IDSymbol name="cmdidIdeListOpenTabs" value="0x021D" />
+      <IDSymbol name="cmdidIdeActivateDocument" value="0x0217" />
+      <IDSymbol name="cmdidIdeCloseDocument" value="0x0218" />
+      <IDSymbol name="cmdidIdeCloseFile" value="0x021E" />
+      <IDSymbol name="cmdidIdeCloseAllExceptCurrent" value="0x021F" />
+      <IDSymbol name="cmdidIdeActivateWindow" value="0x0205" />
+      <IDSymbol name="cmdidIdeListWindows" value="0x0219" />
+      <IDSymbol name="cmdidIdeExecuteVsCommand" value="0x021A" />
+      <IDSymbol name="cmdidIdeFindAllReferences" value="0x021B" />
+      <IDSymbol name="cmdidIdeCountReferences" value="0x023C" />
+      <IDSymbol name="cmdidIdeShowCallHierarchy" value="0x021C" />
+      <IDSymbol name="cmdidIdeGetDocumentSlice" value="0x0215" />
+      <IDSymbol name="cmdidIdeGetSmartContextForQuery" value="0x0220" />
+      <IDSymbol name="cmdidIdeApplyUnifiedDiff" value="0x0221" />
+      <IDSymbol name="cmdidIdeGoToDefinition" value="0x0222" />
+      <IDSymbol name="cmdidIdeGoToImplementation" value="0x022F" />
+      <IDSymbol name="cmdidIdeGetFileOutline" value="0x0223" />
+      <IDSymbol name="cmdidIdeSetBreakpoint" value="0x0206" />
+      <IDSymbol name="cmdidIdeListBreakpoints" value="0x0207" />
+      <IDSymbol name="cmdidIdeRemoveBreakpoint" value="0x0208" />
+      <IDSymbol name="cmdidIdeClearAllBreakpoints" value="0x0209" />
+      <IDSymbol name="cmdidIdeDebugGetState" value="0x020A" />
+      <IDSymbol name="cmdidIdeDebugStart" value="0x020B" />
+      <IDSymbol name="cmdidIdeDebugStop" value="0x020C" />
+      <IDSymbol name="cmdidIdeDebugBreak" value="0x020D" />
+      <IDSymbol name="cmdidIdeDebugContinue" value="0x020E" />
+      <IDSymbol name="cmdidIdeDebugStepOver" value="0x020F" />
+      <IDSymbol name="cmdidIdeDebugStepInto" value="0x0210" />
+      <IDSymbol name="cmdidIdeDebugStepOut" value="0x0211" />
+      <IDSymbol name="cmdidIdeDebugThreads" value="0x0233" />
+      <IDSymbol name="cmdidIdeDebugStack" value="0x0234" />
+      <IDSymbol name="cmdidIdeDebugLocals" value="0x0235" />
+      <IDSymbol name="cmdidIdeDebugModules" value="0x0236" />
+      <IDSymbol name="cmdidIdeDebugWatch" value="0x0237" />
+      <IDSymbol name="cmdidIdeDebugExceptions" value="0x0238" />
+      <IDSymbol name="cmdidIdeDiagnosticsSnapshot" value="0x0239" />
+      <IDSymbol name="cmdidIdeBuildConfigurations" value="0x023A" />
+      <IDSymbol name="cmdidIdeSetBuildConfiguration" value="0x023B" />
+      <IDSymbol name="cmdidIdeBuildSolution" value="0x0212" />
+      <IDSymbol name="cmdidIdeRebuildSolution" value="0x0261" />
+      <IDSymbol name="cmdidIdeGetErrorList" value="0x0213" />
+      <IDSymbol name="cmdidIdeGetWarnings" value="0x0230" />
+      <IDSymbol name="cmdidIdeGetMessages" value="0x0263" />
+      <IDSymbol name="cmdidIdeRunCodeAnalysis" value="0x0264" />
+      <IDSymbol name="cmdidIdeBuildAndCaptureErrors" value="0x0214" />
+      <IDSymbol name="cmdidIdeOpenSolution" value="0x0224" />
+      <IDSymbol name="cmdidIdeCreateSolution" value="0x023D" />
+      <IDSymbol name="cmdidIdeBatchCommands" value="0x0225" />
+      <IDSymbol name="cmdidIdeSearchSymbols" value="0x0226" />
+      <IDSymbol name="cmdidIdeGetQuickInfo" value="0x0227" />
+      <IDSymbol name="cmdidIdePeekDefinition" value="0x0265" />
+      <IDSymbol name="cmdidIdeReadOutputWindow" value="0x0266" />
+      <IDSymbol name="cmdidIdeGetDocumentSlices" value="0x0228" />
+      <IDSymbol name="cmdidIdeGetFileSymbols" value="0x022D" />
+      <IDSymbol name="cmdidIdeEnableBreakpoint" value="0x0229" />
+      <IDSymbol name="cmdidIdeDisableBreakpoint" value="0x022A" />
+      <IDSymbol name="cmdidIdeEnableAllBreakpoints" value="0x022B" />
+      <IDSymbol name="cmdidIdeDisableAllBreakpoints" value="0x022C" />
+      <IDSymbol name="cmdidIdeCloseIde" value="0x0231" />
+      <IDSymbol name="cmdidIdeSaveDocument" value="0x0232" />
+      <IDSymbol name="cmdidIdeListProjects" value="0x023E" />
+      <IDSymbol name="cmdidIdeAddProject" value="0x023F" />
+      <IDSymbol name="cmdidIdeRemoveProject" value="0x0240" />
+      <IDSymbol name="cmdidIdeSetStartupProject" value="0x0241" />
+      <IDSymbol name="cmdidIdeRenameProject" value="0x0262" />
+      <IDSymbol name="cmdidIdeAddFileToProject" value="0x0242" />
+      <IDSymbol name="cmdidIdeRemoveFileFromProject" value="0x0243" />
+      <IDSymbol name="cmdidIdeFindTextBatch" value="0x024A" />
+      <IDSymbol name="cmdidIdeRequestApproval" value="0x024B" />
+      <IDSymbol name="cmdidIdeGetUiSettings" value="0x024C" />
+      <IDSymbol name="cmdidIdeWriteFile" value="0x024D" />
+      <IDSymbol name="cmdidIdeReloadDocument" value="0x024E" />
+      <IDSymbol name="cmdidIdeSetPythonProjectEnv" value="0x024F" />
+      <IDSymbol name="cmdidIdeSetPythonStartupFile" value="0x0250" />
+      <IDSymbol name="cmdidIdeGetPythonStartupFile" value="0x0251" />
+      <IDSymbol name="cmdidIdeCreateProject" value="0x0260" />
+    </GuidSymbol>
+  </Symbols>
+
   <Commands package="guidVsIdeBridgePackage">
     <Groups>
       <Group guid="guidVsIdeBridgeCommandSet" id="BridgeMenuGroup" priority="0x0600">
@@ -19,7 +116,6 @@
         <Strings>
           <ButtonText>IDE Bridge</ButtonText>
           <CommandName>IdeBridgeMenu</CommandName>
-          <LocCanonicalName>.Tools.VsIdeBridgeMenu</LocCanonicalName>
         </Strings>
       </Menu>
     </Menus>
@@ -151,6 +247,17 @@
           <CommandName>IdeGetState</CommandName>
           <CanonicalName>Tools.IdeGetState</CanonicalName>
           <LocCanonicalName>.Tools.IdeGetState</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeReadOutputWindow" priority="0x0266" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <CommandFlag>CommandWellOnly</CommandFlag>
+        <CommandFlag>AllowParams</CommandFlag>
+        <Strings>
+          <ButtonText>IDE Read Output Window</ButtonText>
+          <CommandName>IdeReadOutputWindow</CommandName>
+          <CanonicalName>Tools.IdeReadOutputWindow</CanonicalName>
+          <LocCanonicalName>.Tools.IdeReadOutputWindow</LocCanonicalName>
         </Strings>
       </Button>
       <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeWaitForReady" priority="0x0201" type="Button">
@@ -957,100 +1064,4 @@
       </Button>
     </Buttons>
   </Commands>
-
-  <Symbols>
-    <GuidSymbol name="guidVsIdeBridgePackage" value="{D8F750B1-5FB7-4A52-8D75-ED5A7F576088}" />
-    <GuidSymbol name="guidVsIdeBridgeMenu" value="{B5B178A2-82AB-4B20-AC1B-A7B2AA637325}">
-      <IDSymbol name="BridgeMenu" value="0x1000" />
-    </GuidSymbol>
-    <GuidSymbol name="guidVsIdeBridgeCommandSet" value="{5C519A88-1F81-402D-BD2A-A0110F704494}">
-      <IDSymbol name="BridgeMenuGroup" value="0x1010" />
-      <IDSymbol name="BridgeCommandGroup" value="0x1020" />
-      <IDSymbol name="cmdidIdeHelp" value="0x0100" />
-      <IDSymbol name="cmdidIdeSmokeTest" value="0x0101" />
-      <IDSymbol name="cmdidIdeHelpMenu" value="0x0102" />
-      <IDSymbol name="cmdidIdeToggleHttpServerMenu" value="0x010B" />
-      <IDSymbol name="cmdidIdeGetState" value="0x0200" />
-      <IDSymbol name="cmdidIdeWaitForReady" value="0x0201" />
-      <IDSymbol name="cmdidIdeFindText" value="0x0202" />
-      <IDSymbol name="cmdidIdeFindFiles" value="0x0203" />
-      <IDSymbol name="cmdidIdeOpenDocument" value="0x0204" />
-      <IDSymbol name="cmdidIdeListDocuments" value="0x0216" />
-      <IDSymbol name="cmdidIdeListOpenTabs" value="0x021D" />
-      <IDSymbol name="cmdidIdeActivateDocument" value="0x0217" />
-      <IDSymbol name="cmdidIdeCloseDocument" value="0x0218" />
-      <IDSymbol name="cmdidIdeCloseFile" value="0x021E" />
-      <IDSymbol name="cmdidIdeCloseAllExceptCurrent" value="0x021F" />
-      <IDSymbol name="cmdidIdeActivateWindow" value="0x0205" />
-      <IDSymbol name="cmdidIdeListWindows" value="0x0219" />
-      <IDSymbol name="cmdidIdeExecuteVsCommand" value="0x021A" />
-      <IDSymbol name="cmdidIdeFindAllReferences" value="0x021B" />
-      <IDSymbol name="cmdidIdeCountReferences" value="0x023C" />
-      <IDSymbol name="cmdidIdeShowCallHierarchy" value="0x021C" />
-      <IDSymbol name="cmdidIdeGetDocumentSlice" value="0x0215" />
-      <IDSymbol name="cmdidIdeGetSmartContextForQuery" value="0x0220" />
-      <IDSymbol name="cmdidIdeApplyUnifiedDiff" value="0x0221" />
-      <IDSymbol name="cmdidIdeGoToDefinition" value="0x0222" />
-      <IDSymbol name="cmdidIdeGoToImplementation" value="0x022F" />
-      <IDSymbol name="cmdidIdeGetFileOutline" value="0x0223" />
-      <IDSymbol name="cmdidIdeSetBreakpoint" value="0x0206" />
-      <IDSymbol name="cmdidIdeListBreakpoints" value="0x0207" />
-      <IDSymbol name="cmdidIdeRemoveBreakpoint" value="0x0208" />
-      <IDSymbol name="cmdidIdeClearAllBreakpoints" value="0x0209" />
-      <IDSymbol name="cmdidIdeDebugGetState" value="0x020A" />
-      <IDSymbol name="cmdidIdeDebugStart" value="0x020B" />
-      <IDSymbol name="cmdidIdeDebugStop" value="0x020C" />
-      <IDSymbol name="cmdidIdeDebugBreak" value="0x020D" />
-      <IDSymbol name="cmdidIdeDebugContinue" value="0x020E" />
-      <IDSymbol name="cmdidIdeDebugStepOver" value="0x020F" />
-      <IDSymbol name="cmdidIdeDebugStepInto" value="0x0210" />
-      <IDSymbol name="cmdidIdeDebugStepOut" value="0x0211" />
-      <IDSymbol name="cmdidIdeDebugThreads" value="0x0233" />
-      <IDSymbol name="cmdidIdeDebugStack" value="0x0234" />
-      <IDSymbol name="cmdidIdeDebugLocals" value="0x0235" />
-      <IDSymbol name="cmdidIdeDebugModules" value="0x0236" />
-      <IDSymbol name="cmdidIdeDebugWatch" value="0x0237" />
-      <IDSymbol name="cmdidIdeDebugExceptions" value="0x0238" />
-      <IDSymbol name="cmdidIdeDiagnosticsSnapshot" value="0x0239" />
-      <IDSymbol name="cmdidIdeBuildConfigurations" value="0x023A" />
-      <IDSymbol name="cmdidIdeSetBuildConfiguration" value="0x023B" />
-      <IDSymbol name="cmdidIdeBuildSolution" value="0x0212" />
-      <IDSymbol name="cmdidIdeRebuildSolution" value="0x0261" />
-      <IDSymbol name="cmdidIdeGetErrorList" value="0x0213" />
-      <IDSymbol name="cmdidIdeGetWarnings" value="0x0230" />
-      <IDSymbol name="cmdidIdeGetMessages" value="0x0263" />
-      <IDSymbol name="cmdidIdeRunCodeAnalysis" value="0x0264" />
-      <IDSymbol name="cmdidIdeBuildAndCaptureErrors" value="0x0214" />
-      <IDSymbol name="cmdidIdeOpenSolution" value="0x0224" />
-      <IDSymbol name="cmdidIdeCreateSolution" value="0x023D" />
-      <IDSymbol name="cmdidIdeBatchCommands" value="0x0225" />
-      <IDSymbol name="cmdidIdeSearchSymbols" value="0x0226" />
-      <IDSymbol name="cmdidIdeGetQuickInfo" value="0x0227" />
-      <IDSymbol name="cmdidIdePeekDefinition" value="0x0265" />
-      <IDSymbol name="cmdidIdeGetDocumentSlices" value="0x0228" />
-      <IDSymbol name="cmdidIdeGetFileSymbols" value="0x022D" />
-      <IDSymbol name="cmdidIdeEnableBreakpoint" value="0x0229" />
-      <IDSymbol name="cmdidIdeDisableBreakpoint" value="0x022A" />
-      <IDSymbol name="cmdidIdeEnableAllBreakpoints" value="0x022B" />
-      <IDSymbol name="cmdidIdeDisableAllBreakpoints" value="0x022C" />
-      <IDSymbol name="cmdidIdeCloseIde" value="0x0231" />
-      <IDSymbol name="cmdidIdeSaveDocument" value="0x0232" />
-      <IDSymbol name="cmdidIdeListProjects" value="0x023E" />
-      <IDSymbol name="cmdidIdeAddProject" value="0x023F" />
-      <IDSymbol name="cmdidIdeRemoveProject" value="0x0240" />
-      <IDSymbol name="cmdidIdeSetStartupProject" value="0x0241" />
-      <IDSymbol name="cmdidIdeRenameProject" value="0x0262" />
-      <IDSymbol name="cmdidIdeAddFileToProject" value="0x0242" />
-      <IDSymbol name="cmdidIdeRemoveFileFromProject" value="0x0243" />
-      <IDSymbol name="cmdidIdeFindTextBatch" value="0x024A" />
-      <IDSymbol name="cmdidIdeRequestApproval" value="0x024B" />
-      <IDSymbol name="cmdidIdeGetUiSettings" value="0x024C" />
-      <IDSymbol name="cmdidIdeWriteFile" value="0x024D" />
-      <IDSymbol name="cmdidIdeReloadDocument" value="0x024E" />
-      <IDSymbol name="cmdidIdeSetPythonProjectEnv" value="0x024F" />
-      <IDSymbol name="cmdidIdeSetPythonStartupFile" value="0x0250" />
-      <IDSymbol name="cmdidIdeGetPythonStartupFile" value="0x0251" />
-      <IDSymbol name="cmdidIdeCreateProject" value="0x0260" />
-    </GuidSymbol>
-  </Symbols>
 </CommandTable>

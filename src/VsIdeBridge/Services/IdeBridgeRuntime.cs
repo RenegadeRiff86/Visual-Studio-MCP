@@ -18,6 +18,7 @@ internal sealed class IdeBridgeRuntime
         SearchService searchService,
         DocumentService documentService,
         WindowService windowService,
+        OutputWindowService outputWindowService,
         VsCommandService vsCommandService,
         SolutionExplorerSyncService solutionExplorerSyncService,
         BridgeApprovalService bridgeApprovalService,
@@ -37,6 +38,7 @@ internal sealed class IdeBridgeRuntime
         SearchService = searchService;
         DocumentService = documentService;
         WindowService = windowService;
+        OutputWindowService = outputWindowService;
         VsCommandService = vsCommandService;
         SolutionExplorerSyncService = solutionExplorerSyncService;
         BridgeApprovalService = bridgeApprovalService;
@@ -66,6 +68,8 @@ internal sealed class IdeBridgeRuntime
     public DocumentService DocumentService { get; }
 
     public WindowService WindowService { get; }
+
+    public OutputWindowService OutputWindowService { get; }
 
     public VsCommandService VsCommandService { get; }
 
@@ -121,6 +125,7 @@ internal sealed class IdeBridgeRuntime
         BuildService buildService = new(readinessService);
         BridgeWatchdogService bridgeWatchdogService = new(package);
         WindowService windowService = new();
+        OutputWindowService outputWindowService = new();
         VsCommandService vsCommandService = new();
         SolutionExplorerSyncService solutionExplorerSyncService = new();
 
@@ -135,6 +140,7 @@ internal sealed class IdeBridgeRuntime
             searchService,
             documentService,
             windowService,
+            outputWindowService,
             vsCommandService,
             solutionExplorerSyncService,
             bridgeApprovalService,

@@ -669,8 +669,8 @@ internal sealed partial class DocumentService
     {
         string? file = range["file"]?.Value<string>();
         int line = range["line"]?.Value<int?>() ?? 1;
-        int before = range["contextBefore"]?.Value<int?>() ?? range["context-before"]?.Value<int?>() ?? 0;
-        int after = range["contextAfter"]?.Value<int?>() ?? range["context-after"]?.Value<int?>() ?? 0;
+        int before = range["contextBefore"]?.Value<int?>() ?? range["context-before"]?.Value<int?>() ?? range["context_before"]?.Value<int?>() ?? 0;
+        int after = range["contextAfter"]?.Value<int?>() ?? range["context-after"]?.Value<int?>() ?? range["context_after"]?.Value<int?>() ?? 0;
         int startLine = range["startLine"]?.Value<int?>()
             ?? range["start-line"]?.Value<int?>()
             ?? range["start_line"]?.Value<int?>()

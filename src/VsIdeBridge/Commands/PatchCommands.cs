@@ -3,6 +3,7 @@ using System.Text;
 using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 using VsIdeBridge.Services;
+using VsIdeBridge.Tooling.Patches;
 
 namespace VsIdeBridge.Commands;
 
@@ -19,7 +20,10 @@ internal static class PatchCommands
             string? patchText = null;
             string? patchTextBase64 = args.GetString("patch-text-base64");
             if (!string.IsNullOrWhiteSpace(patchTextBase64))
+            {
                 patchText = DecodePatchTextBase64(patchTextBase64!);
+                ValidatePatchText(patchText);
+            }
 
             string? patchFile = args.GetString("patch-file");
             string? baseDirectory = args.GetString("base-directory");
@@ -51,8 +55,20 @@ internal static class PatchCommands
         {
             throw new CommandErrorException(
                 InvalidArguments,
-                "Value passed to --patch-text-base64 was not valid base64.",
+                "The patch-text-base64 value is not valid base64. Base64-encode the patch text as UTF-8 before passing it — e.g., Convert.ToBase64String(Encoding.UTF8.GetBytes(patchText)).",
                 new { exception = ex.Message });
+        }
+    }
+
+    private static void ValidatePatchText(string patchText)
+    {
+        try
+        {
+            _ = ApplyDiffRequest.FromPatchText(patchText);
+        }
+        catch (ApplyDiffValidationException ex)
+        {
+            throw new CommandErrorException(InvalidArguments, ex.Message);
         }
     }
 
@@ -63,10 +79,10 @@ internal static class PatchCommands
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
             string file = args.GetString("file")
-                ?? throw new CommandErrorException(InvalidArguments, "Missing required --file argument.");
+                ?? throw new CommandErrorException(InvalidArguments, "Missing required file parameter. Call tool_help with write_file to see all required parameters and an example call.");
 
             string contentBase64 = args.GetString("content-base64")
-                ?? throw new CommandErrorException(InvalidArguments, "Missing required --content-base64 argument.");
+                ?? throw new CommandErrorException(InvalidArguments, "Missing required content-base64 parameter. Pass the full file content as a base64-encoded UTF-8 string. Call tool_help with write_file to see all required parameters and an example.");
 
             string content;
             try
@@ -75,7 +91,7 @@ internal static class PatchCommands
             }
             catch (System.FormatException ex)
             {
-                throw new CommandErrorException(InvalidArguments, "Value passed to --content-base64 was not valid base64.", new { exception = ex.Message });
+                throw new CommandErrorException(InvalidArguments, "The content-base64 value is not valid base64. Base64-encode the full file content as UTF-8 before passing it — e.g., Convert.ToBase64String(Encoding.UTF8.GetBytes(content)).", new { exception = ex.Message });
             }
 
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -96,7 +112,8 @@ internal static class PatchCommands
                         $"Refusing to write {newLineCount} lines to {System.IO.Path.GetFileName(resolvedPath)}, " +
                         $"which currently has {existingLineCount} lines. " +
                         "write_file replaces the ENTIRE file — this looks like a partial snippet, not a complete replacement. " +
-                        "Pass --allow-truncation true to override if you genuinely intend to replace the file with shorter content.",
+                        "To change only part of the file, use apply_diff instead. " +
+                        "To replace the entire file with shorter content, pass allow_truncation: true.",
                         new { existingLineCount, newLineCount });
                 }
             }

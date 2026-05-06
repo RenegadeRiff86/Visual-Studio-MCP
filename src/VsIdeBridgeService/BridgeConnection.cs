@@ -159,7 +159,7 @@ internal sealed class BridgeConnection
     {
         BridgeInstance instance = await GetInstanceAsync(ignoreSolutionHint).ConfigureAwait(false);
         await using VsPipeClient client = await VsPipeClient.CreateAsync(
-            instance.PipeName,
+             instance.PipeName,
             GetCommandTimeoutMs(timeoutProfile),
             GetPipeGateTimeoutMs(timeoutProfile)).ConfigureAwait(false);
         return await client.SendAsync((JsonObject)request.DeepClone()).ConfigureAwait(false);

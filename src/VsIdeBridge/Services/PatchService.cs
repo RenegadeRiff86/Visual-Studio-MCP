@@ -17,6 +17,9 @@ namespace VsIdeBridge.Services;
 
 internal sealed partial class PatchService
 {
+    private const int PatchedContentVerificationAttemptCount = 3;
+    private const int PatchedContentVerificationDelayMilliseconds = 50;
+
     public async Task<JObject> ApplyEditorPatchAsync(
         DTE2 dte,
         DocumentService documentService,
@@ -42,7 +45,7 @@ internal sealed partial class PatchService
             patchSource = PathNormalization.NormalizeFilePath(patchFilePath);
             if (!File.Exists(patchSource))
             {
-                throw new CommandErrorException("document_not_found", $"Patch file not found: {patchSource}");
+                throw new CommandErrorException("document_not_found", $"Patch file not found: {patchSource}. Verify the path exists on disk and retry with the correct absolute path, or omit --patch-file and use --patch-text-base64 to pass the patch inline.");
             }
 
             patchText = File.ReadAllText(patchSource);
@@ -74,7 +77,7 @@ internal sealed partial class PatchService
                 EnsureSafeToModifyOpenDocument(dte, paths.TargetPath);
                 if (File.Exists(paths.TargetPath))
                 {
-                    throw new CommandErrorException("unsupported_operation", $"Patch move target already exists: {paths.TargetPath}");
+                    throw new CommandErrorException("unsupported_operation", $"Patch move target already exists: {paths.TargetPath}. Delete or rename the existing file first, or change the *** Move to: path in the patch to a location that does not exist.");
                 }
             }
 
@@ -100,7 +103,7 @@ internal sealed partial class PatchService
                         alreadySatisfied = true;
                         break;
                     default:
-                        throw new CommandErrorException("unsupported_operation", $"Patch add target already exists with different content: {paths.TargetPath}");
+                        throw new CommandErrorException("unsupported_operation", $"Patch add target already exists with different content: {paths.TargetPath}. Use *** Update File: instead of *** Add File: in the patch header to modify an existing file.");
                 }
             }
             else
@@ -356,22 +359,56 @@ internal sealed partial class PatchService
 
     private static async Task<bool> VerifyPatchedContentAsync(DTE2 dte, DocumentService documentService, string targetPath, string expectedContent)
     {
+        string currentContent = string.Empty;
+        for (int attempt = 0; attempt < PatchedContentVerificationAttemptCount; attempt++)
+        {
+            currentContent = await ReadPatchVerificationContentAsync(dte, targetPath).ConfigureAwait(true);
+            if (string.Equals(currentContent, expectedContent, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if (attempt == 0)
+            {
+                await documentService.ReloadDocumentAsync(targetPath).ConfigureAwait(true);
+            }
+
+            if (attempt < PatchedContentVerificationAttemptCount - 1)
+            {
+                await Task.Delay(PatchedContentVerificationDelayMilliseconds).ConfigureAwait(true);
+            }
+        }
+
+        throw new CommandErrorException(
+            "write_failed",
+            $"Patched content could not be verified after write: {targetPath}",
+            new
+            {
+                path = targetPath,
+                expectedLength = expectedContent.Length,
+                actualLength = currentContent.Length,
+                firstDifferenceIndex = FindFirstDifferenceIndex(expectedContent, currentContent),
+            });
+    }
+
+    private static async Task<string> ReadPatchVerificationContentAsync(DTE2 dte, string targetPath)
+    {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        return ReadContentFromEditorOrDisk(dte, targetPath);
+    }
 
-        string currentContent = ReadContentFromEditorOrDisk(dte, targetPath);
-        if (string.Equals(currentContent, expectedContent, StringComparison.Ordinal))
+    private static int FindFirstDifferenceIndex(string expectedContent, string currentContent)
+    {
+        int comparisonLength = Math.Min(expectedContent.Length, currentContent.Length);
+        for (int index = 0; index < comparisonLength; index++)
         {
-            return true;
+            if (expectedContent[index] != currentContent[index])
+            {
+                return index;
+            }
         }
 
-        await documentService.ReloadDocumentAsync(targetPath).ConfigureAwait(true);
-        currentContent = ReadContentFromEditorOrDisk(dte, targetPath);
-        if (string.Equals(currentContent, expectedContent, StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        throw new CommandErrorException("write_failed", $"Patched content could not be verified after write: {targetPath}");
+        return expectedContent.Length == currentContent.Length ? -1 : comparisonLength;
     }
 }
 

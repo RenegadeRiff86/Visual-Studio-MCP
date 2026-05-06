@@ -490,7 +490,7 @@ internal sealed class PipeServerService : IDisposable
 
         if (!_runtime.TryGetCommand(commandName, out IdeCommandBase cmd))
         {
-            throw new CommandErrorException("command_not_found", $"Unknown command: '{commandName}'.");
+            throw new CommandErrorException("command_not_found", $"Unknown command: '{commandName}'. Call tool_help with no arguments to see all available tool names and their parameters, then retry with a valid command name.");
         }
 
         CommandArguments args = CommandArgumentParser.Parse(request.Args);

@@ -19,11 +19,13 @@ internal static class InstallerDefaults
     internal const string ServiceDescription = "VS IDE Bridge background host (automatic start, idle auto-stop).";
     internal const string VsixId = "RenegadeRiff86.VsIdeBridge";
     internal const string LegacyVsixId = "StanElston.VsIdeBridge";
-    internal const string VisualStudioMajorVersion = "18";
+    internal const string VisualStudioRootFolderName = "Microsoft Visual Studio";
+    internal const string VisualStudioInstallerDirectoryName = "Installer";
+    internal const string VswhereExecutableName = "vswhere.exe";
+    internal const string VisualStudioCoreEditorComponentId = "Microsoft.VisualStudio.Component.CoreEditor";
+    internal const string VsixInstallerRelativePath = "Common7\\IDE\\VSIXInstaller.exe";
     internal const int DefaultIdleSoftSeconds = 900;
     internal const int DefaultIdleHardSeconds = 1200;
-
-    internal static readonly string[] VisualStudioEditions = ["Enterprise", "Professional", "Community", "Preview"];
 
     internal static string DefaultInstallDir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),

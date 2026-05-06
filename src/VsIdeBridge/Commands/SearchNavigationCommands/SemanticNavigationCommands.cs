@@ -282,7 +282,7 @@ internal static partial class SearchNavigationCommands
             string? symbolQuery = args.GetString("query") ?? args.GetString("name");
             if (string.IsNullOrWhiteSpace(symbolQuery))
             {
-                throw new CommandErrorException("invalid_arguments", "Missing required argument --query.");
+                throw new CommandErrorException("invalid_arguments", "The query parameter is required. Pass the symbol name or text to search for, e.g. query: \"MyClass\". Call tool_help with search_symbols to see all parameters and an example.");
             }
 
             JObject symbolSearchResult = await context.Runtime.SearchService.SearchSymbolsAsync(

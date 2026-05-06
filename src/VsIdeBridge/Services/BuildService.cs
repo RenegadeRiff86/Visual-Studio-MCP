@@ -18,7 +18,7 @@ internal sealed class BuildService(ReadinessService readinessService)
     private const int BuildPollIntervalMilliseconds = 500;
 
     private const string SolutionNotOpenCode = "solution_not_open";
-    private const string NoSolutionOpen = "No solution is open.";
+    private const string NoSolutionOpen = "No solution is open. Call open_solution with a .sln or .slnx path to open one, or call bind_solution if the solution is already loaded in a different VS instance.";
     private const string SolutionPathKey = "solutionPath";
     private const string ActiveConfigurationKey = "activeConfiguration";
     private const string ActivePlatformKey = "activePlatform";
@@ -238,7 +238,7 @@ internal sealed class BuildService(ReadinessService readinessService)
             throw new CommandErrorException(SolutionNotOpenCode, NoSolutionOpen);
         SolutionBuild solutionBuild = dte.Solution.SolutionBuild;
         if (solutionBuild.BuildState == vsBuildState.vsBuildStateInProgress)
-            throw new CommandErrorException("build_in_progress", "A build or code analysis is already in progress.");
+            throw new CommandErrorException("build_in_progress", "A build or code analysis is already in progress. Wait for it to complete, then retry.");
         string solutionName = dte.Solution.FullName;
         string activeConfig = solutionBuild.ActiveConfiguration?.Name ?? string.Empty;
         string activePlatform = (solutionBuild.ActiveConfiguration as SolutionConfiguration2)?.PlatformName ?? string.Empty;
@@ -248,7 +248,7 @@ internal sealed class BuildService(ReadinessService readinessService)
         // so ConfigureAwait(false) on WaitForBuildEventAsync can release the main thread first.
         // ExecuteCommand pumps the Windows message queue while blocked, so the Done event and the
         // finally's SwitchToMainThreadAsync both run inside it — no deadlock.
-        const string timeoutMessage = "Timed out waiting for code analysis to finish.";
+        const string timeoutMessage = "Timed out waiting for code analysis to finish. Increase timeout_ms and retry, or use wait_for_completion: false to start analysis without waiting.";
         int lastBuildInfo;
         if (buildManager is not null)
         {
@@ -300,7 +300,7 @@ internal sealed class BuildService(ReadinessService readinessService)
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
 
         string uniqueName = FindProjectUniqueName(dte, projectName)
-            ?? throw new CommandErrorException("project_not_found", $"Project '{projectName}' was not found in the solution.");
+            ?? throw new CommandErrorException("project_not_found", $"Project '{projectName}' was not found in the solution. Call list_projects to see all project names, then retry with the exact name.");
         string activeConfig = solutionBuild.ActiveConfiguration?.Name ?? "Debug";
 
         // GetServiceAsync does not require the main thread — release it here.
@@ -330,7 +330,7 @@ internal sealed class BuildService(ReadinessService readinessService)
         DateTimeOffset deadline)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
-        const string timeoutMessage = "Timed out waiting for the build to finish.";
+        const string timeoutMessage = "Timed out waiting for the build to finish. Increase timeout_ms and retry.";
         if (buildManager is not null)
         {
             BuildCompletionWaiter waiter = new(buildManager);
@@ -468,7 +468,7 @@ internal sealed class BuildService(ReadinessService readinessService)
         SolutionBuild solutionBuild = dte.Solution.SolutionBuild;
         if (solutionBuild.BuildState == vsBuildState.vsBuildStateInProgress)
         {
-            throw new CommandErrorException("build_in_progress", "A build is already in progress.");
+            throw new CommandErrorException("build_in_progress", "A build is already in progress. Wait for it to complete, then retry.");
         }
 
         TryActivateConfiguration(solutionBuild, configuration, platform);
@@ -518,6 +518,11 @@ internal sealed class BuildService(ReadinessService readinessService)
             ["succeeded"] = solutionBuild.LastBuildInfo == 0,
             ["elapsedMilliseconds"] = (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds,
         };
+
+        if (solutionBuild.LastBuildInfo != 0)
+        {
+            result["nextStep"] = "Build failed. Call errors to see the full Error List, or build_errors to see the raw build output with error details.";
+        }
 
         if (!string.IsNullOrWhiteSpace(projectName))
         {

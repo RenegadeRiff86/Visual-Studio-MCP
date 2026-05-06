@@ -24,7 +24,7 @@ internal sealed partial class SearchService
         Document? activeDocument = context.Dte.ActiveDocument;
         if (activeDocument is null || string.IsNullOrWhiteSpace(activeDocument.FullName))
         {
-            throw new CommandErrorException("document_not_found", "There is no active document.");
+            throw new CommandErrorException("document_not_found", "There is no active document. Pass the file parameter with an absolute path to the file to search in, or open a file in VS first using open_file.");
         }
 
         return (

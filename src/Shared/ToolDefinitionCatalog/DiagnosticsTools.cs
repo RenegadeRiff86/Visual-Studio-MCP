@@ -18,6 +18,18 @@ public static partial class ToolDefinitionCatalog
             aliases: ["error_list", "diagnostics", "list_errors"],
             tags: ["diagnostics", "errors", "build", "warnings"]);
 
+    public static ToolDefinition Warnings(JsonObject parameterSchema)
+        => CreateReadOnlyTool(
+            "warnings",
+            DiagnosticsCategory,
+            "Read current Error List warnings.",
+            "Read current Error List warning rows without triggering a build. Use this when you want compiler and analyzer warnings without mixing them with errors or build messages.",
+            parameterSchema,
+            bridgeCommand: "warnings",
+            title: "Error List Warnings",
+            aliases: ["list_warnings", "diagnostic_warnings", "error_list_warnings"],
+            tags: ["diagnostics", "warnings", "build", "error-list"]);
+
     public static ToolDefinition Messages(JsonObject parameterSchema)
         => CreateReadOnlyTool(
             "messages",

@@ -170,6 +170,7 @@ internal sealed partial class PatchService
         }
 
         List<SearchBlock> blocks = [];
+        List<Hunk> hunks = [];
         SearchBlock? currentBlock = null;
         while (lineIndex < lines.Length && !IsEditorPatchDirective(lines[lineIndex]))
         {
@@ -178,7 +179,14 @@ internal sealed partial class PatchService
             {
                 if (currentBlock?.Lines.Count > 0)
                 {
-                    blocks.Add(currentBlock);
+                    blocks.Add(NormalizeSearchBlock(currentBlock));
+                    currentBlock = null;
+                }
+
+                if (LooksLikeUnifiedHunkHeader(line))
+                {
+                    hunks.Add(ParseEditorUnifiedHunk(lines, ref lineIndex));
+                    continue;
                 }
 
                 currentBlock = new SearchBlock { Header = line.Length > EditorPatchHeaderPrefixLength ? line.Substring(EditorPatchHeaderPrefixLength).Trim() : string.Empty };
@@ -211,13 +219,20 @@ internal sealed partial class PatchService
 
         if (currentBlock?.Lines.Count > 0)
         {
-            blocks.Add(currentBlock);
+            blocks.Add(NormalizeSearchBlock(currentBlock));
+        }
+
+        if (blocks.Count > 0 && hunks.Count > 0)
+        {
+            throw new CommandErrorException(InvalidArgumentsCode,
+                $"Patch for {oldPath} mixes editor search blocks and unified hunk headers. Use either plain @@ editor blocks or @@ -old,+new @@ hunk blocks in one file patch.");
         }
 
         return new FilePatch
         {
             OldPath = oldPath,
             NewPath = newPath,
+            Hunks = hunks,
             SearchBlocks = blocks,
             Format = "editor-patch",
         };
@@ -226,6 +241,60 @@ internal sealed partial class PatchService
     private static bool IsEditorPatchDirective(string line)
     {
         return line.StartsWith("*** ", StringComparison.Ordinal);
+    }
+
+    private static Hunk ParseEditorUnifiedHunk(string[] lines, ref int lineIndex)
+    {
+        Hunk hunk = ParseHunkHeader(lines[lineIndex]);
+        lineIndex++;
+        while (lineIndex < lines.Length && !IsEditorPatchDirective(lines[lineIndex]))
+        {
+            string hunkLine = lines[lineIndex];
+            if (IsHunkBoundaryLine(hunkLine))
+            {
+                break;
+            }
+
+            AddHunkLine(hunk, hunkLine);
+            lineIndex++;
+        }
+
+        return hunk;
+    }
+
+    /// <summary>
+    /// Normalizes a search block by collapsing the common "duplicate context+deletion"
+    /// formatting error: when a context line (' ') is followed (through any '+' additions)
+    /// by a deletion ('-') of identical text, the context line is redundant — it would
+    /// force the matcher to find two consecutive identical lines in the file, which fails
+    /// when only one exists. Removing it leaves '-' old / '+' new, which matches and
+    /// applies correctly.
+    /// </summary>
+    private static SearchBlock NormalizeSearchBlock(SearchBlock block)
+    {
+        List<HunkLine> lines = block.Lines;
+        List<HunkLine>? normalized = null;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            HunkLine current = lines[i];
+            if (current.Kind == ' ')
+            {
+                // Scan forward past any '+' additions to find a '-' deletion.
+                int j = i + 1;
+                while (j < lines.Count && lines[j].Kind == '+') j++;
+                if (j < lines.Count && lines[j].Kind == '-'
+                    && string.Equals(lines[j].Text, current.Text, StringComparison.Ordinal))
+                {
+                    // The context line is a duplicate of the following deletion — skip it.
+                    normalized ??= [.. lines.Take(i)];
+                    continue;
+                }
+            }
+            normalized?.Add(current);
+        }
+        if (normalized is null)
+            return block;
+        return new SearchBlock { Header = block.Header, Lines = normalized };
     }
 
     private static string ParseEditorPatchPath(string line, string prefix)
@@ -288,33 +357,7 @@ internal sealed partial class PatchService
                         break;
                     }
 
-                    if (hunkLine == "\\ No newline at end of file")
-                    {
-                        lineIndex++;
-                        continue;
-                    }
-
-                    if (hunkLine.Length == 0)
-                    {
-                        // Blank line in hunk body = context line for an empty file line.
-                        // Treating it as a skip (without advancing sourceIndex) would shift
-                        // all subsequent matches off by one.
-                        hunk.Lines.Add(new HunkLine { Kind = ' ', Text = string.Empty });
-                        lineIndex++;
-                        continue;
-                    }
-
-                    char prefix = hunkLine[0];
-                    if (prefix != ' ' && prefix != '+' && prefix != '-')
-                    {
-                        throw new CommandErrorException(InvalidArgumentsCode, $"Unsupported hunk line prefix '{prefix}'.");
-                    }
-
-                    hunk.Lines.Add(new HunkLine
-                    {
-                        Kind = prefix,
-                        Text = hunkLine.Length > 1 ? hunkLine.Substring(1) : string.Empty,
-                    });
+                    AddHunkLine(hunk, hunkLine);
                     lineIndex++;
                 }
 
@@ -339,6 +382,40 @@ internal sealed partial class PatchService
         }
 
         return false;
+    }
+
+    private static bool LooksLikeUnifiedHunkHeader(string line)
+    {
+        return Regex.IsMatch(line, @"^@@ -\d+(,\d+)? \+\d+(,\d+)? @@");
+    }
+
+    private static void AddHunkLine(Hunk hunk, string hunkLine)
+    {
+        if (hunkLine == "\\ No newline at end of file")
+        {
+            return;
+        }
+
+        if (hunkLine.Length == 0)
+        {
+            // Blank line in hunk body = context line for an empty file line.
+            // Treating it as a skip without advancing sourceIndex would shift
+            // all subsequent matches off by one.
+            hunk.Lines.Add(new HunkLine { Kind = ' ', Text = string.Empty });
+            return;
+        }
+
+        char prefix = hunkLine[0];
+        if (prefix != ' ' && prefix != '+' && prefix != '-')
+        {
+            throw new CommandErrorException(InvalidArgumentsCode, $"Unsupported hunk line prefix '{prefix}'.");
+        }
+
+        hunk.Lines.Add(new HunkLine
+        {
+            Kind = prefix,
+            Text = hunkLine.Length > 1 ? hunkLine.Substring(1) : string.Empty,
+        });
     }
 
     private static Hunk ParseHunkHeader(string line)

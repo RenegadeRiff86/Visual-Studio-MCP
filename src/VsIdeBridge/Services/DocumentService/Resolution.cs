@@ -29,7 +29,7 @@ internal sealed partial class DocumentService
 
         if (dte.ActiveDocument is null || string.IsNullOrWhiteSpace(dte.ActiveDocument.FullName))
         {
-            throw new CommandErrorException(DocumentNotFoundCode, "There is no active document.");
+            throw new CommandErrorException(DocumentNotFoundCode, "There is no active document. Pass the file parameter with an absolute path, or open a file in VS first using open_file.");
         }
 
         return PathNormalization.NormalizeFilePath(dte.ActiveDocument.FullName);
@@ -212,7 +212,7 @@ internal sealed partial class DocumentService
         IReadOnlyList<Document> documents = EnumerateOpenDocuments(dte);
         if (documents.Count == 0)
         {
-            throw new CommandErrorException(DocumentNotFoundCode, "There are no open documents.");
+            throw new CommandErrorException(DocumentNotFoundCode, "There are no open documents. Open a file in VS first using open_file, then retry.");
         }
 
         if (string.IsNullOrWhiteSpace(query))
@@ -238,7 +238,7 @@ internal sealed partial class DocumentService
 
         if (!fallbackToActive || dte.ActiveDocument is null)
         {
-            throw new CommandErrorException("invalid_arguments", "Missing document query.");
+            throw new CommandErrorException("invalid_arguments", "The document parameter is required when there is no active document. Pass a file name or path fragment to identify the target document.");
         }
 
         return (new List<Document> { dte.ActiveDocument }, "active");
@@ -284,7 +284,7 @@ internal sealed partial class DocumentService
             return FinalizeMatches(containsPath, allowMultiple, "path-contains");
         }
 
-        throw new CommandErrorException(DocumentNotFoundCode, $"No open document matched '{rawQuery}'.");
+        throw new CommandErrorException(DocumentNotFoundCode, $"No open document matched '{rawQuery}'. Call list_documents to see all open documents, then retry with an exact file name or path.");
     }
 
     private static List<Document> PreferSingleDocumentMatch(DTE2 dte, List<Document> matches)

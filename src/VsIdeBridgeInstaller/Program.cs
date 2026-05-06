@@ -5,6 +5,8 @@ namespace VsIdeBridgeInstaller;
 
 internal static class Program
 {
+    private static string? s_vsixInstallerPath;
+
     private static int Main(string[] args)
     {
         if (!OperatingSystem.IsWindows())
@@ -214,29 +216,189 @@ internal static class Program
 
     private static string FindVsixInstallerPath()
     {
-        string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-        string root = Path.Combine(programFiles, "Microsoft Visual Studio", InstallerDefaults.VisualStudioMajorVersion);
-        if (!Directory.Exists(root))
+        if (!string.IsNullOrWhiteSpace(s_vsixInstallerPath))
         {
-            throw new InvalidOperationException($"Visual Studio {InstallerDefaults.VisualStudioMajorVersion} installation path not found.");
+            return s_vsixInstallerPath;
         }
 
-        foreach (string edition in InstallerDefaults.VisualStudioEditions)
+        foreach (string candidate in EnumerateVsixInstallerCandidates()
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            string candidate = Path.Combine(root, edition, "Common7", "IDE", "VSIXInstaller.exe");
             if (File.Exists(candidate))
             {
-                return candidate;
+                s_vsixInstallerPath = Path.GetFullPath(candidate);
+                return s_vsixInstallerPath;
             }
         }
 
-        string? fallback = Directory.GetFiles(root, "VSIXInstaller.exe", SearchOption.AllDirectories).FirstOrDefault();
-        if (!string.IsNullOrWhiteSpace(fallback))
+        throw new InvalidOperationException(
+            "VSIXInstaller.exe was not found. Install or repair Visual Studio so vswhere can locate a supported instance.");
+    }
+
+    private static IEnumerable<string> EnumerateVsixInstallerCandidates()
+    {
+        foreach (string candidate in EnumerateVswhereVsixInstallerPaths())
         {
-            return fallback;
+            yield return candidate;
         }
 
-        throw new FileNotFoundException($"VSIXInstaller.exe not found under Visual Studio {InstallerDefaults.VisualStudioMajorVersion} install path.");
+        foreach (string candidate in EnumerateProgramFilesVsixInstallerPaths())
+        {
+            yield return candidate;
+        }
+    }
+
+    private static IEnumerable<string> EnumerateVswhereVsixInstallerPaths()
+    {
+        string? vswherePath = FindVswherePath();
+        if (vswherePath is null)
+        {
+            yield break;
+        }
+
+        string coreEditorFilter = $"-products * -requires {InstallerDefaults.VisualStudioCoreEditorComponentId}";
+        string findVsixInstaller = $"-find {InstallerDefaults.VsixInstallerRelativePath}";
+
+        foreach (string candidate in RunVswhere(vswherePath, $"-latest -prerelease {coreEditorFilter} {findVsixInstaller}"))
+        {
+            yield return candidate;
+        }
+
+        foreach (string candidate in RunVswhere(vswherePath, $"-all -prerelease {coreEditorFilter} {findVsixInstaller}"))
+        {
+            yield return candidate;
+        }
+
+        foreach (string installPath in RunVswhere(vswherePath, "-legacy -all -property installationPath"))
+        {
+            yield return Path.Combine(installPath, InstallerDefaults.VsixInstallerRelativePath);
+        }
+    }
+
+    private static string? FindVswherePath()
+    {
+        string[] candidates =
+        [
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                InstallerDefaults.VisualStudioRootFolderName,
+                InstallerDefaults.VisualStudioInstallerDirectoryName,
+                InstallerDefaults.VswhereExecutableName),
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                InstallerDefaults.VisualStudioRootFolderName,
+                InstallerDefaults.VisualStudioInstallerDirectoryName,
+                InstallerDefaults.VswhereExecutableName),
+        ];
+
+        return candidates.FirstOrDefault(File.Exists);
+    }
+
+    private static string[] RunVswhere(string vswherePath, string arguments)
+    {
+        try
+        {
+            using Process process = new()
+            {
+                StartInfo = new()
+                {
+                    FileName = vswherePath,
+                    Arguments = arguments,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                }
+            };
+
+            process.Start();
+            string stdout = process.StandardOutput.ReadToEnd();
+            string stderr = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+
+            if (process.ExitCode != 0)
+            {
+                if (!string.IsNullOrWhiteSpace(stderr))
+                {
+                    Console.Error.WriteLine(stderr.Trim());
+                }
+
+                return [];
+            }
+
+            return stdout.Split(
+                [Environment.NewLine, "\r", "\n"],
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Console.Error.WriteLine($"Unable to run vswhere: {ex.Message}");
+            return [];
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            Console.Error.WriteLine($"Unable to run vswhere: {ex.Message}");
+            return [];
+        }
+    }
+
+    private static IEnumerable<string> EnumerateProgramFilesVsixInstallerPaths()
+    {
+        foreach (string programFilesRoot in GetProgramFilesRoots()
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            string visualStudioRoot = Path.Combine(programFilesRoot, InstallerDefaults.VisualStudioRootFolderName);
+            foreach (string versionDirectory in SafeEnumerateDirectories(visualStudioRoot))
+            {
+                yield return Path.Combine(versionDirectory, InstallerDefaults.VsixInstallerRelativePath);
+
+                foreach (string editionDirectory in SafeEnumerateDirectories(versionDirectory))
+                {
+                    yield return Path.Combine(editionDirectory, InstallerDefaults.VsixInstallerRelativePath);
+                }
+            }
+
+            foreach (string legacyRoot in SafeEnumerateDirectories(programFilesRoot, InstallerDefaults.VisualStudioRootFolderName + "*"))
+            {
+                yield return Path.Combine(legacyRoot, InstallerDefaults.VsixInstallerRelativePath);
+            }
+        }
+    }
+
+    private static string[] GetProgramFilesRoots()
+    {
+        return
+        [
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+        ];
+    }
+
+    private static string[] SafeEnumerateDirectories(string path, string searchPattern = "*")
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+        {
+            return [];
+        }
+
+        try
+        {
+            return [.. Directory.EnumerateDirectories(path, searchPattern)];
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return [];
+        }
+        catch (IOException)
+        {
+            return [];
+        }
     }
 
     private static int RunProcess(string fileName, string arguments)

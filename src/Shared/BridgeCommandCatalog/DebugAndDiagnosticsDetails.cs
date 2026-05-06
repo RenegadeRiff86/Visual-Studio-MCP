@@ -137,6 +137,9 @@ public static partial class BridgeCommandCatalog
             case "messages":
                 detail = ("Read current message rows with optional code/path/project filters. Set refresh=true only when you want to force the Error List to repopulate first.", ExampleCommand("messages", @"{""group_by"":""code""}"));
                 return true;
+            case "read-output":
+                detail = ("Read chunked text from a Visual Studio Output window pane. Omit pane to read the active Output pane; provide pane to select Build, IDE Bridge, or another pane by name/GUID. Defaults to the last chunk and returns chunk metadata for follow-up reads.", ExampleCommand("read-output", @"{""pane"":""Build"",""chunk_lines"":200}"));
+                return true;
             case "build-errors":
                 detail = ("Build then capture Error List rows in one call. By default this refuses to build when diagnostics already exist and fails if any errors, warnings, or messages remain after the build.", ExampleCommand("build-errors", @"{""max"":200,""require_clean_diagnostics"":true}"));
                 return true;

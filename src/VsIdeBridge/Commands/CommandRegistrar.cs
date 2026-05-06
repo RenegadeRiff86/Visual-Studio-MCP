@@ -34,6 +34,7 @@ internal static class CommandRegistrar
         RegisterCommandSafely(() => new IdeCoreCommands.IdeGetStateCommand(package, runtime, commandService));
         RegisterCommandSafely(() => new IdeCoreCommands.IdeGetUiSettingsCommand(package, runtime, commandService));
         RegisterCommandSafely(() => new IdeCoreCommands.IdeCaptureVsWindowCommand(package, runtime, commandService));
+        RegisterCommandSafely(() => new IdeCoreCommands.IdeReadOutputWindowCommand(package, runtime, commandService));
         RegisterCommandSafely(() => new IdeCoreCommands.IdeWaitForReadyCommand(package, runtime, commandService));
         RegisterCommandSafely(() => new IdeCoreCommands.IdeOpenSolutionCommand(package, runtime, commandService));
         RegisterCommandSafely(() => new IdeCoreCommands.IdeLaunchVisualStudioCommand(package, runtime, commandService));

@@ -168,13 +168,14 @@ internal static partial class BestPracticeAnalyzer
 
     public static IEnumerable<JObject> FindMagicNumbers(string file, string content)
     {
+        CodeLanguage language = GetLanguage(file);
         IEnumerable<IGrouping<string, (Match Match, string Value)>> matches =
             NumberLiteralPattern().Matches(content)
             .Cast<Match>()
             .Select(match => (Match: match, match.Groups["value"].Value))
             .Where(item => item.Value is not "0" and not "1" and not "-1")
-        .Where(item => !IsInsideStringLiteral(content, item.Match.Index))
-            .Where(item => !IsInsideLineComment(content, item.Match.Index))
+            .Where(item => !IsInsideStringLiteral(content, item.Match.Index))
+            .Where(item => !IsInsideComment(content, item.Match.Index, language))
             .GroupBy(item => item.Value)
             .Where(group => group.Count() >= RepeatedNumberThreshold)
             .OrderByDescending(group => group.Count())

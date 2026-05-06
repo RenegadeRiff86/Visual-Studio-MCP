@@ -20,13 +20,26 @@ internal sealed partial class SearchService
             yield break;
         }
 
-        foreach (Project project in dte.Solution.Projects)
+        // Snapshot the project list first. Iterating dte.Solution.Projects directly can throw
+        // COMException from the enumerator itself for some project types in VS 18+ (.slnx).
+        List<Project> projects = [];
+        try
         {
-            if (project is null)
+            foreach (Project project in dte.Solution.Projects)
             {
-                continue;
+                if (project is not null)
+                {
+                    projects.Add(project);
+                }
             }
+        }
+        catch (COMException ex)
+        {
+            TraceSearchFailure(nameof(EnumerateSolutionFiles), ex);
+        }
 
+        foreach (Project project in projects)
+        {
             foreach ((string Path, string ProjectUniqueName) file in EnumerateProjectFiles(project))
             {
                 yield return file;
@@ -43,18 +56,32 @@ internal sealed partial class SearchService
             yield break;
         }
 
-        if (string.Equals(project.Kind, EnvDTE80.ProjectKinds.vsProjectKindSolutionFolder, StringComparison.OrdinalIgnoreCase))
-        {
-            foreach (ProjectItem item in project.ProjectItems)
-            {
-                if (item is null)
-                {
-                    continue;
-                }
+        // Guard every COM property access — VS 18 SDK-style / .slnx projects can throw
+        // "Failed to load the document due to an internal error." from these properties.
+        string? kind = null;
+        try { kind = project.Kind; }
+        catch (COMException ex) { TraceSearchFailure("EnumerateProjectFiles.Kind", ex); }
 
-                if (item.SubProject is not null)
+        if (kind is null)
+        {
+            yield break;
+        }
+
+        if (string.Equals(kind, EnvDTE80.ProjectKinds.vsProjectKindSolutionFolder, StringComparison.OrdinalIgnoreCase))
+        {
+            ProjectItems? sfProjectItems = null;
+            try { sfProjectItems = project.ProjectItems; }
+        catch (COMException ex) { TraceSearchFailure("EnumerateProjectFiles.SFProjectItems", ex); }
+
+            foreach (ProjectItem item in TryGetProjectItems(sfProjectItems, "EnumerateProjectFiles.SFEnumerate"))
+            {
+                Project? subProject = null;
+                try { subProject = item.SubProject; }
+                catch (COMException ex) { TraceSearchFailure("EnumerateProjectFiles.SubProject", ex); }
+
+                if (subProject is not null)
                 {
-                    foreach ((string Path, string ProjectUniqueName) file in EnumerateProjectFiles(item.SubProject))
+                    foreach ((string Path, string ProjectUniqueName) file in EnumerateProjectFiles(subProject))
                     {
                         yield return file;
                     }
@@ -64,14 +91,17 @@ internal sealed partial class SearchService
             yield break;
         }
 
-        foreach (ProjectItem item in project.ProjectItems)
-        {
-            if (item is null)
-            {
-                continue;
-            }
+        string uniqueName = string.Empty;
+        try { uniqueName = project.UniqueName; }
+        catch (COMException ex) { TraceSearchFailure("EnumerateProjectFiles.UniqueName", ex); }
 
-            foreach ((string Path, string ProjectUniqueName) file in EnumerateProjectItemFiles(item, project.UniqueName))
+        ProjectItems? projectItems = null;
+        try { projectItems = project.ProjectItems; }
+        catch (COMException ex) { TraceSearchFailure("EnumerateProjectFiles.ProjectItems", ex); }
+
+        foreach (ProjectItem item in TryGetProjectItems(projectItems, "EnumerateProjectFiles.Enumerate"))
+        {
+            foreach ((string Path, string ProjectUniqueName) file in EnumerateProjectItemFiles(item, uniqueName))
             {
                 yield return file;
             }
@@ -87,35 +117,65 @@ internal sealed partial class SearchService
             yield break;
         }
 
-        if (item.FileCount > 0)
+        // item.FileCount and item.FileNames can throw for virtual or unresolvable items.
+        short fileCount = 0;
+        try { fileCount = item.FileCount; }
+        catch (COMException ex) { TraceSearchFailure("EnumerateProjectItemFiles.FileCount", ex); }
+
+        for (short i = 1; i <= fileCount; i++)
         {
-            for (short i = 1; i <= item.FileCount; i++)
+            string? fileName = null;
+            try { fileName = item.FileNames[i]; }
+            catch (COMException ex) { TraceSearchFailure("EnumerateProjectItemFiles.FileNames", ex); }
+
+            if (!string.IsNullOrWhiteSpace(fileName))
             {
-                string? fileName = item.FileNames[i];
-                if (!string.IsNullOrWhiteSpace(fileName))
-                {
-                    yield return (PathNormalization.NormalizeFilePath(fileName), projectUniqueName);
-                }
+                yield return (PathNormalization.NormalizeFilePath(fileName!), projectUniqueName);
             }
         }
 
-        if (item.ProjectItems is null)
-        {
-            yield break;
-        }
+        ProjectItems? children = null;
+        try { children = item.ProjectItems; }
+        catch (COMException ex) { TraceSearchFailure("EnumerateProjectItemFiles.ProjectItems", ex); }
 
-        foreach (ProjectItem child in item.ProjectItems)
+        foreach (ProjectItem child in TryGetProjectItems(children, "EnumerateProjectItemFiles.Children"))
         {
-            if (child is null)
-            {
-                continue;
-            }
-
             foreach ((string Path, string ProjectUniqueName) file in EnumerateProjectItemFiles(child, projectUniqueName))
             {
                 yield return file;
             }
         }
+    }
+
+    /// <summary>
+    /// Safely materialises a COM <see cref="ProjectItems"/> collection into a list.
+    /// Catches any exception thrown by the enumerator itself (e.g. from VS 18 SDK-style projects).
+    /// </summary>
+    private static List<ProjectItem> TryGetProjectItems(ProjectItems? projectItems, string context)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        List<ProjectItem> result = [];
+        if (projectItems is null)
+        {
+            return result;
+        }
+
+        try
+        {
+            foreach (ProjectItem item in projectItems)
+            {
+                if (item is not null)
+                {
+                    result.Add(item);
+                }
+            }
+        }
+        catch (COMException ex)
+        {
+            TraceSearchFailure(context, ex);
+        }
+
+        return result;
     }
 
     private static IEnumerable<(string Path, string ProjectUniqueName)> EnumerateOpenFiles(DTE2 dte)

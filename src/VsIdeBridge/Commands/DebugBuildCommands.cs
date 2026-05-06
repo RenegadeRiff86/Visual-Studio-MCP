@@ -47,7 +47,7 @@ internal static partial class DebugBuildCommands
         {
             throw new CommandErrorException(
                 "invalid_timeout",
-                $"'{TimeoutMillisecondsArgument}' must be at least {MinimumBuildErrorsTimeoutMilliseconds}ms for build_errors.");
+                $"The timeout_ms value must be at least {MinimumBuildErrorsTimeoutMilliseconds}ms for build_errors. Increase timeout_ms to at least {MinimumBuildErrorsTimeoutMilliseconds} and retry.");
         }
 
         return timeout;
@@ -184,7 +184,7 @@ internal static partial class DebugBuildCommands
 
         throw new CommandErrorException(
             DirtyDiagnosticsCode,
-            $"{summaryPrefix}: {FormatBlockingDiagnosticsSummary(errorCount, warningCount, messageCount)}. Fix them first or set --{RequireCleanDiagnosticsArgument} false to override.",
+            $"{summaryPrefix}: {FormatBlockingDiagnosticsSummary(errorCount, warningCount, messageCount)}. Call errors to see the full list and fix them before retrying. To skip this check and proceed anyway, pass require_clean_diagnostics: false.",
             commandData);
     }
 

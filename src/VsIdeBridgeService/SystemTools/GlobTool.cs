@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.FileSystemGlobbing;
 using Microsoft.Extensions.FileSystemGlobbing.Abstractions;
+using VsIdeBridge.Tooling.Search;
 
 namespace VsIdeBridgeService.SystemTools;
 
@@ -43,11 +44,18 @@ internal static class GlobTool
             ["files"] = new JsonArray([.. files.Select(f => JsonValue.Create(f))]),
         };
 
-        string successText = files.Count == 0
+        SearchQueryOptions options = SearchQueryOptions.FromJsonObject(args, defaultChunkSize: 25, includePathFilter: false);
+        SearchResultCollection.FromJsonObject(payload, SearchJsonNames.Files).WriteTo(payload, SearchJsonNames.Files, options);
+
+        int returnedCount = payload[SearchJsonNames.Count]?.GetValue<int>() ?? files.Count;
+        int filteredCount = payload[SearchJsonNames.FilteredCount]?.GetValue<int>() ?? returnedCount;
+        int totalCount = payload[SearchJsonNames.TotalCount]?.GetValue<int>() ?? filteredCount;
+
+        string successText = totalCount == 0 || filteredCount == 0
             ? $"No files found for pattern '{pattern}'."
             : truncated
-                ? $"Found {files.Count} file(s) for pattern '{pattern}' (max {max} reached)."
-                : $"Found {files.Count} file(s) for pattern '{pattern}'.";
+                ? $"Found {returnedCount} file(s) in this chunk for pattern '{pattern}' (max {max} reached)."
+                : $"Found {returnedCount} file(s) in this chunk for pattern '{pattern}'.";
         return Task.FromResult(ToolResultFormatter.StructuredToolResult(payload, args, successText: successText));
     }
 }

@@ -4,8 +4,9 @@ using System.Linq;
 using System.Text.Json.Nodes;
 using static VsIdeBridgeService.ArgBuilder;
 using static VsIdeBridgeService.SchemaHelpers;
+using VsIdeBridge.Diagnostics;
 using VsIdeBridge.Shared;
-using VsIdeBridgeService.Diagnostics;
+using VsIdeBridge.Tooling.Patches;
 using VsIdeBridgeService.SystemTools;
 
 namespace VsIdeBridgeService;
@@ -64,10 +65,10 @@ internal static partial class ToolCatalog
         return norm.Contains(sep + segment + sep, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string BuildApplyDiffArgs(JsonObject? args)
+    private static string BuildApplyDiffArgs(ApplyDiffRequest request)
     {
         return Build(
-            ("patch-text-base64", EncodeUtf8ToBase64(OptionalString(args, "diff"))),
+            ("patch-text-base64", request.EncodedDiff),
             ("open-changed-files", "true"),
             ("save-changed-files", "true"));
     }
@@ -111,11 +112,26 @@ internal static partial class ToolCatalog
                     related: [("write_file", "Overwrite the full file instead"), (ReadFileTool, "Read the file first to understand its current state")])),
             async (id, args, bridge) =>
             {
+                ApplyDiffRequest request;
+                try
+                {
+                    request = ApplyDiffRequest.FromJsonObject(args);
+                }
+                catch (ApplyDiffValidationException ex)
+                {
+                    throw new McpRequestException(id, McpErrorCodes.InvalidParams, ex.Message);
+                }
+
                 JsonObject result = await bridge.SendAsync(
                     id,
                     "apply-diff",
-                    BuildApplyDiffArgs(args))
+                    BuildApplyDiffArgs(request))
                     .ConfigureAwait(false);
+
+                if (result["Data"] is JsonObject data)
+                {
+                    data["validatedPatch"] = request.ToJsonObject();
+                }
 
                 if (ArgBuilder.OptionalBool(args, PostCheck, false))
                 {

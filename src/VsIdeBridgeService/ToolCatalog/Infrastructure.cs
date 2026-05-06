@@ -233,12 +233,18 @@ internal static partial class ToolCatalog
         ToolDefinition definition,
         string pipeCommand,
         Func<JsonObject?, string> buildArgs,
-        JsonObject? searchHints = null)
+        JsonObject? searchHints = null,
+        Func<JsonObject, JsonObject?, JsonObject>? transformResponse = null)
         => new(searchHints is not null ? definition.WithSearchHints(searchHints) : definition,
             async (id, args, bridge) =>
             {
                 JsonObject response = await bridge.SendAsync(id, pipeCommand, buildArgs(args))
                     .ConfigureAwait(false);
+                if (transformResponse is not null)
+                {
+                    response = transformResponse(response, args);
+                }
+
                 return BridgeResult(response, args);
             });
 
@@ -258,12 +264,18 @@ internal static partial class ToolCatalog
         bool? mutating = null,
         bool? destructive = null,
         JsonObject? searchHints = null,
-        JsonObject? outputSchema = null)
+        JsonObject? outputSchema = null,
+        Func<JsonObject, JsonObject?, JsonObject>? transformResponse = null)
         => new(name, description, schema, category,
             async (id, args, bridge) =>
             {
                 JsonObject response = await bridge.SendAsync(id, pipeCommand, buildArgs(args))
                     .ConfigureAwait(false);
+                if (transformResponse is not null)
+                {
+                    response = transformResponse(response, args);
+                }
+
                 return BridgeResult(response, args, dataOnly: outputSchema is not null);
             },
             title,
@@ -297,12 +309,18 @@ internal static partial class ToolCatalog
         bool? mutating = null,
         bool? destructive = null,
         JsonObject? searchHints = null,
-        JsonObject? outputSchema = null)
+        JsonObject? outputSchema = null,
+        Func<JsonObject, JsonObject?, JsonObject>? transformResponse = null)
         => new(name, description, schema, category,
             async (id, args, bridge) =>
             {
                 JsonObject response = await bridge.SendAsync(id, pipeCommand, buildArgs(args))
                     .ConfigureAwait(false);
+                if (transformResponse is not null)
+                {
+                    response = transformResponse(response, args);
+                }
+
                 return BridgeResult(response, args, dataOnly: outputSchema is not null);
             },
             title,
@@ -320,35 +338,14 @@ internal static partial class ToolCatalog
     private static JsonNode BridgeResult(JsonObject response, JsonObject? args = null, bool dataOnly = false)
     {
         bool success = (response["Success"] ?? response["success"])?.GetValue<bool>() ?? false;
-        bool isError = ToolResultFormatter.ShouldTreatAsError(response, !success);
-        return ToolResultFormatter.StructuredToolResult(response, args, isError: isError, dataOnly: dataOnly);
+        return ToolResultFormatter.StructuredToolResult(response, args, isError: !success, dataOnly: dataOnly);
     }
 }
 
 internal static class ToolResultFormatter
 {
     private const string FormatterWarningsCommand = "warnings";
-
-    internal static bool ShouldTreatAsError(JsonObject response, bool defaultIsError)
-    {
-        if (defaultIsError)
-        {
-            return true;
-        }
-
-        string? command = response["Command"]?.GetValue<string>();
-        if (!string.Equals(command, FormatterWarningsCommand, StringComparison.OrdinalIgnoreCase)
-            || response["Data"] is not JsonObject data)
-        {
-            return false;
-        }
-
-        int totalCount = data["totalCount"]?.GetValue<int>()
-            ?? data["count"]?.GetValue<int>()
-            ?? 0;
-
-        return totalCount > 0;
-    }
+    private const string TotalCountProperty = "totalCount";
 
     internal static JsonNode StructuredToolResult(
         JsonObject response,
@@ -364,8 +361,8 @@ internal static class ToolResultFormatter
             string? errorCode = response["Error"]?["code"]?.GetValue<string>();
             string? errorMsg = response["Error"]?["message"]?.GetValue<string>();
             string? summary = response["Summary"]?.GetValue<string>();
-            // If no actual error message exists (e.g. warnings flagged as error for attention),
-            // use the diagnostics success text so row data is visible in the response.
+            // If an error-shaped diagnostics response lacks an Error message,
+            // keep the rendered rows visible in the response.
             string? diagnosticsText = errorMsg is null ? CreateDiagnosticsSuccessText(response) : null;
             string baseText = diagnosticsText ?? errorMsg ?? summary ?? response.ToJsonString();
             string? hint = GetErrorHint(errorCode);
@@ -453,17 +450,18 @@ internal static class ToolResultFormatter
 
     private static string? GetErrorHint(string? code) => code switch
     {
-        "document_not_found"     => "Fix: use find_files to locate the correct path, or verify the file is part of the loaded solution.",
-        "file_not_found"         => "Fix: use find_files or glob to locate the correct file path.",
-        "project_not_found"      => "Fix: call list_projects to see all loaded projects and their names.",
-        "solution_not_open"      => "Fix: open a solution first with open_solution, or use bind_solution if one is already loaded.",
-        "invalid_arguments"      => "Fix: call tool_help with the tool name to see correct parameters and examples.",
-        "invalid_json"           => "Fix: check the argument is valid JSON — no trailing commas, unescaped characters, or mismatched brackets.",
-        "not_in_break_mode"      => "Fix: the debugger must be paused — use debug_break to pause, or set a breakpoint with set_breakpoint then debug_start.",
-        "thread_not_found"       => "Fix: call debug_threads to list available thread IDs.",
-        "dirty_diagnostics"      => "Fix: call errors or warnings to get current diagnostics before retrying.",
-        "unsupported_operation"  => "Fix: call tool_help with the tool name to check prerequisites or whether a different tool applies.",
-        "timeout"                => "Fix: the operation timed out — try again, or reduce scope (e.g. search a subdirectory instead of the full solution).",
+        "document_not_found"     => "The file path was not recognized as an open document. Call find_files with the filename to get the correct path, then retry with the resolved path.",
+        "file_not_found"         => "The file path does not exist on disk. Call find_files or glob with the filename to locate it, then retry with the resolved path.",
+        "project_not_found"      => "The project name or path was not found in the solution. Call list_projects to see the names of all loaded projects, then retry with the correct name.",
+        "solution_not_open"      => "No solution is open in Visual Studio. Call open_solution with a .sln path to open one, or call bind_solution to attach to an already-running instance.",
+        "invalid_arguments"      => "One or more required parameters were wrong or missing. Call tool_help with the tool name to see the correct parameters and an example call.",
+        "invalid_json"           => "The arguments could not be parsed as JSON. Check for trailing commas, unescaped characters, or mismatched brackets, then resubmit.",
+        "not_in_break_mode"      => "This operation requires the debugger to be paused at a breakpoint. Call debug_break to pause now, or set a breakpoint with set_breakpoint and then call debug_start to run until it hits.",
+        "thread_not_found"       => "The thread ID is not in the current thread list. Call debug_threads to see all active thread IDs, then retry with a valid ID.",
+        "dirty_diagnostics"      => "The diagnostics snapshot is stale. Call errors or warnings to get the current Error List state, then retry.",
+        "unsupported_operation"  => "This operation is not supported in the current context. Call tool_help with the tool name to check prerequisites, or look for a different tool that covers your use case.",
+        "timeout"                => "The operation timed out before it could complete. Try again, or narrow the scope — for example search a single subdirectory instead of the whole solution.",
+        "unknown_command"        => "The command name was not recognized. Call list_tools to see every registered tool, list_tool_categories to browse by group, or recommend_tools with a description of your task to get a suggestion.",
         _                        => null,
     };
 
@@ -505,7 +503,7 @@ internal static class ToolResultFormatter
     private static string? CreateDataListText(JsonObject response)
     {
         string? command = response["Command"]?.GetValue<string>();
-        if (command is FormatterWarningsCommand or "errors" or "diagnostics-snapshot")
+        if (command is FormatterWarningsCommand or "errors" or "messages" or "diagnostics-snapshot")
             return null;
 
         // Check Data object first (bridge-piped tools), then fall back to top-level fields
@@ -595,7 +593,7 @@ internal static class ToolResultFormatter
 
         return command switch
         {
-            FormatterWarningsCommand or "errors" => CreateWarningsOrErrorsSuccessText(command, response, data),
+            FormatterWarningsCommand or "errors" or "messages" => CreateWarningsOrErrorsSuccessText(command, response, data),
             "diagnostics-snapshot" => CreateDiagnosticsSnapshotSuccessText(response, data),
             _ => null,
         };
@@ -605,20 +603,34 @@ internal static class ToolResultFormatter
     {
         string? summary = response["Summary"]?.GetValue<string>();
         int returnedCount = data["count"]?.GetValue<int>() ?? 0;
-        int totalCount = data["totalCount"]?.GetValue<int>() ?? returnedCount;
+        int totalCount = data[TotalCountProperty]?.GetValue<int>() ?? returnedCount;
+        int filteredCount = data["filteredCount"]?.GetValue<int>() ?? totalCount;
         bool truncated = data["truncated"]?.GetValue<bool>() ?? false;
+        int chunkIndex = data["chunkIndex"]?.GetValue<int?>() ?? 0;
+        int chunkCount = data["chunkCount"]?.GetValue<int?>() ?? 0;
+        int chunkSize = data["chunkSize"]?.GetValue<int?>() ?? returnedCount;
+        bool chunkOutOfRange = data["chunkOutOfRange"]?.GetValue<bool?>() == true;
         JsonArray? rows = data["rows"] as JsonArray;
         JsonArray? groups = data["groups"] as JsonArray;
 
-        string countText = totalCount == returnedCount
+        string countText = filteredCount == returnedCount
             ? $"rows={returnedCount}"
-            : $"rows={returnedCount}, totalCount={totalCount}";
+            : $"rows={returnedCount}, filteredCount={filteredCount}";
+        if (data["chunkIndex"] is not null || data["chunkCount"] is not null)
+        {
+            countText = $"{countText}, chunkIndex={chunkIndex}, chunkCount={chunkCount}, chunkSize={chunkSize}";
+        }
+
+        if (chunkOutOfRange)
+        {
+            countText = $"{countText}, chunkOutOfRange=true";
+        }
 
         string truncatedText = truncated ? ", truncated=true" : string.Empty;
         string groupsSuffix = RenderGroupSummary(groups) is { Length: > 0 } gs ? "\n" + gs : string.Empty;
         string rowsText = RenderDiagnosticRowList(rows, MaxDiagnosticTextRows);
         string rowsSuffix = string.IsNullOrWhiteSpace(rowsText) ? string.Empty : "\n" + rowsText;
-        string continuationHint = CreateDiagnosticsContinuationHint(command, returnedCount, totalCount, truncated, rows?.Count ?? 0, MaxDiagnosticTextRows);
+        string continuationHint = CreateDiagnosticsContinuationHint(command, data, rows?.Count ?? 0, MaxDiagnosticTextRows);
         string continuationSuffix = string.IsNullOrWhiteSpace(continuationHint) ? string.Empty : $"\n{continuationHint}";
 
         if (!string.IsNullOrWhiteSpace(summary))
@@ -647,7 +659,7 @@ internal static class ToolResultFormatter
 
         if (rows.Count > maxRows)
         {
-            entries.Add($"... ({rows.Count - maxRows} more row(s) in this response; use max, code, path, or project to narrow it.)");
+            entries.Add($"... ({rows.Count - maxRows} more row(s) in this response; increase chunk_size or add code/path/project filters to narrow it.)");
         }
 
         return string.Join("\n", entries);
@@ -713,10 +725,10 @@ internal static class ToolResultFormatter
         JsonObject? errors = data["errors"] as JsonObject;
 
         int warningRows = warnings?["count"]?.GetValue<int>() ?? 0;
-        int warningTotal = warnings?["totalCount"]?.GetValue<int>() ?? warningRows;
+        int warningTotal = warnings?[TotalCountProperty]?.GetValue<int>() ?? warningRows;
         bool warningTruncated = warnings?["truncated"]?.GetValue<bool>() ?? false;
         int errorRows = errors?["count"]?.GetValue<int>() ?? 0;
-        int errorTotal = errors?["totalCount"]?.GetValue<int>() ?? errorRows;
+        int errorTotal = errors?[TotalCountProperty]?.GetValue<int>() ?? errorRows;
         bool errorTruncated = errors?["truncated"]?.GetValue<bool>() ?? false;
         string warningPreview = CreateDiagnosticRowPreview(warnings?["rows"] as JsonArray, "warnings", MaxDiagnosticPreviewRows);
         string errorPreview = CreateDiagnosticRowPreview(errors?["rows"] as JsonArray, "errors", MaxDiagnosticPreviewRows);
@@ -749,7 +761,7 @@ internal static class ToolResultFormatter
         string previewSuffix = string.IsNullOrWhiteSpace(previewText)
             ? string.Empty
             : $" {previewText}";
-        string continuationHint = "Use errors, warnings, or messages with max, code, path, or project filters for more rows, or full=true for the full payload.";
+        string continuationHint = "Use errors, warnings, or messages with chunk_index, chunk_size, sort_by, code, path, or project filters for more rows, or full=true for the full payload.";
 
         return $"{prefix} See warnings.rows and errors.rows for details; {warningText}; {errorText}{truncationText}.{previewSuffix} {continuationHint}";
     }
@@ -780,21 +792,41 @@ internal static class ToolResultFormatter
 
     private static string CreateDiagnosticsContinuationHint(
         string command,
-        int returnedCount,
-        int totalCount,
-        bool truncated,
+        JsonObject data,
         int previewedRowCount,
         int maxPreviewRows)
     {
+        int returnedCount = data["count"]?.GetValue<int>() ?? 0;
+        int filteredCount = data["filteredCount"]?.GetValue<int>()
+            ?? data[TotalCountProperty]?.GetValue<int>()
+            ?? returnedCount;
+        int chunkIndex = data["chunkIndex"]?.GetValue<int?>() ?? 0;
+        int chunkCount = data["chunkCount"]?.GetValue<int?>() ?? 0;
+        int chunkSize = data["chunkSize"]?.GetValue<int?>() ?? returnedCount;
+        bool truncated = data["truncated"]?.GetValue<bool>() ?? false;
+        bool hasMoreChunks = data["hasMoreChunks"]?.GetValue<bool?>() == true;
+        bool chunkOutOfRange = data["chunkOutOfRange"]?.GetValue<bool?>() == true;
         bool previewTrimmed = previewedRowCount > maxPreviewRows;
-        bool moreRowsAvailable = truncated || totalCount > returnedCount || previewTrimmed;
+
+        if (chunkOutOfRange)
+        {
+            int lastChunk = Math.Max(0, chunkCount - 1);
+            return $"Requested chunk_index={chunkIndex} is outside the available {command} chunks. Use chunk_index between 0 and {lastChunk}, adjust chunk_size, add filters, or use full=true for the full payload.";
+        }
+
+        if (hasMoreChunks)
+        {
+            return $"More {command} chunks are available. Use chunk_index={chunkIndex + 1} with the same filters, adjust chunk_size={chunkSize}, add filters, or use full=true for the full payload.";
+        }
+
+        bool moreRowsAvailable = truncated || filteredCount > returnedCount || previewTrimmed;
 
         if (!moreRowsAvailable)
         {
-            return "Use max, code, path, or project filters to narrow the list, or full=true for the full payload.";
+            return "Use chunk_size, sort_by, code, path, or project filters to reshape the list, or full=true for the full payload.";
         }
 
-        return $"More {command} rows are available. Use max to request a larger page, add code/path/project filters to narrow the list, or use full=true for the full payload.";
+        return $"More {command} rows are available. Use chunk_index, chunk_size, sort_by, add code/path/project filters to narrow the list, or use full=true for the full payload.";
     }
 
     private static string CreateDiagnosticRowPreviewEntry(JsonObject row)

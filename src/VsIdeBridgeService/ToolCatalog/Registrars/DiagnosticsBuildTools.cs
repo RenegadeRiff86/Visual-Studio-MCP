@@ -280,7 +280,7 @@ internal static partial class ToolCatalog
     {
         try
         {
-            if (!bridge.DocumentDiagnostics.TryGetCachedErrors(null, out JsonObject pre))
+            if (!bridge.DocumentDiagnostics.TryGetCached("Error", null, out JsonObject pre))
             {
                 Task<JsonObject> preTask = bridge.SendAsync(id, "errors", new JsonObject
                 {

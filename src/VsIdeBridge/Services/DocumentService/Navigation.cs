@@ -46,7 +46,7 @@ internal sealed partial class DocumentService
         string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
         if (!File.Exists(normalizedPath))
         {
-            throw new CommandErrorException(DocumentNotFoundCode, $"File not found: {normalizedPath}");
+            throw new CommandErrorException(DocumentNotFoundCode, $"File not found: {normalizedPath}. Call find_files to locate the correct path, then retry.");
         }
 
         Window window = dte.ItemOperations.OpenFile(normalizedPath);
@@ -94,7 +94,7 @@ internal sealed partial class DocumentService
 
         if (document.Object(TextDocumentKind) is not TextDocument textDocument)
         {
-            throw new CommandErrorException(UnsupportedOperationCode, $"Document is not a text document: {document.FullName}");
+            throw new CommandErrorException(UnsupportedOperationCode, $"Document is not a text document: {document.FullName}. Only source code files support cursor positioning — open a .cs, .cpp, .py, or other text-based file.");
         }
 
         TextSelection selection = textDocument.Selection;
@@ -212,7 +212,7 @@ internal sealed partial class DocumentService
         }
         else
         {
-            throw new CommandErrorException("invalid_arguments", "Specify --file or --query.");
+            throw new CommandErrorException("invalid_arguments", "Either file or query is required. Pass file with an absolute path to the document on disk, or query with a text string to match against open document names.");
         }
 
         return await CloseOpenDocumentsAsync(dte, resolvedQuery, closeAllMatches: false, saveChanges).ConfigureAwait(true);
@@ -270,11 +270,11 @@ internal sealed partial class DocumentService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        Document activeDocument = dte.ActiveDocument ?? throw new CommandErrorException(DocumentNotFoundCode, "There is no active document.");
+        Document activeDocument = dte.ActiveDocument ?? throw new CommandErrorException(DocumentNotFoundCode, "There is no active document. Open a file in VS first using open_file.");
         string? activePath = TryGetDocumentFullName(activeDocument);
         if (string.IsNullOrWhiteSpace(activePath))
         {
-            throw new CommandErrorException(DocumentNotFoundCode, "The active document does not have a file path.");
+            throw new CommandErrorException(DocumentNotFoundCode, "The active document does not have a file path. It may be an unsaved scratch buffer — open a file from disk first using open_file.");
         }
 
         List<Document> documentsToClose = [..EnumerateOpenDocuments(dte)
@@ -310,10 +310,10 @@ internal sealed partial class DocumentService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        Document document = dte.ActiveDocument ?? throw new CommandErrorException(DocumentNotFoundCode, "There is no active document.");
+        Document document = dte.ActiveDocument ?? throw new CommandErrorException(DocumentNotFoundCode, "There is no active document. Open a file in VS first using open_file.");
         if (document.Object(TextDocumentKind) is not TextDocument textDocument)
         {
-            throw new CommandErrorException(UnsupportedOperationCode, $"Active document is not a text document: {document.FullName}");
+            throw new CommandErrorException(UnsupportedOperationCode, $"Active document is not a text document: {document.FullName}. Only source code files support text operations — open a .cs, .cpp, .py, or other text-based file.");
         }
 
         EditPoint editPoint = textDocument.StartPoint.CreateEditPoint();
@@ -331,13 +331,13 @@ internal sealed partial class DocumentService
             string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
             if (!File.Exists(normalizedPath))
             {
-                throw new CommandErrorException(DocumentNotFoundCode, $"File not found: {normalizedPath}");
+                throw new CommandErrorException(DocumentNotFoundCode, $"File not found: {normalizedPath}. Call find_files to locate the correct path, then retry.");
             }
 
             Window window = dte.ItemOperations.OpenFile(normalizedPath);
             window.Activate();
             return window.Document ?? dte.ActiveDocument
-                ?? throw new CommandErrorException(DocumentNotFoundCode, $"Unable to activate: {normalizedPath}");
+                ?? throw new CommandErrorException(DocumentNotFoundCode, $"Unable to activate document: {normalizedPath}. Verify the file exists and is not locked by another process.");
         }
 
         if (!string.IsNullOrWhiteSpace(documentQuery))
@@ -348,7 +348,7 @@ internal sealed partial class DocumentService
             return resolved;
         }
 
-        Document active = dte.ActiveDocument ?? throw new CommandErrorException(DocumentNotFoundCode, "There is no active document.");
+        Document active = dte.ActiveDocument ?? throw new CommandErrorException(DocumentNotFoundCode, "There is no active document. Open a file in VS first using open_file.");
         active.Activate();
         return active;
     }

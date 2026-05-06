@@ -386,6 +386,12 @@ internal static partial class BestPracticeAnalyzer
         foreach (Match match in commentMatches)
         {
             string raw = match.Value.Trim();
+
+            // Skip XML documentation comments (///) entirely — they are API documentation,
+            // not inline comments, and follow conventions like "Gets the X." that are never low-value.
+            if (raw.StartsWith("///", StringComparison.Ordinal))
+                continue;
+
             string commentText = raw.StartsWith("//", StringComparison.Ordinal)
 #if NET5_0_OR_GREATER
                 ? raw[2..].Trim()

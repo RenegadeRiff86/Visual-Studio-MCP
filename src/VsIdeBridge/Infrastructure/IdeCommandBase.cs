@@ -46,7 +46,10 @@ internal abstract class IdeCommandBase
     internal virtual bool AllowAutomationInvocation => true;
 
     internal Task<CommandExecutionResult> ExecuteDirectAsync(IdeCommandContext ctx, CommandArguments args)
-        => ExecuteAsync(ctx, args);
+    {
+        args.ToolName ??= CanonicalName;
+        return ExecuteAsync(ctx, args);
+    }
 
     protected abstract Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args);
 
@@ -76,6 +79,7 @@ internal abstract class IdeCommandBase
         try
         {
             CommandArguments args = CommandArgumentParser.Parse(rawArguments);
+            args.ToolName = CanonicalName;
             outputPath = ResolveOutputPath(args);
             requestId = args.GetString("request-id");
             CommandExecutionResult commandResult = await ExecuteAsync(context, args).ConfigureAwait(false);

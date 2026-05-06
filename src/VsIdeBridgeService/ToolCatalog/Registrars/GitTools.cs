@@ -349,7 +349,9 @@ internal static partial class ToolCatalog
                 string branch = args?["branch"]?.GetValue<string>() ?? string.Empty;
                 bool setUpstream = args?["set_upstream"]?.GetValue<bool?>() ?? false;
                 string uFlag = setUpstream ? "-u" : string.Empty;
-                string remoteArg = string.IsNullOrWhiteSpace(remote) ? string.Empty : EscapeArg(remote);
+               if (setUpstream && string.IsNullOrWhiteSpace(remote))
+                   remote = "origin";
+               string remoteArg = string.IsNullOrWhiteSpace(remote) ? string.Empty : EscapeArg(remote);
                 string branchArg = string.IsNullOrWhiteSpace(branch) ? string.Empty : EscapeArg(branch);
                 return await GitRunner.RunNetworkAsync(id, repo,
                     $"push {uFlag} {remoteArg} {branchArg}".TrimEnd().Replace("  ", " "))

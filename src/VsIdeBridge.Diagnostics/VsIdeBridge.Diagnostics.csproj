@@ -5,9 +5,9 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>VsIdeBridge.Diagnostics</RootNamespace>
   </PropertyGroup>
-
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="System.Text.Json" Version="9.0.0" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net472'">

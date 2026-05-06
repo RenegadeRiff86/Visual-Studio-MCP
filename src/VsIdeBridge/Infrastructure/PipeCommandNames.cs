@@ -13,6 +13,7 @@ internal static class PipeCommandNames
         ["Tools.IdeGetState"] = ["state"],
         ["Tools.IdeGetUiSettings"] = ["ui-settings"],
         ["Tools.IdeCaptureVsWindow"] = ["capture-vs-window"],
+        ["Tools.IdeReadOutputWindow"] = ["read-output", "read-output-window"],
         ["Tools.IdeWaitForReady"] = ["ready"],
         ["Tools.IdeOpenSolution"] = ["open-solution"],
         ["Tools.IdeLaunchVisualStudio"] = ["launch-visual-studio"],

@@ -100,7 +100,7 @@ internal sealed class ReadinessService
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
         if (context.Dte.Solution?.IsOpen != true)
         {
-            throw new CommandErrorException("solution_not_open", "No solution is open.");
+            throw new CommandErrorException("solution_not_open", "No solution is open. Call open_solution with a .sln or .slnx path to open one.");
         }
 
         return context.Dte.Solution.FullName;
