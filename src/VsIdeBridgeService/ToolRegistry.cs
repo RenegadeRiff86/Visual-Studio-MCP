@@ -109,13 +109,15 @@ internal sealed class ToolExecutionRegistry
             return "shell_exec";
 
         // Simple similarity: prefer names that contain the guess or start with it
-        List<string> candidates = _byLookupName.Keys
-            .Where(k => k.Contains(attempted, StringComparison.OrdinalIgnoreCase) ||
-                        attempted.Contains(k, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(k => Math.Abs(k.Length - attempted.Length))
-            .ThenBy(k => k)
-            .Take(3)
-            .ToList();
+        List<string> candidates =
+        [
+            .._byLookupName.Keys
+                .Where(k => k.Contains(attempted, StringComparison.OrdinalIgnoreCase) ||
+                            attempted.Contains(k, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(k => Math.Abs(k.Length - attempted.Length))
+                .ThenBy(k => k)
+                .Take(3),
+        ];
 
         if (candidates.Count > 0)
             return candidates[0];

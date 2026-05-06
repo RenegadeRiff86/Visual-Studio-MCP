@@ -28,7 +28,7 @@ internal sealed class VsCommandService
         {
             throw new CommandErrorException(
                 "unsupported_operation",
-                $"Visual Studio command failed: {command.Name}",
+                $"Visual Studio command '{command.Name}' failed with a COM exception. Ensure VS is idle with no modal dialogs and the required editor context is active, then retry.",
                 new { command = command.Name, args = commandArgs ?? string.Empty, exception = ex.Message, hresult = ex.HResult });
         }
 
@@ -81,7 +81,7 @@ internal sealed class VsCommandService
         {
             throw new CommandErrorException(
                 "unsupported_operation",
-                $"None of the Visual Studio commands could be executed: {string.Join(", ", candidateCommands)}",
+                $"None of the VS commands could be executed: {string.Join(", ", candidateCommands)}. Open the required file in VS and ensure no modal dialog is active, then retry.",
                 new { candidates = candidateCommands, error = commandError ?? string.Empty });
         }
 
@@ -130,7 +130,7 @@ internal sealed class VsCommandService
         {
             throw new CommandErrorException(
                 "unsupported_operation",
-                $"Visual Studio command failed: {commandName}",
+                $"Visual Studio command '{commandName}' failed with a COM exception. Ensure VS is idle with no modal dialogs and the required editor context is active, then retry.",
                 new { command = commandName, args = commandArgs, error = ex.Message, hresult = ex.HResult });
         }
 
@@ -176,7 +176,7 @@ internal sealed class VsCommandService
             return command;
         }
 
-        throw new CommandErrorException("unsupported_operation", $"Visual Studio command not found: {commandName}");
+        throw new CommandErrorException("unsupported_operation", $"Visual Studio command not found: '{commandName}'. Call tool_help execute_command to see usage and examples, or look up the command name in VS under Tools > Options > Environment > Keyboard.");
     }
 
     private static Command? TryResolveCommand(DTE2 dte, string commandName)

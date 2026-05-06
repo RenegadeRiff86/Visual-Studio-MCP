@@ -96,12 +96,12 @@ internal sealed class DebuggerService
         Debugger debugger = dte.Debugger;
         if (debugger.CurrentMode != dbgDebugMode.dbgBreakMode)
         {
-            throw new CommandErrorException("not_in_break_mode", "Debugger is not currently in break mode.");
+            throw new CommandErrorException("not_in_break_mode", "Debugger is not currently in break mode. Call debug_break to pause execution first, then retry.");
         }
 
         modeString = debugger.CurrentMode.ToString();
         Thread targetThread = ResolveThread(debugger.CurrentProgram, threadId)
-            ?? throw new CommandErrorException("thread_not_found", $"Thread '{threadId}' was not found in the current debug program.");
+            ?? throw new CommandErrorException("thread_not_found", $"Thread '{threadId}' was not found in the current debug program. Call debug_threads to list all active thread IDs, then retry with a valid thread_id.");
         targetThreadId = targetThread.ID;
         int limit = maxFrames <= 0 ? 100 : maxFrames;
         rawFrames = [];
@@ -177,7 +177,7 @@ internal sealed class DebuggerService
         Debugger debugger = dte.Debugger;
         if (debugger.CurrentMode != dbgDebugMode.dbgBreakMode || debugger.CurrentStackFrame is not StackFrame frame)
         {
-            throw new CommandErrorException("not_in_break_mode", "Debugger is not currently in break mode.");
+            throw new CommandErrorException("not_in_break_mode", "Debugger is not currently in break mode. Call debug_break to pause execution first, then retry.");
         }
 
         modeString = debugger.CurrentMode.ToString();
@@ -299,7 +299,7 @@ internal sealed class DebuggerService
         Debugger debugger = dte.Debugger;
         if (debugger.CurrentMode != dbgDebugMode.dbgBreakMode)
         {
-            throw new CommandErrorException("not_in_break_mode", "Debugger is not currently in break mode.");
+            throw new CommandErrorException("not_in_break_mode", "Debugger is not currently in break mode. Call debug_break to pause execution first, then retry.");
         }
 
         timeout = timeoutMs <= 0 ? 1000 : timeoutMs;
@@ -411,7 +411,7 @@ internal sealed class DebuggerService
 
         if (dte.Debugger.CurrentMode != dbgDebugMode.dbgBreakMode)
         {
-            throw new CommandErrorException("not_in_break_mode", "Debugger is not currently in break mode.");
+            throw new CommandErrorException("not_in_break_mode", "Debugger is not currently in break mode. Call debug_break to pause execution first, then retry.");
         }
     }
 
@@ -539,7 +539,7 @@ internal sealed class DebuggerService
 
         if (throwOnTimeout)
         {
-            throw new CommandErrorException("timeout", $"Debugger did not reach break or design mode within {timeout} ms.");
+            throw new CommandErrorException("timeout", $"Debugger did not reach break or design mode within {timeout} ms. Increase timeout_ms and retry, or verify the debug target is still running.");
         }
 
         JObject timedOutData = await GetStateAsync(dte).ConfigureAwait(true);

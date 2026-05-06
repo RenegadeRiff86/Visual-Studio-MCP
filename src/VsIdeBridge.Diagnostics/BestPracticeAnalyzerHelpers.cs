@@ -490,10 +490,23 @@ internal static partial class BestPracticeAnalyzerHelpers
     internal static bool IsUnnecessaryComment(string comment)
     {
         string lower = comment.ToLowerInvariant().TrimEnd('.', '!', '?', ':');
+
+        // These are only redundant when the comment *opens* with them ("This method does X").
+        // Mid-sentence they can be legitimate ("Skip this method if...", "Call this function when...").
+        string[] redundantPrefixes =
+        [
+            "this method", "this function", "this class", "this variable", "this line",
+            "gets the", "sets the",
+        ];
+
+        if (redundantPrefixes.Any(phrase => lower.StartsWith(phrase, StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
         string[] redundantPhrases =
         [
-            "this method", "this function", "this class", "this variable",
-            "this line", "increments", "decrements", "sets the", "gets the",
+            "increments", "decrements",
             "initializes the", "checks if",
             "loops through", "iterates over", "adds one to", "subtracts one",
             "as an ai", "large language model",

@@ -65,7 +65,7 @@ internal static partial class SolutionProjectCommands
                 object? referencesObject = TryGetAutomationProperty(project.Object, "References")
                     ?? throw new CommandErrorException(
                         UnsupportedProjectTypeCode,
-                        $"Project '{project.Name}' does not expose automation references.");
+                        $"Project '{project.Name}' does not expose references through the VS automation API (common for C++ and SDK-style projects). Retry with --declared-only true to read references directly from the project file instead.");
 
                 allReferences =
                 [

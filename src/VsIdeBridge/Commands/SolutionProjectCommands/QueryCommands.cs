@@ -29,7 +29,7 @@ internal static partial class SolutionProjectCommands
             int maxResults = args.GetInt32("max", 200);
 
             if (!Directory.Exists(rootPath))
-                throw new CommandErrorException("path_not_found", $"Search root not found: {rootPath}");
+                throw new CommandErrorException("path_not_found", $"Search root directory not found: {rootPath}. Verify the path exists on disk. Omit the path parameter to search from the default root, or pass a valid directory path.");
 
             List<string> matches = FindSolutions(rootPath, query, maxDepth, maxResults);
             JObject[] results =

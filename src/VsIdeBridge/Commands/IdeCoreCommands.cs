@@ -131,7 +131,7 @@ internal static partial class IdeCoreCommands
         }
         catch (Exception ex) when (ex is not null) // rethrow as CommandErrorException so callers get a clean error code
         {
-            throw new CommandErrorException("http_toggle_failed", $"Failed to toggle HTTP server: {ex.Message}");
+            throw new CommandErrorException("http_toggle_failed", $"Failed to toggle the bridge HTTP server: {ex.Message}. This is a bridge-internal error — wait a moment and retry, or restart Visual Studio if it persists.");
         }
     }
 
@@ -166,7 +166,7 @@ internal static partial class IdeCoreCommands
                 "shell_exec" => BridgeApprovalKind.ShellExec,
                 "python_exec" => BridgeApprovalKind.PythonExecution,
                 "python_env_mutation" => BridgeApprovalKind.PythonEnvironmentMutation,
-                _ => throw new CommandErrorException("invalid_arguments", $"Unsupported approval operation: {operation}"),
+                _ => throw new CommandErrorException("invalid_arguments", $"Unsupported approval operation: '{operation}'. Valid values are: shell_exec, python_exec, python_env_mutation."),
             };
 
             JObject commandData = await context.Runtime.BridgeApprovalService
@@ -227,13 +227,13 @@ internal static partial class IdeCoreCommands
             string solutionPath = args.GetRequiredString("solution");
             if (!File.Exists(solutionPath))
             {
-                throw new CommandErrorException("file_not_found", $"Solution file not found: {solutionPath}");
+                throw new CommandErrorException("file_not_found", $"Solution file not found: {solutionPath}. Call search_solutions to locate the correct .sln or .slnx path, then retry with the resolved path.");
             }
             string ext = Path.GetExtension(solutionPath);
             if (!string.Equals(ext, ".sln", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(ext, ".slnx", StringComparison.OrdinalIgnoreCase))
             {
-                throw new CommandErrorException("invalid_file_type", $"File is not a solution file: {solutionPath}");
+                throw new CommandErrorException("invalid_file_type", $"The path '{solutionPath}' is not a solution file. The solution parameter must point to a .sln or .slnx file.");
             }
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             context.Dte.Solution.Open(solutionPath);
@@ -253,7 +253,7 @@ internal static partial class IdeCoreCommands
 
             if (!File.Exists(devenvPath))
             {
-                throw new CommandErrorException("file_not_found", $"devenv.exe not found: {devenvPath}");
+                throw new CommandErrorException("file_not_found", $"devenv.exe was not found at '{devenvPath}'. Verify the path — the default location is C:\\Program Files\\Microsoft Visual Studio\\<version>\\<edition>\\Common7\\IDE\\devenv.exe.");
             }
 
             if (!string.IsNullOrWhiteSpace(solutionPath))
@@ -262,12 +262,12 @@ internal static partial class IdeCoreCommands
                 if (!string.Equals(extension, ".sln", StringComparison.OrdinalIgnoreCase) &&
                     !string.Equals(extension, ".slnx", StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new CommandErrorException("invalid_file_type", $"File is not a solution file: {solutionPath}");
+                    throw new CommandErrorException("invalid_file_type", $"The path '{solutionPath}' is not a solution file. The solution parameter must point to a .sln or .slnx file.");
                 }
 
                 if (!File.Exists(solutionPath))
                 {
-                    throw new CommandErrorException("file_not_found", $"Solution file not found: {solutionPath}");
+                    throw new CommandErrorException("file_not_found", $"Solution file not found: {solutionPath}. Call search_solutions to locate the correct .sln or .slnx path, then retry with the resolved path.");
                 }
             }
 
@@ -281,7 +281,7 @@ internal static partial class IdeCoreCommands
             };
 
             using Process? process = Process.Start(startInfo);
-            _ = process ?? throw new CommandErrorException("launch_failed", "Visual Studio launch failed: Process.Start returned null.");
+            _ = process ?? throw new CommandErrorException("launch_failed", $"Visual Studio failed to launch from '{devenvPath}'. Verify that devenv.exe exists at the specified path and that you have permission to run it.");
 
             if (solutionPath is string verifiedSolutionPath && !string.IsNullOrWhiteSpace(verifiedSolutionPath))
             {
@@ -331,7 +331,7 @@ internal static partial class IdeCoreCommands
 
             if (File.Exists(solutionPath))
             {
-                throw new CommandErrorException("file_exists", $"Solution file already exists: {solutionPath}");
+                throw new CommandErrorException("file_exists", $"A solution file already exists at {solutionPath}. To open it, call open_solution with that path. To create a new solution, choose a different name or directory.");
             }
 
             Directory.CreateDirectory(directory);
@@ -361,17 +361,17 @@ internal static partial class IdeCoreCommands
 
             if (string.IsNullOrWhiteSpace(trimmedName))
             {
-                throw new CommandErrorException("invalid_arguments", "Argument --name must not be empty.");
+                throw new CommandErrorException("invalid_arguments", "The name parameter must not be empty. Pass a valid solution name like 'MySolution'.");
             }
 
             if (!string.Equals(Path.GetFileName(trimmedName), trimmedName, StringComparison.Ordinal))
             {
-                throw new CommandErrorException("invalid_arguments", "Argument --name must be a solution name, not a path.");
+                throw new CommandErrorException("invalid_arguments", "The name parameter must be a plain solution name, not a file path. Pass the name only (e.g. 'MySolution') — use the directory parameter to specify where to create it.");
             }
 
             if (trimmedName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
             {
-                throw new CommandErrorException("invalid_arguments", $"Argument --name contains invalid file name characters: {requestedName}");
+                throw new CommandErrorException("invalid_arguments", $"The name '{requestedName}' contains characters that are not valid in a file name. Remove any of: \\ / : * ? \" < > |");
             }
 
             return trimmedName;

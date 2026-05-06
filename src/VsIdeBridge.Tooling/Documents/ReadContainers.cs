@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json.Nodes;
 
 namespace VsIdeBridge.Tooling.Documents;
@@ -90,7 +91,14 @@ public sealed class ReadSlice
         => new(source, index);
 
     public JsonObject ToJsonObject()
-        => (JsonObject)_original.DeepClone();
+    {
+        JsonObject clone = (JsonObject)_original.DeepClone();
+        // Strip the lines array (each line as a {line, text} object — duplicates the text field)
+        // and queue metadata. Both are redundant noise in the structured output.
+        clone.Remove("lines");
+        clone.Remove("queue");
+        return clone;
+    }
 
     public bool Matches(ReadQueryOptions options)
         => Contains(ResolvedPath, options.Path)
@@ -361,6 +369,15 @@ public sealed class ReadSliceCollection
         return result;
     }
 
+    // Compute filter+sort+page and build a human-readable summary of the slice content.
+    // Used by the MCP service layer to populate the tool result Summary field.
+    public string BuildPageSummary(ReadQueryOptions options)
+    {
+        ReadSliceCollection filtered = ApplyFilters(options).Sort(options);
+        ReadPage page = filtered.Page(options);
+        return page.BuildSummary(SourceTotalCount);
+    }
+
     public JsonArray GroupBy(string? groupBy)
     {
         string normalized = ReadQueryOptions.NormalizeGroupBy(groupBy);
@@ -554,4 +571,21 @@ public readonly struct ReadPage(
 
     public bool IsTruncated(bool sourceTruncated)
         => sourceTruncated || HasMoreChunks || ChunkOutOfRange;
+
+    // Build a human-readable summary that renders each slice's content,
+    // suitable for use as the tool result "Summary" field.
+    public string BuildSummary(int totalCount)
+    {
+        StringBuilder sb = new();
+        sb.Append($"Captured {totalCount} slice(s).");
+        foreach (ReadSlice slice in Slices)
+        {
+            string range = (slice.ActualStartLine.HasValue && slice.ActualEndLine.HasValue)
+                ? $" (lines {slice.ActualStartLine}-{slice.ActualEndLine})"
+                : string.Empty;
+            sb.Append($"\n--- {slice.FileName}{range} ---\n{slice.Text}");
+        }
+
+        return sb.ToString();
+    }
 }

@@ -50,7 +50,7 @@ public static partial class ToolDefinitionCatalog
             "read_file_batch",
             "search",
             "Read several file slices.",
-            "Take multiple code slices in one bridge request. Use search_symbols, find_text, file_outline, or peek_definition first, then use this instead of repeated read_file calls when you need several slices before apply_diff or a larger refactor.",
+            "Take multiple code slices in one bridge request. Each range item must include file plus one of: (a) start_line + end_line for a fixed range, or (b) line + context_before + context_after for an anchor-based slice. Use search_symbols, find_text, file_outline, or peek_definition first to get line numbers, then call this instead of repeated read_file calls when you need several slices before apply_diff or a larger refactor.",
             parameterSchema,
             bridgeCommand: "document-slices",
             title: "Read File Slices",

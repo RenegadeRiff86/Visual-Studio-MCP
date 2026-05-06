@@ -39,14 +39,16 @@ internal static partial class SolutionProjectCommands
             }
 
             return new CommandExecutionResult(
-                $"Read {properties.Count} project propert{(properties.Count == 1 ? "y" : "ies")} from '{projectName}'.",
+                $"Read {properties.Count} project propert{(properties.Count == 1 ? "y" : "ies")} from '{projectName}'{(requestedNameArray.Length > 0 && filteredProperties.Count < requestedNameArray.Length ? $" ({requestedNameArray.Length - filteredProperties.Count} requested name(s) not found)" : string.Empty)}.",
                 new JObject
                 {
                     ["project"] = projectName,
                     [UniqueNamePropertyName] = uniqueName,
                     ["count"] = properties.Count,
                     ["properties"] = properties,
-                    ["missing"] = new JArray(),
+                    ["missing"] = new JArray(requestedNameArray.Length == 0
+                        ? []
+                        : requestedNameArray.Where(n => !filteredProperties.Any(p => string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase))).ToArray()),
                 });
         }
 
@@ -119,7 +121,7 @@ internal static partial class SolutionProjectCommands
             {
                 throw new CommandErrorException(
                     UnsupportedProjectTypeCode,
-                    $"Project '{project.Name}' does not expose configurations.",
+                    $"Project '{project.Name}' does not expose build configurations. This project type does not support configuration management. Call list_projects to choose a project with a .csproj or .vbproj extension.",
                     new { exception = ex.Message });
             }
 
@@ -127,7 +129,7 @@ internal static partial class SolutionProjectCommands
             {
                 throw new CommandErrorException(
                     UnsupportedProjectTypeCode,
-                    $"Project '{project.Name}' does not expose configurations.");
+                    $"Project '{project.Name}' does not expose build configurations. This project type does not support configuration management. Call list_projects to choose a project with a .csproj or .vbproj extension.");
             }
 
             Configuration? activeConfiguration = null;

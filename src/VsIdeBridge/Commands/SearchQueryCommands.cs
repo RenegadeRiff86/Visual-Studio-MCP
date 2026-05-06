@@ -49,7 +49,7 @@ internal static partial class SearchNavigationCommands
             }
             catch (JsonException ex)
             {
-                throw new CommandErrorException(InvalidJsonErrorCode, $"Failed to parse --queries JSON: {ex.Message}");
+                throw new CommandErrorException(InvalidJsonErrorCode, $"The queries parameter could not be parsed as JSON: {ex.Message}. Pass a JSON array of strings, e.g. [\"MyClass\", \"MyMethod\"]. Check for trailing commas, unescaped characters, or single quotes.");
             }
 
             string[] queries =
@@ -59,7 +59,7 @@ internal static partial class SearchNavigationCommands
                 .Select(item => item!.Trim())];
             if (queries.Length == 0)
             {
-                throw new CommandErrorException("invalid_arguments", "Missing required argument --queries with at least one query string.");
+                throw new CommandErrorException("invalid_arguments", "The queries parameter must be a JSON array containing at least one non-empty string, e.g. [\"MyClass\", \"MyMethod\"].");
             }
 
             string scope = args.GetEnum("scope", SolutionScope, SolutionScope, ProjectScope, DocumentScope, OpenScope);

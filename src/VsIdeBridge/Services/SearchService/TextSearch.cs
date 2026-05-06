@@ -158,7 +158,21 @@ internal sealed partial class SearchService
             return snapshots;
         }
 
-        foreach (Document document in dte.Documents)
+        // Snapshot dte.Documents into a list first. Iterating the COM collection directly can
+        // throw from MoveNext() for certain document types in VS 18+ (.slnx), identical to the
+        // dte.Solution.Projects enumerator problem fixed in EnumerateSolutionFiles.
+        List<Document> documents = [];
+        try
+        {
+            foreach (Document document in dte.Documents)
+                if (document is not null) documents.Add(document);
+        }
+        catch (COMException ex)
+        {
+            TraceSearchFailure(nameof(CaptureOpenDocumentSnapshots), ex);
+        }
+
+        foreach (Document document in documents)
         {
             try
             {

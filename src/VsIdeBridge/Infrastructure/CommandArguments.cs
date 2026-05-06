@@ -10,6 +10,12 @@ internal sealed class CommandArguments(Dictionary<string, List<string>> values)
     private const string InvalidArgumentsCode = "invalid_arguments";
     private readonly Dictionary<string, List<string>> _values = values;
 
+    public string? ToolName { get; set; }
+
+    private string ToolHint => ToolName is null
+        ? string.Empty
+        : $" Call tool_help with {ToolName} to see all parameters and examples.";
+
     public string? GetString(string name, string? defaultValue = null)
     {
         return _values.TryGetValue(name, out List<string>? values) && values.Count > 0
@@ -27,7 +33,7 @@ internal sealed class CommandArguments(Dictionary<string, List<string>> values)
         string? value = GetString(name);
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new CommandErrorException(InvalidArgumentsCode, $"Missing required argument --{name}.");
+            throw new CommandErrorException(InvalidArgumentsCode, $"Missing required argument --{name}.{ToolHint}");
         }
 
         return value!;
@@ -43,7 +49,7 @@ internal sealed class CommandArguments(Dictionary<string, List<string>> values)
 
         if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value))
         {
-            throw new CommandErrorException(InvalidArgumentsCode, $"Argument --{name} must be an integer.");
+            throw new CommandErrorException(InvalidArgumentsCode, $"Argument --{name} must be an integer.{ToolHint}");
         }
 
         return value;
@@ -59,7 +65,7 @@ internal sealed class CommandArguments(Dictionary<string, List<string>> values)
 
         if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value))
         {
-            throw new CommandErrorException(InvalidArgumentsCode, $"Argument --{name} must be an integer.");
+            throw new CommandErrorException(InvalidArgumentsCode, $"Argument --{name} must be an integer.{ToolHint}");
         }
 
         return value;
@@ -78,7 +84,7 @@ internal sealed class CommandArguments(Dictionary<string, List<string>> values)
             return value;
         }
 
-        throw new CommandErrorException(InvalidArgumentsCode, $"Argument --{name} must be true or false.");
+        throw new CommandErrorException(InvalidArgumentsCode, $"Argument --{name} must be true or false.{ToolHint}");
     }
 
     public string GetEnum(string name, string defaultValue, params string[] allowedValues)
@@ -86,7 +92,7 @@ internal sealed class CommandArguments(Dictionary<string, List<string>> values)
         string value = GetString(name, defaultValue) ?? defaultValue;
         if (!allowedValues.Contains(value, StringComparer.OrdinalIgnoreCase))
         {
-            throw new CommandErrorException(InvalidArgumentsCode, $"Argument --{name} must be one of: {string.Join(", ", allowedValues)}.");
+            throw new CommandErrorException(InvalidArgumentsCode, $"Argument --{name} must be one of: {string.Join(", ", allowedValues)}.{ToolHint}");
         }
 
         return value.ToLowerInvariant();

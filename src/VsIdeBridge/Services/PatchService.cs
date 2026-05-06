@@ -45,7 +45,7 @@ internal sealed partial class PatchService
             patchSource = PathNormalization.NormalizeFilePath(patchFilePath);
             if (!File.Exists(patchSource))
             {
-                throw new CommandErrorException("document_not_found", $"Patch file not found: {patchSource}");
+                throw new CommandErrorException("document_not_found", $"Patch file not found: {patchSource}. Verify the path exists on disk and retry with the correct absolute path, or omit --patch-file and use --patch-text-base64 to pass the patch inline.");
             }
 
             patchText = File.ReadAllText(patchSource);
@@ -77,7 +77,7 @@ internal sealed partial class PatchService
                 EnsureSafeToModifyOpenDocument(dte, paths.TargetPath);
                 if (File.Exists(paths.TargetPath))
                 {
-                    throw new CommandErrorException("unsupported_operation", $"Patch move target already exists: {paths.TargetPath}");
+                    throw new CommandErrorException("unsupported_operation", $"Patch move target already exists: {paths.TargetPath}. Delete or rename the existing file first, or change the *** Move to: path in the patch to a location that does not exist.");
                 }
             }
 
@@ -103,7 +103,7 @@ internal sealed partial class PatchService
                         alreadySatisfied = true;
                         break;
                     default:
-                        throw new CommandErrorException("unsupported_operation", $"Patch add target already exists with different content: {paths.TargetPath}");
+                        throw new CommandErrorException("unsupported_operation", $"Patch add target already exists with different content: {paths.TargetPath}. Use *** Update File: instead of *** Add File: in the patch header to modify an existing file.");
                 }
             }
             else

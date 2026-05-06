@@ -263,13 +263,13 @@ internal static partial class SolutionProjectCommands
         ThreadHelper.ThrowIfNotOnUIThread();
         if (string.IsNullOrWhiteSpace(project.FullName))
         {
-            throw new CommandErrorException(UnsupportedProjectTypeCode, $"Project '{project.Name}' does not expose a project file path.");
+            throw new CommandErrorException(UnsupportedProjectTypeCode, $"Project '{project.Name}' does not have a project file on disk (e.g. it may be a solution folder). Call list_projects to see all projects and choose one with a .csproj or .vbproj file.");
         }
 
         string projectPath = PathNormalization.NormalizeFilePath(project.FullName);
         if (!File.Exists(projectPath))
         {
-            throw new CommandErrorException("project_file_not_found", $"Project file not found: {projectPath}");
+            throw new CommandErrorException("project_file_not_found", $"Project file not found: {projectPath}. The project may have been moved or deleted. Call find_files to locate the project file on disk.");
         }
 
         XDocument document;
@@ -281,21 +281,21 @@ internal static partial class SolutionProjectCommands
         {
             throw new CommandErrorException(
                 "project_file_read_failed",
-                $"Project file could not be read: {projectPath}",
+                $"Project file could not be read: {projectPath}. Verify the file is not locked by another process and retry.",
                 new { exception = ex.Message });
         }
         catch (UnauthorizedAccessException ex)
         {
             throw new CommandErrorException(
                 "project_file_read_failed",
-                $"Project file could not be read: {projectPath}",
+                $"Access denied reading project file: {projectPath}. Check file permissions and retry.",
                 new { exception = ex.Message });
         }
         catch (XmlException ex)
         {
             throw new CommandErrorException(
                 "project_file_read_failed",
-                $"Project file could not be read: {projectPath}",
+                $"Project file is not valid XML: {projectPath}. The file may be corrupt — verify its contents manually.",
                 new { exception = ex.Message });
         }
 

@@ -54,7 +54,7 @@ internal static partial class ToolCatalog
                     OptBool("reveal_in_editor", "Reveal slice in editor (default true).")))
                 .WithSearchHints(BuildSearchHints(
                     workflow: [("apply_diff", "Apply targeted edits to the file"), ("file_outline", "Get symbol structure of the file")],
-                    related: [("read_file_batch", "Read multiple slices or files in one call — pass start_line/end_line per range"), ("file_outline", "Get symbol line numbers first, then re-call read_file with start_line/end_line to read only that slice"), ("find_text", "Search for text to locate the right line before slicing")])),
+                     related: [("read_file_batch", "Read multiple slices in one call — per range: start_line+end_line for a fixed range, or line+context_before+context_after for an anchor"), ("file_outline", "Get symbol line numbers first, then re-call read_file with start_line/end_line to read only that slice"), ("find_text", "Search for text to locate the right line before slicing")])),
             "document-slice",
             a => Build(
                 ("file", OptionalString(a, "file")),
@@ -112,7 +112,11 @@ internal static partial class ToolCatalog
         bool success = (response["Success"] ?? response["success"])?.GetValue<bool>() ?? false;
         if (success && response["Data"] is JsonObject data)
         {
-            ReadSlice.FromJsonObject(data);
+            // Strip the lines array (each line as a {line, text} object) — it duplicates
+            // the preformatted text field and balloons the structured content for large slices.
+            // Also remove queue (pipe scheduling metadata), which is never useful to callers.
+            data.Remove("lines");
+            data.Remove("queue");
         }
 
         return response;
@@ -128,6 +132,11 @@ internal static partial class ToolCatalog
 
         ReadQueryOptions options = ReadQueryOptions.FromJsonObject(args, DefaultReadChunkSize);
         response["Data"] = collection.ToJsonObject(options, data);
+
+        // Replace the compact "Captured N slice(s)." summary with the actual slice content
+        // so Claude can read the code directly from the tool result text.
+        response["Summary"] = collection.BuildPageSummary(options);
+
         return response;
     }
 

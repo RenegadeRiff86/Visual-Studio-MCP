@@ -179,7 +179,7 @@ internal sealed partial class PatchService
             {
                 if (currentBlock?.Lines.Count > 0)
                 {
-                    blocks.Add(currentBlock);
+                    blocks.Add(NormalizeSearchBlock(currentBlock));
                     currentBlock = null;
                 }
 
@@ -219,7 +219,7 @@ internal sealed partial class PatchService
 
         if (currentBlock?.Lines.Count > 0)
         {
-            blocks.Add(currentBlock);
+            blocks.Add(NormalizeSearchBlock(currentBlock));
         }
 
         if (blocks.Count > 0 && hunks.Count > 0)
@@ -260,6 +260,41 @@ internal sealed partial class PatchService
         }
 
         return hunk;
+    }
+
+    /// <summary>
+    /// Normalizes a search block by collapsing the common "duplicate context+deletion"
+    /// formatting error: when a context line (' ') is followed (through any '+' additions)
+    /// by a deletion ('-') of identical text, the context line is redundant — it would
+    /// force the matcher to find two consecutive identical lines in the file, which fails
+    /// when only one exists. Removing it leaves '-' old / '+' new, which matches and
+    /// applies correctly.
+    /// </summary>
+    private static SearchBlock NormalizeSearchBlock(SearchBlock block)
+    {
+        List<HunkLine> lines = block.Lines;
+        List<HunkLine>? normalized = null;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            HunkLine current = lines[i];
+            if (current.Kind == ' ')
+            {
+                // Scan forward past any '+' additions to find a '-' deletion.
+                int j = i + 1;
+                while (j < lines.Count && lines[j].Kind == '+') j++;
+                if (j < lines.Count && lines[j].Kind == '-'
+                    && string.Equals(lines[j].Text, current.Text, StringComparison.Ordinal))
+                {
+                    // The context line is a duplicate of the following deletion — skip it.
+                    normalized ??= [.. lines.Take(i)];
+                    continue;
+                }
+            }
+            normalized?.Add(current);
+        }
+        if (normalized is null)
+            return block;
+        return new SearchBlock { Header = block.Header, Lines = normalized };
     }
 
     private static string ParseEditorPatchPath(string line, string prefix)

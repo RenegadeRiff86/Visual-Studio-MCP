@@ -23,18 +23,21 @@ internal static partial class SolutionProjectCommands
     private static readonly string[] PreferredOutputExtensions = [".vsix", ".exe", ".dll", ".winmd"];
 
     // Data class for extracted project item info (no COM dependencies)
-    private sealed class ProjectItemData(string name, string[] paths, bool isFolder)
+    private sealed class ProjectItemData(string name, string[] paths, bool isFolder, string kind, string? itemType, string? subType)
     {
         public string Name { get; } = name;
         public string[] Paths { get; } = paths;
         public bool IsFolder { get; } = isFolder;
+        public string Kind { get; } = kind;
+        public string? ItemType { get; } = itemType;
+        public string? SubType { get; } = subType;
     }
 
     private static void EnsureSolutionOpen(DTE2 dte)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
         if (dte.Solution?.IsOpen != true)
-            throw new CommandErrorException(SolutionNotOpenCode, "No solution is open.");
+            throw new CommandErrorException(SolutionNotOpenCode, "No solution is open in Visual Studio. Call open_solution with a .sln or .slnx path to open one, or call bind_solution if a solution is already loaded in a different VS instance.");
     }
 
     private static Project? FindProject(DTE2 dte, string query)
@@ -53,7 +56,7 @@ internal static partial class SolutionProjectCommands
     }
 
     private static CommandErrorException CreateProjectNotFound(string projectQuery)
-        => new(ProjectNotFoundCode, $"Project not found: {projectQuery}");
+        => new(ProjectNotFoundCode, $"Project '{projectQuery}' was not found in the solution. Call list_projects to see all project names, then retry with the exact name or path.");
 
     private static IEnumerable<Project> EnumerateAllProjects(DTE2 dte)
     {
@@ -199,7 +202,10 @@ internal static partial class SolutionProjectCommands
                 continue;
             }
 
-            yield return new ProjectItemData(item.Name, paths, item.FileCount == 0);
+            string kind = item.Kind ?? string.Empty;
+            string? itemType = TryGetPropertyString(item.Properties, "ItemType");
+            string? subType = TryGetPropertyString(item.Properties, "SubType");
+            yield return new ProjectItemData(item.Name, paths, item.FileCount == 0, kind, itemType, subType);
         }
     }
 
@@ -281,14 +287,17 @@ internal static partial class SolutionProjectCommands
 
     private static JObject ProjectItemToJsonFromData(ProjectItemData data)
     {
+        string? primaryPath = data.Paths.FirstOrDefault();
         return new JObject
         {
             ["name"] = data.Name,
-            ["path"] = data.Paths.FirstOrDefault(),
+            ["path"] = primaryPath,
             ["paths"] = new JArray(data.Paths),
-            ["kind"] = string.Empty,
-            ["itemType"] = string.Empty,
-            ["subType"] = string.Empty,
+            ["isFolder"] = data.IsFolder,
+            ["extension"] = data.IsFolder ? string.Empty : Path.GetExtension(primaryPath ?? string.Empty).ToLowerInvariant(),
+            ["kind"] = data.Kind,
+            ["itemType"] = data.ItemType ?? string.Empty,
+            ["subType"] = data.SubType ?? string.Empty,
             ["fileCount"] = data.IsFolder ? 0 : data.Paths.Length,
         };
     }

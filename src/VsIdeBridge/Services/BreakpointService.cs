@@ -121,7 +121,7 @@ internal sealed class BreakpointService
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
         string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
-        Breakpoint bp = FindBreakpoint(dte, normalizedPath, line) ?? throw new CommandErrorException("not_found", $"No breakpoint found at {normalizedPath}:{line}");
+        Breakpoint bp = FindBreakpoint(dte, normalizedPath, line) ?? throw new CommandErrorException("not_found", $"No breakpoint found at {normalizedPath}:{line}. Call list_breakpoints to see all active breakpoints, then retry with a valid file path and line number.");
         bp.Enabled = true;
         return SerializeBreakpoint(bp, normalizedPath, line);
     }
@@ -131,7 +131,7 @@ internal sealed class BreakpointService
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
         string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
-        Breakpoint bp = FindBreakpoint(dte, normalizedPath, line) ?? throw new CommandErrorException("not_found", $"No breakpoint found at {normalizedPath}:{line}");
+        Breakpoint bp = FindBreakpoint(dte, normalizedPath, line) ?? throw new CommandErrorException("not_found", $"No breakpoint found at {normalizedPath}:{line}. Call list_breakpoints to see all active breakpoints, then retry with a valid file path and line number.");
         bp.Enabled = false;
         return SerializeBreakpoint(bp, normalizedPath, line);
     }

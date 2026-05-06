@@ -97,31 +97,31 @@ internal static partial class SearchNavigationCommands
             }
             catch (JsonException ex)
             {
-                throw new CommandErrorException("invalid_json", $"Failed to parse --ranges JSON: {ex.Message}");
+                throw new CommandErrorException("invalid_json", $"The ranges parameter could not be parsed as JSON: {ex.Message}. Pass a JSON array of range objects, e.g. [{{\"file\": \"path.cs\", \"startLine\": 10, \"endLine\": 30}}]. Check for trailing commas or unescaped characters.");
             }
         }
 
         private static JArray ParseRangesFromFile(string? rangesFile)
         {
             if (string.IsNullOrWhiteSpace(rangesFile))
-                throw new CommandErrorException("invalid_arguments", "Specify either --ranges or --ranges-file.");
+                throw new CommandErrorException("invalid_arguments", "Either ranges or ranges_file is required. Pass ranges as a JSON array of range objects, or pass ranges_file as a path to a JSON file containing the ranges.");
             if (!File.Exists(rangesFile))
-                throw new CommandErrorException("file_not_found", $"Ranges file not found: {rangesFile}");
+                throw new CommandErrorException("file_not_found", $"Ranges file not found: {rangesFile}. Verify the path exists on disk and retry with the correct path.");
             try
             {
                 return JArray.Parse(File.ReadAllText(rangesFile!));
             }
             catch (IOException ex)
             {
-                throw new CommandErrorException("invalid_json", $"Failed to parse ranges file: {ex.Message}");
+                throw new CommandErrorException("file_not_found", $"Could not read ranges file: {ex.Message}. Verify the file exists and is accessible.");
             }
             catch (UnauthorizedAccessException ex)
             {
-                throw new CommandErrorException("invalid_json", $"Failed to parse ranges file: {ex.Message}");
+                throw new CommandErrorException("file_not_found", $"Access denied reading ranges file: {ex.Message}. Check file permissions and retry.");
             }
             catch (JsonException ex)
             {
-                throw new CommandErrorException("invalid_json", $"Failed to parse ranges file: {ex.Message}");
+                throw new CommandErrorException("invalid_json", $"Ranges file could not be parsed as JSON: {ex.Message}. The file must contain a JSON array of range objects. Check for trailing commas or syntax errors.");
             }
         }
     }

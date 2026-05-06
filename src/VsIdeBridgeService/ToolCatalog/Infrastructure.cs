@@ -450,17 +450,18 @@ internal static class ToolResultFormatter
 
     private static string? GetErrorHint(string? code) => code switch
     {
-        "document_not_found"     => "Fix: use find_files to locate the correct path, or verify the file is part of the loaded solution.",
-        "file_not_found"         => "Fix: use find_files or glob to locate the correct file path.",
-        "project_not_found"      => "Fix: call list_projects to see all loaded projects and their names.",
-        "solution_not_open"      => "Fix: open a solution first with open_solution, or use bind_solution if one is already loaded.",
-        "invalid_arguments"      => "Fix: call tool_help with the tool name to see correct parameters and examples.",
-        "invalid_json"           => "Fix: check the argument is valid JSON — no trailing commas, unescaped characters, or mismatched brackets.",
-        "not_in_break_mode"      => "Fix: the debugger must be paused — use debug_break to pause, or set a breakpoint with set_breakpoint then debug_start.",
-        "thread_not_found"       => "Fix: call debug_threads to list available thread IDs.",
-        "dirty_diagnostics"      => "Fix: call errors or warnings to get current diagnostics before retrying.",
-        "unsupported_operation"  => "Fix: call tool_help with the tool name to check prerequisites or whether a different tool applies.",
-        "timeout"                => "Fix: the operation timed out — try again, or reduce scope (e.g. search a subdirectory instead of the full solution).",
+        "document_not_found"     => "The file path was not recognized as an open document. Call find_files with the filename to get the correct path, then retry with the resolved path.",
+        "file_not_found"         => "The file path does not exist on disk. Call find_files or glob with the filename to locate it, then retry with the resolved path.",
+        "project_not_found"      => "The project name or path was not found in the solution. Call list_projects to see the names of all loaded projects, then retry with the correct name.",
+        "solution_not_open"      => "No solution is open in Visual Studio. Call open_solution with a .sln path to open one, or call bind_solution to attach to an already-running instance.",
+        "invalid_arguments"      => "One or more required parameters were wrong or missing. Call tool_help with the tool name to see the correct parameters and an example call.",
+        "invalid_json"           => "The arguments could not be parsed as JSON. Check for trailing commas, unescaped characters, or mismatched brackets, then resubmit.",
+        "not_in_break_mode"      => "This operation requires the debugger to be paused at a breakpoint. Call debug_break to pause now, or set a breakpoint with set_breakpoint and then call debug_start to run until it hits.",
+        "thread_not_found"       => "The thread ID is not in the current thread list. Call debug_threads to see all active thread IDs, then retry with a valid ID.",
+        "dirty_diagnostics"      => "The diagnostics snapshot is stale. Call errors or warnings to get the current Error List state, then retry.",
+        "unsupported_operation"  => "This operation is not supported in the current context. Call tool_help with the tool name to check prerequisites, or look for a different tool that covers your use case.",
+        "timeout"                => "The operation timed out before it could complete. Try again, or narrow the scope — for example search a single subdirectory instead of the whole solution.",
+        "unknown_command"        => "The command name was not recognized. Call list_tools to see every registered tool, list_tool_categories to browse by group, or recommend_tools with a description of your task to get a suggestion.",
         _                        => null,
     };
 

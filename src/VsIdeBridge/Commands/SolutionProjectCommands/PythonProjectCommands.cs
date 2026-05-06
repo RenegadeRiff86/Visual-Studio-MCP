@@ -53,7 +53,7 @@ internal static partial class SolutionProjectCommands
             {
                 throw new CommandErrorException(
                     UnsupportedProjectTypeCode,
-                    "Multiple Python projects are open. Specify --project.");
+                    "Multiple Python projects are open. Call list_projects to see all Python projects by name, then pass the exact project name using the project parameter.");
             }
 
             onlyPythonProject = project;
@@ -62,7 +62,7 @@ internal static partial class SolutionProjectCommands
         return onlyPythonProject
             ?? throw new CommandErrorException(
                 ProjectNotFoundCode,
-                "No Python project is open. Specify --project with a .pyproj project.");
+                "No Python project is open in the solution. Call list_projects to verify a .pyproj project is loaded, then pass the project name using the project parameter.");
     }
 
     private static void EnsurePythonProject(Project project, string projectQuery)
@@ -72,7 +72,7 @@ internal static partial class SolutionProjectCommands
         {
             throw new CommandErrorException(
                 UnsupportedProjectTypeCode,
-                $"Project '{projectQuery}' is not a Python project.");
+                $"Project '{projectQuery}' is not a Python project. Call list_projects to see all projects in the solution — Python projects have the .pyproj extension.");
         }
     }
 
@@ -92,7 +92,7 @@ internal static partial class SolutionProjectCommands
         {
             throw new CommandErrorException(
                 FileNotFoundCode,
-                $"Project file not found: {projectPath ?? "<unknown>"}");
+                $"Project file not found: {projectPath ?? "<unknown>"}. Call find_files to locate the .pyproj file, then retry with the resolved path.");
         }
 
         return PathNormalization.NormalizeFilePath(projectPath);
@@ -183,7 +183,7 @@ internal static partial class SolutionProjectCommands
     {
         XDocument document = XDocument.Load(projectPath, LoadOptions.PreserveWhitespace);
         XElement root = document.Root
-            ?? throw new CommandErrorException("invalid_project", $"Project file is missing a root element: {projectPath}");
+            ?? throw new CommandErrorException("invalid_project", $"The project file at '{projectPath}' is malformed — it must be a valid XML file with a root element. Verify the file is not corrupt or empty.");
         XNamespace xmlNamespace = root.Name.Namespace;
 
         XElement? targetPropertyGroup = null;
@@ -258,7 +258,7 @@ internal static partial class SolutionProjectCommands
             string? projectQuery = args.GetString("project");
             if (!File.Exists(interpreterPath))
             {
-                throw new CommandErrorException(FileNotFoundCode, $"Interpreter path not found: {interpreterPath}");
+                throw new CommandErrorException(FileNotFoundCode, $"Interpreter path not found: {interpreterPath}. Verify the path points to a valid Python executable on disk, then retry with the correct path.");
             }
 
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -295,7 +295,7 @@ internal static partial class SolutionProjectCommands
             string? projectQuery = args.GetString("project");
             if (!File.Exists(requestedFilePath))
             {
-                throw new CommandErrorException(FileNotFoundCode, $"Startup file not found: {requestedFilePath}");
+                throw new CommandErrorException(FileNotFoundCode, $"Startup file not found: {requestedFilePath}. Call find_files to locate the Python file, then retry with the resolved path.");
             }
 
             (string projectName, string uniqueName, string projectPath, string startupFileValue) =
@@ -370,7 +370,7 @@ internal static partial class SolutionProjectCommands
             {
                 throw new CommandErrorException(
                     "startup_file_not_set",
-                    $"No startup file is configured for Python project '{project.Name}'.");
+                    $"No startup file is configured for Python project '{project.Name}'. Call python_set_startup_file to configure a startup file for this project first.");
             }
 
             return (project.Name, project.UniqueName, projectPath, startupFileValue!);

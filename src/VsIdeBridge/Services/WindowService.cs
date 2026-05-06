@@ -114,7 +114,7 @@ internal sealed class WindowService
         IntPtr windowHandle = GetVsMainWindowHandle(dte);
         if (windowHandle == IntPtr.Zero)
         {
-            throw new CommandErrorException("window_not_found", "Could not resolve the Visual Studio main window handle.");
+            throw new CommandErrorException("window_not_found", "Could not resolve the Visual Studio main window handle. Ensure VS is running and not minimized or hidden, then retry.");
         }
 
         string caption = GetWindowCaptionSafe(dte.MainWindow);
@@ -173,7 +173,7 @@ internal sealed class WindowService
             return window;
         }
 
-        throw new CommandErrorException("window_not_found", $"Window not found: {query}");
+        throw new CommandErrorException("window_not_found", $"Window not found: '{query}'. Call list_windows to see all available VS window titles, then retry with the exact title.");
     }
 
     private static Window? TryResolveWindow(DTE2 dte, string query, bool allowContains)

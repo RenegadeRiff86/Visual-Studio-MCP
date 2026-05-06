@@ -38,7 +38,7 @@ internal sealed class OutputWindowService
         IReadOnlyList<OutputPaneSnapshot> panes = CaptureOutputPanes(outputWindow);
         if (panes.Count == 0)
         {
-            throw new CommandErrorException("output_pane_not_found", "Visual Studio has no Output window panes to read.");
+            throw new CommandErrorException("output_pane_not_found", "Visual Studio has no Output window panes to read. Trigger a build, run, or debug session first to populate the Output window, then retry.");
         }
 
         OutputWindowPane pane = SelectPane(outputWindow, panes, requestedPane);

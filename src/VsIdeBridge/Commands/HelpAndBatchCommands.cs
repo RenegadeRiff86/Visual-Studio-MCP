@@ -57,7 +57,7 @@ internal static partial class IdeCoreCommands
         }
         catch (JsonException ex)
         {
-            throw new CommandErrorException("invalid_json", $"Failed to parse {sourceDescription}: {ex.Message}");
+            throw new CommandErrorException("invalid_json", $"Failed to parse {sourceDescription}: {ex.Message}. Check for trailing commas, unescaped strings, or other JSON syntax errors, then resubmit.");
         }
     }
 
@@ -72,12 +72,12 @@ internal static partial class IdeCoreCommands
         string? batchFile = args.GetString("batch-file");
         if (string.IsNullOrWhiteSpace(batchFile))
         {
-            throw new CommandErrorException("invalid_arguments", "Missing required argument --steps or --batch-file.");
+            throw new CommandErrorException("invalid_arguments", "Either steps or batch_file is required. Pass steps as a JSON array of command objects, or pass batch_file as a path to a JSON file containing the batch steps.");
         }
 
         if (!File.Exists(batchFile))
         {
-            throw new CommandErrorException("file_not_found", $"Batch file not found: {batchFile}");
+            throw new CommandErrorException("file_not_found", $"Batch file not found: {batchFile}. Verify the path exists on disk and retry with the correct path.");
         }
 
         return ParseBatchSteps(File.ReadAllText(batchFile), "batch file");

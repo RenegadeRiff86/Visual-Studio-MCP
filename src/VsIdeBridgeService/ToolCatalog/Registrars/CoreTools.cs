@@ -12,6 +12,7 @@ internal static partial class ToolCatalog
     private const string BindSolutionToolName = "bind_solution";
     private const int DefaultBatchChunkSize = 10;
     private const string ListInstancesToolName = "list_instances";
+    private const string RecommendToolsToolName = "recommend_tools";
     private const string VsStateToolName = "vs_state";
     private const string WaitForReadyToolName = "wait_for_ready";
 
@@ -23,10 +24,13 @@ internal static partial class ToolCatalog
     private static IEnumerable<ToolEntry> CoreBindingTools()
     {
         yield return new("bridge_health",
-            "Get binding health, discovery source, and last round-trip metrics.",
+            "Get binding health, discovery source, and last round-trip metrics. " +
+            "Response includes a toolDiscovery hint — call list_tool_categories, list_tools, " +
+            "list_tools_by_category, or recommend_tools to explore all available bridge capabilities.",
             EmptySchema(), Core,
             (id, _, bridge) => BridgeHealthAsync(id, bridge),
             searchHints: BuildSearchHints(
+                workflow: [("list_tool_categories", "Discover available tool groups"), (RecommendToolsToolName, "Find the right tool for a task")],
                 related: [(VsStateToolName, "Check current IDE state"), (ListInstancesToolName, "Find all bridge instances")]));
 
         yield return CreateBatchTool();
@@ -389,7 +393,7 @@ internal static partial class ToolCatalog
         yield return new(
             ToolDefinitionCatalog.ListTools(EmptySchema())
                 .WithSearchHints(BuildSearchHints(
-                    workflow: [("list_tools_by_category", "Get a focused list of tools for a specific category"), ("recommend_tools", "Get personalized tool recommendations for a task")],
+                    workflow: [("list_tools_by_category", "Get a focused list of tools for a specific category"), (RecommendToolsToolName, "Get personalized tool recommendations for a task")],
                     related: [("tool_help", "Get detailed help for a specific tool")])),
             (_, _, _) =>
             {
@@ -402,7 +406,7 @@ internal static partial class ToolCatalog
             ToolDefinitionCatalog.ListToolCategories(EmptySchema())
                 .WithSearchHints(BuildSearchHints(
                     workflow: [("list_tools_by_category", "Get tools for a specific category")],
-                    related: [("list_tools", "List all tools at once"), ("recommend_tools", "Get recommendations for a task")])),
+                    related: [("list_tools", "List all tools at once"), (RecommendToolsToolName, "Get recommendations for a task")])),
             (_, _, _) =>
             {
                 JsonObject categories = DefinitionRegistry.Value.BuildCategoryList();
@@ -416,7 +420,7 @@ internal static partial class ToolCatalog
                 ObjectSchema(Req(CategoryName, "Category name.")))
                 .WithSearchHints(BuildSearchHints(
                     workflow: [("tool_help", "Get detailed help for a tool from this category")],
-                    related: [("list_tools", "List all tools"), ("recommend_tools", "Get recommendations for a specific task")])),
+                    related: [("list_tools", "List all tools"), (RecommendToolsToolName, "Get recommendations for a specific task")])),
             (_, args, _) =>
             {
                 JsonObject toolsByCategory = DefinitionRegistry.Value.BuildToolsByCategory(
@@ -445,7 +449,7 @@ internal static partial class ToolCatalog
                     Opt("name", "Optional tool name for focused help."),
                     Opt(CategoryName, "Optional category name.")))
                 .WithSearchHints(BuildSearchHints(
-                    related: [("list_tools_by_category", "Browse tools by category"), ("recommend_tools", "Get recommendations for a task")])),
+                    related: [("list_tools_by_category", "Browse tools by category"), (RecommendToolsToolName, "Get recommendations for a task")])),
             (_, args, _) =>
             {
                 JsonObject help = DefinitionRegistry.Value.BuildToolHelp(

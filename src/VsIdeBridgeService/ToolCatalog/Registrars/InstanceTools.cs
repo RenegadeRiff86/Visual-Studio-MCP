@@ -63,6 +63,11 @@ internal static partial class ToolCatalog
             ["bound"] = instance is not null,
             ["visibleInstanceCount"] = visibleInstances.Count,
             ["visibleInstances"] = visibleInstanceItems,
+            ["toolDiscovery"] = new JsonObject
+            {
+                ["hint"] = "Call list_tool_categories to see all tool groups, list_tools to browse every tool, list_tools_by_category for focused browsing, or recommend_tools for task-based discovery.",
+                ["tools"] = new JsonArray { "list_tools", "list_tool_categories", "list_tools_by_category", "recommend_tools" },
+            },
         };
 
         if (instance is not null)

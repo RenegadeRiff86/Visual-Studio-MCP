@@ -98,7 +98,7 @@ internal static partial class SolutionProjectCommands
             string projectPath = PathNormalization.NormalizeFilePath(args.GetRequiredString("project"));
             if (!File.Exists(projectPath))
             {
-                throw new CommandErrorException(FileNotFoundCode, $"Project file not found: {projectPath}");
+                throw new CommandErrorException(FileNotFoundCode, $"Project file not found: {projectPath}. Call find_files to locate the correct .csproj or .vbproj path, then retry with the resolved path.");
             }
 
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -248,7 +248,7 @@ internal static partial class SolutionProjectCommands
             EnsureSolutionOpen(context.Dte);
 
             Project project = FindProject(context.Dte, projectQuery)
-                ?? throw new CommandErrorException(ProjectNotFoundCode, $"Project not found: {projectQuery}");
+                ?? throw new CommandErrorException(ProjectNotFoundCode, $"Project '{projectQuery}' was not found in the solution. Call list_projects to see all project names, then retry with the exact name or path.");
 
             string projectName = project.Name;
             context.Dte.Solution.Remove(project);
@@ -271,7 +271,7 @@ internal static partial class SolutionProjectCommands
             EnsureSolutionOpen(context.Dte);
 
             Project project = FindProject(context.Dte, projectQuery)
-                ?? throw new CommandErrorException(ProjectNotFoundCode, $"Project not found: {projectQuery}");
+                ?? throw new CommandErrorException(ProjectNotFoundCode, $"Project '{projectQuery}' was not found in the solution. Call list_projects to see all project names, then retry with the exact name or path.");
 
             context.Dte.Solution.SolutionBuild.StartupProjects = project.UniqueName;
 
@@ -296,7 +296,7 @@ internal static partial class SolutionProjectCommands
             string newName = args.GetRequiredString("new-name").Trim();
             if (string.IsNullOrWhiteSpace(newName))
             {
-                throw new CommandErrorException("invalid_name", "Project name cannot be empty.");
+                throw new CommandErrorException("invalid_name", "The new-name parameter cannot be empty. Pass a non-empty project name.");
             }
 
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -327,7 +327,7 @@ internal static partial class SolutionProjectCommands
             {
                 throw new CommandErrorException(
                     "rename_failed",
-                    $"Could not rename project '{oldName}' to '{newName}': {ex.Message}");
+                    $"Could not rename project '{oldName}' to '{newName}': {ex.Message}. This usually means a file system lock — close any open files in the project and retry.");
             }
 
             return new CommandExecutionResult(
@@ -353,7 +353,7 @@ internal static partial class SolutionProjectCommands
             string projectQuery = args.GetRequiredString("project");
             if (!File.Exists(filePath))
             {
-                throw new CommandErrorException(FileNotFoundCode, $"File not found: {filePath}");
+                throw new CommandErrorException(FileNotFoundCode, $"File not found: {filePath}. Call find_files to locate the correct path, then retry with the resolved path.");
             }
 
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
@@ -390,7 +390,7 @@ internal static partial class SolutionProjectCommands
                 ?? throw CreateProjectNotFound(projectQuery);
 
             ProjectItem projectItem = FindProjectItem(project.ProjectItems, fileQuery)
-                ?? throw new CommandErrorException(FileNotFoundCode, $"File '{fileQuery}' not found in project '{project.Name}'.");
+                ?? throw new CommandErrorException(FileNotFoundCode, $"File '{fileQuery}' was not found in project '{project.Name}'. Call query_project_items with the project name to list all files in the project, then retry with the exact file name.");
 
             string fileName = projectItem.Name;
             projectItem.Remove();

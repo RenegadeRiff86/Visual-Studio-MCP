@@ -305,13 +305,16 @@ internal sealed partial class PatchService
             : $"editor patch block '{block.Header}'";
         string firstMatchLine = matchLines.Length > 0 ? Truncate(matchLines[0], 60) : "(empty)";
         string bestMatchHint = errorBestCandidate >= 0
-            ? $" Best partial match at line {errorBestCandidate + 1} ({errorBestScore}/{matchLines.Length} lines matched)."
-            : string.Empty;
+            ? $" The closest match was at line {errorBestCandidate + 1} but only {errorBestScore} of {matchLines.Length} context lines agreed."
+            : " No candidate position matched any context line.";
         throw new CommandErrorException(
             InvalidArgumentsCode,
-            $"Could not locate {descriptor} in {path} (searched from line {sourceIndex + 1}).{bestMatchHint} " +
-            $"First context line: \"{firstMatchLine}\". " +
-            "Fix: call read_file to verify the context lines exist in the file, then regenerate the patch with correct content. " +
+            $"apply_diff failed: the @@ context block was not found in {path}. " +
+            $"The patch was looking for a block starting with \"{firstMatchLine}\".{bestMatchHint} " +
+            "To fix this: (1) Call read_file on this file to see the current content. " +
+            "(2) Copy the exact lines you want to change from the read_file output — do not retype or paraphrase them. " +
+            "(3) Build a new @@ block using those exact lines as context, with - for deletions and + for additions. " +
+            "(4) Resubmit apply_diff with the corrected patch." +
             BuildBackwardSearchHint(existingLines, sourceIndex, maxStart, matchLines),
             new
             {
@@ -382,8 +385,8 @@ internal sealed partial class PatchService
             return string.Empty;
         }
 
-        return $"The same context exists earlier at line {consumedMatchLine + 1}, before the current search cursor. " +
-               "This usually means a previous @@ block already consumed those lines. Fix: combine related @@ blocks, or use a pure anchor block followed by a change block that does not rely on already-consumed context.";
+        return $" Those same lines already appeared at line {consumedMatchLine + 1} and were consumed by an earlier @@ block in this patch. " +
+               "Merge the related @@ blocks into one, or write the second block with context lines that come after the first block's changes.";
     }
 
     private static (int BestCandidate, int BestScore) FindBestAnchorMatch(
@@ -533,10 +536,10 @@ internal sealed partial class PatchService
         if (index >= existingLines.Count)
         {
             throw new CommandErrorException(InvalidArgumentsCode,
-                $"Patch {operation} at line {index + 1} exceeded file length ({existingLines.Count} lines) in {path}. " +
-                "The line numbers in your patch do not match the file. " +
-                "Fix: call read_file to check actual line numbers, then regenerate. " +
-                "Tip: use editor patch format (*** Begin Patch) which matches by content instead of line numbers.");
+                $"apply_diff failed: the patch references line {index + 1} but {path} only has {existingLines.Count} lines. " +
+                "Your hunk line numbers are off — likely because a prior hunk added or removed lines and the numbers were not adjusted. " +
+                "Call read_file on this file, copy the exact lines you want to change, and resubmit the patch. " +
+                "Alternatively, switch to editor patch format (*** Begin Patch / *** Update File / @@ / -old / +new / *** End Patch), which finds lines by content and never needs line numbers.");
         }
 
         if (!LinesMatchFuzzy(existingLines[index], expected))
@@ -549,11 +552,11 @@ internal sealed partial class PatchService
 
             throw new CommandErrorException(
                 InvalidArgumentsCode,
-                $"Patch {operation} mismatch in {path} at line {index + 1}. " +
-                $"Expected: \"{Truncate(expected, 80)}\" but found: \"{Truncate(existingLines[index], 80)}\". " +
-                "This usually means line numbers drifted because a prior hunk added or removed lines. " +
-                "Fix: call read_file with a tight range around line " + (index + 1) + " to see actual content, then regenerate. " +
-                "Tip: use editor patch format (*** Begin Patch) which matches by content instead of line numbers.",
+                $"apply_diff failed: the {operation} line in your patch does not match the file. " +
+                $"Your patch says \"{Truncate(expected, 80)}\" — the file at line {index + 1} has \"{Truncate(existingLines[index], 80)}\". " +
+                "This usually means line numbers shifted because a prior hunk in this patch added or removed lines. " +
+                "Call read_file around line " + (index + 1) + " to see what is actually there, copy the exact text, and resubmit. " +
+                "Alternatively, switch to editor patch format (*** Begin Patch / *** Update File / @@ / -old / +new / *** End Patch), which matches by content and never needs line numbers.",
                 new { expected, actual = existingLines[index], line = index + 1, fileContext = context });
         }
     }

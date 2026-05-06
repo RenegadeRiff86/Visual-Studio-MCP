@@ -75,9 +75,11 @@ internal sealed partial class DocumentService
 
             Document finalDocument = window.Document ?? document;
             string finalContent = TryReadDocumentText(finalDocument) ?? ReadFileText(normalizedPath);
-            if (!string.Equals(finalContent, content, StringComparison.Ordinal))
+            if (!WriteContentMatches(content, finalContent))
             {
-                throw new CommandErrorException("write_failed", $"Document content did not match the requested text after write: {normalizedPath}");
+                throw new CommandErrorException("write_failed",
+                    $"Write verification failed for {normalizedPath}: the VS editor buffer ({finalContent.Length} chars) differs from the expected content ({content.Length} chars). " +
+                    "VS may have applied auto-formatting or normalized line endings. Check that no editor extension is reformatting on write.");
             }
 
             bool contentChanged = !string.Equals(originalContent, finalContent, StringComparison.Ordinal);
@@ -133,9 +135,11 @@ internal sealed partial class DocumentService
         string originalContent = ReadFileText(normalizedPath);
         File.WriteAllText(normalizedPath, content);
         string finalContent = ReadFileText(normalizedPath);
-        if (!string.Equals(finalContent, content, StringComparison.Ordinal))
+        if (!WriteContentMatches(content, finalContent))
         {
-            throw new CommandErrorException("write_failed", $"Document content did not match the requested text after write: {normalizedPath}");
+            throw new CommandErrorException("write_failed",
+                $"Write verification failed for {normalizedPath}: read back {finalContent.Length} chars but expected {content.Length} chars. " +
+                "This may be a file encoding issue. Verify the file is writable and that no process is locking or modifying it.");
         }
 
         IReadOnlyList<JObject> preWriteWarnings = includeBestPracticeWarnings
@@ -271,6 +275,12 @@ internal sealed partial class DocumentService
     {
         return File.Exists(path) ? File.ReadAllText(path) : string.Empty;
     }
+
+    private static bool WriteContentMatches(string written, string readBack)
+        => string.Equals(
+            written.Replace("\r\n", "\n"),
+            readBack.Replace("\r\n", "\n"),
+            StringComparison.Ordinal);
 
     private static string? TryReadDocumentText(Document? document)
     {
