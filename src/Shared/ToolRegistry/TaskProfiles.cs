@@ -38,7 +38,10 @@ public sealed partial class ToolRegistry
                 "nuget", "dotnet add", "dotnet remove", "dotnet package"),
             ContainsAny(normalizedTask,
                 "breakpoint", "debug", "debugger", "watch", "step into", "step over",
-                "step out", "stack frame", "callstack", "call stack", "locals", "exception"));
+                "step out", "stack frame", "callstack", "call stack", "locals", "exception"),
+            ContainsAny(normalizedTask,
+                "restore", "discard", "revert file", "checkout --", "git checkout --",
+                "corrupted file", "undo file"));
     }
 
     private readonly record struct TaskProfile(
@@ -53,5 +56,6 @@ public sealed partial class ToolRegistry
         bool LooksLikePythonTask,
         bool LooksLikeGitTask,
         bool LooksLikeNuGetTask,
-        bool LooksLikeDebugTask);
+        bool LooksLikeDebugTask,
+        bool LooksLikeRestoreTask);
 }

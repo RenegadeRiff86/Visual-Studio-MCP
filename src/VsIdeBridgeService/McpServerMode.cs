@@ -153,6 +153,11 @@ internal static class McpServerMode
                 ["name"]    = "vs_ide_bridge",
                 ["version"] = "0.1.0",
             },
+            ["instructions"] =
+                "VS IDE Bridge MCP server. " +
+                "Call list_tools (no parameters) to see every available tool name. " +
+                "Call tool_help with name=<tool> for the full schema and usage examples. " +
+                "If you get an unknown-tool error, call list_tools first — do not guess tool names.",
         };
     }
 

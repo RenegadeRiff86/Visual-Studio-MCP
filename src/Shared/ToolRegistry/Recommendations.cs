@@ -7,10 +7,17 @@ public sealed partial class ToolRegistry
     public JsonObject RecommendTools(string task)
     {
         TaskProfile profile = CreateTaskProfile(task);
+        List<(ToolDefinition Tool, string Reason, int Score)> selected = [.. ScoreTools(task).Take(7)];
+        if (!selected.Any(static item => string.Equals(item.Tool.Name, "list_tools", StringComparison.Ordinal))
+            && TryGet("list_tools", out ToolDefinition? listTools))
+        {
+            selected.Add((listTools, "Browse the full bridge tool surface when a needed tool is not visible", 0));
+        }
+
         JsonArray recommendations = [];
         bool includesReadFile = false;
         bool includesApplyDiff = false;
-        foreach (var (tool, reason, _) in ScoreTools(task).Take(7))
+        foreach (var (tool, reason, _) in selected)
         {
             includesReadFile |= string.Equals(tool.Name, "read_file", StringComparison.Ordinal);
             includesApplyDiff |= string.Equals(tool.Name, "apply_diff", StringComparison.Ordinal);
@@ -45,7 +52,9 @@ public sealed partial class ToolRegistry
         }
         else if (profile.LooksLikeGitTask)
         {
-            workflowHint = "For Git work, review status with git_status / git_diff_unstaged before staging with git_add and committing with git_commit.";
+            workflowHint = profile.LooksLikeRestoreTask
+                ? "For restoring files in a bound solution, review git_status or git_diff_unstaged, then use git_restore with explicit paths instead of shell git checkout -- <path>."
+                : "For Git work, review status with git_status / git_diff_unstaged before staging with git_add and committing with git_commit.";
         }
         else if (profile.LooksLikeDebugTask)
         {
@@ -58,6 +67,8 @@ public sealed partial class ToolRegistry
             ["task"] = task,
             ["count"] = recommendations.Count,
             ["workflowHint"] = workflowHint,
+            ["discoveryHint"] = "Call list_tools to browse the complete bridge tool surface when a needed tool is not visible.",
+            ["discoveryTools"] = new JsonArray { "list_tools", "list_tool_categories", "list_tools_by_category", "tool_help" },
             ["recommendations"] = recommendations,
         };
     }

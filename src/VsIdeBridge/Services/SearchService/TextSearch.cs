@@ -167,7 +167,7 @@ internal sealed partial class SearchService
             foreach (Document document in dte.Documents)
                 if (document is not null) documents.Add(document);
         }
-        catch (COMException ex)
+        catch (Exception ex) when (IsRecoverableSearchFailure(ex))
         {
             TraceSearchFailure(nameof(CaptureOpenDocumentSnapshots), ex);
         }
@@ -189,7 +189,7 @@ internal sealed partial class SearchService
                     snapshots[normalizedPath] = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
                 }
             }
-            catch (COMException ex)
+            catch (Exception ex) when (IsRecoverableSearchFailure(ex))
             {
                 TraceSearchFailure("CaptureOpenDocumentSnapshots", ex);
             }

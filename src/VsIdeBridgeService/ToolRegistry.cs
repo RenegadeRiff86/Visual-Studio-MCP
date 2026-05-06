@@ -82,15 +82,12 @@ internal sealed class ToolExecutionRegistry
 
         string text =
             $"{suggestion}Unknown tool '{attemptedName}'.\n\n" +
-            "To discover the correct tool name and see its exact schema + usage, call:\n\n" +
-            "tool_help with name=\"shell_exec\"   ← replace with the real tool name you want\n\n" +
-            "Example of the correct JSON call:\n" +
-            "{\n" +
-            "  \"name\": \"tool_help\",\n" +
-            "  \"arguments\": { \"name\": \"shell_exec\" }\n" +
-            "}\n\n" +
-            "After calling tool_help you will get the full documentation and parameter schema.\n" +
-            "Then use the exact tool name it confirms.";
+            "To find the correct tool name:\n\n" +
+            "1. Call list_tools (no parameters) — returns every available tool name.\n" +
+            "   Example: { \"name\": \"list_tools\", \"arguments\": {} }\n\n" +
+            "2. Then call tool_help with the exact name to get its full schema:\n" +
+            "   Example: { \"name\": \"tool_help\", \"arguments\": { \"name\": \"find_files\" } }\n\n" +
+            "Do not guess tool names. Always confirm with list_tools first.";
 
         return new JsonObject
         {

@@ -189,7 +189,7 @@ internal sealed partial class SearchService
             {
                 fullName = document.FullName;
             }
-            catch (COMException ex)
+            catch (Exception ex) when (IsRecoverableSearchFailure(ex))
             {
                 TraceSearchFailure("EnumerateOpenDocumentTargets", ex);
             }
@@ -329,13 +329,20 @@ internal sealed partial class SearchService
                     return text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
                 }
             }
-            catch (COMException ex)
+            catch (Exception ex) when (IsRecoverableSearchFailure(ex))
             {
                 TraceSearchFailure("ReadSearchLines", ex);
             }
         }
 
         return File.ReadAllLines(normalizedPath);
+    }
+
+    private static bool IsRecoverableSearchFailure(Exception ex)
+    {
+        return ex is COMException
+            || string.Equals(ex.GetType().FullName, "Microsoft.Assumes+InternalErrorException", StringComparison.Ordinal)
+            || ex.Message.IndexOf("Failed to load the document", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private static void TraceSearchFailure(string operation, Exception ex)

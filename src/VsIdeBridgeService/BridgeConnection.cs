@@ -90,12 +90,14 @@ internal sealed class BridgeConnection
             BridgeInstance discovered = await GetInstanceAsync(ignoreSolutionHint: false).ConfigureAwait(false);
             RememberSolutionPath(discovered.SolutionPath);
             _documentDiagnostics.QueueRefreshAndGetSnapshot("bind", clearCached: true);
-            return new JsonObject
+            JsonObject bindResponse = new()
             {
                 ["success"] = true,
                 ["binding"] = InstanceToJson(discovered),
                 ["selector"] = SelectorToJson(CurrentSelector),
             };
+            ToolCatalog.AttachBoundSessionGuidance(bindResponse);
+            return bindResponse;
         }
         catch (BridgeException ex)
         {
@@ -277,6 +279,7 @@ internal sealed class BridgeConnection
 
         response["BindingNotice"] = notice;
         response["Binding"] = InstanceToJson(CurrentInstance ?? throw new InvalidOperationException("Current instance should exist when attaching a binding notice."));
+        ToolCatalog.AttachBoundSessionGuidance(response);
     }
 
     private async Task<JsonObject> RetryImplicitBindingCancellationAsync(

@@ -58,6 +58,18 @@ public sealed partial class ToolRegistry
             reason = ChooseReason(reason, "Primary tool discovery tool");
         }
 
+        if (profile.LooksLikeGitTask && DefaultRecommendedGitToolNames.Contains(tool.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            score += 55;
+            reason = ChooseReason(reason, "Primary bridge Git tool");
+        }
+
+        if (profile.LooksLikeRestoreTask && string.Equals(tool.Name, "git_restore", StringComparison.OrdinalIgnoreCase))
+        {
+            score += 80;
+            reason = ChooseReason(reason, "Use bridge git_restore instead of shell git checkout -- <path>");
+        }
+
         return score;
     }
 
@@ -196,6 +208,9 @@ public sealed partial class ToolRegistry
 
         if (profile.LooksLikeBuildTask)
             score -= 40;
+
+        if (profile.LooksLikeGitTask)
+            score -= 60;
 
         return score;
     }

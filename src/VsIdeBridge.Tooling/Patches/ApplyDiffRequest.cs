@@ -40,15 +40,12 @@ public sealed class ApplyDiffRequest
         if (args is null)
             throw new ApplyDiffValidationException("apply_diff requires arguments object.");
 
-        // 1. Simple full file write (easiest for models - recommended)
         if (args.ContainsKey("file") && args.ContainsKey("content"))
         {
-            string path = args["file"]!.GetValue<string>();
-            string content = args["content"]!.GetValue<string>();
-            return FromSimpleWrite(path, content);
+            throw new ApplyDiffValidationException(
+                "apply_diff does not accept 'file' + 'content' full-file replacement. Use write_file only when a full replacement is intentional, or use 'file' + 'old_content' + 'new_content' for a targeted replacement.");
         }
 
-        // 2. Simple string replace (file + old_content + new_content)
         if (args.ContainsKey("file") && args.ContainsKey("old_content") && args.ContainsKey("new_content"))
         {
             string path = args["file"]!.GetValue<string>();
@@ -57,7 +54,6 @@ public sealed class ApplyDiffRequest
             return FromSimpleReplace(path, oldContent, newContent);
         }
 
-        // 3. Original advanced patch format (still fully supported)
         if (args.ContainsKey("diff"))
         {
             return FromPatchText(args["diff"]?.GetValue<string>());
@@ -66,9 +62,7 @@ public sealed class ApplyDiffRequest
         throw new ApplyDiffValidationException(
             "apply_diff requires one of these input shapes:\n" +
             "  • \"diff\": \"*** Begin Patch ... *** End Patch\"   (advanced patch)\n" +
-            "  • \"file\" + \"content\"                           (full file write - recommended)\n" +
-            "  • \"file\" + \"old_content\" + \"new_content\"     (simple replace)\n\n" +
-            "The 'file' + 'content' style works on any text file (not just code).");
+            "  • \"file\" + \"old_content\" + \"new_content\"     (targeted simple replace)");
     }
 
     public static ApplyDiffRequest FromPatchText(string? diff)
@@ -291,28 +285,58 @@ public sealed class ApplyDiffRequest
         throw new ApplyDiffValidationException($"Unsupported editor patch directive: {line}.");
     }
 
-    // === NEW MODEL-FRIENDLY HELPERS ===
-
-    private static ApplyDiffRequest FromSimpleWrite(string path, string content)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-            throw new ApplyDiffValidationException("apply_diff 'file' path cannot be empty.");
-
-        if (content is null)
-            throw new ApplyDiffValidationException("apply_diff 'content' cannot be null.");
-
-        ApplyDiffFileOperation operation = new("write", path, null, 0, content.Length, content.Length);
-        return new ApplyDiffRequest($"*** Begin Patch\n*** Write File: {path}\n{content}\n*** End Patch", [operation], content.Length);
-    }
-
     private static ApplyDiffRequest FromSimpleReplace(string path, string oldContent, string newContent)
     {
         if (string.IsNullOrWhiteSpace(path))
+        {
             throw new ApplyDiffValidationException("apply_diff 'file' path cannot be empty.");
+        }
 
-        ApplyDiffFileOperation operation = new("replace", path, null, 0, newContent.Length, newContent.Length);
-        string diffText = $"*** Begin Patch\n*** Replace in File: {path}\n- {oldContent}\n+ {newContent}\n*** End Patch";
-        return new ApplyDiffRequest(diffText, [operation], newContent.Length);
+        string[] oldLines = SplitPatchContentLines(oldContent);
+        if (oldLines.Length == 0)
+        {
+            throw new ApplyDiffValidationException("apply_diff 'old_content' cannot be empty for a targeted replacement.");
+        }
+
+        string[] newLines = SplitPatchContentLines(newContent);
+        int mutationLineCount = oldLines.Length + newLines.Length;
+        ApplyDiffFileOperation operation = new("replace", path, null, 1, mutationLineCount, newLines.Length);
+
+        StringBuilder diffBuilder = new();
+        diffBuilder.Append("*** Begin Patch\n");
+        diffBuilder.Append("*** Update File: ").Append(path).Append('\n');
+        diffBuilder.Append("@@\n");
+        AppendPatchLines(diffBuilder, '-', oldLines);
+        AppendPatchLines(diffBuilder, '+', newLines);
+        diffBuilder.Append("*** End Patch");
+        string diffText = diffBuilder.ToString();
+        return new ApplyDiffRequest(diffText, [operation], mutationLineCount);
+    }
+
+    private static string[] SplitPatchContentLines(string content)
+    {
+        string normalized = (content ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
+#if NET8_0_OR_GREATER
+        if (normalized.EndsWith('\n'))
+        {
+            normalized = normalized[..^1];
+        }
+#else
+        if (normalized.Length > 0 && normalized[normalized.Length - 1] == '\n')
+        {
+            normalized = normalized.Substring(0, normalized.Length - 1);
+        }
+#endif
+
+        return normalized.Length == 0 ? [] : normalized.Split('\n');
+    }
+
+    private static void AppendPatchLines(StringBuilder builder, char prefix, IEnumerable<string> lines)
+    {
+        foreach (string line in lines)
+        {
+            builder.Append(prefix).Append(line).Append('\n');
+        }
     }
 }
 

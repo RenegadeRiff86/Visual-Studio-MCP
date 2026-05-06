@@ -30,6 +30,17 @@ public sealed partial class ToolRegistry
         "set_build_configuration",
     ];
 
+    private static readonly string[] DefaultRecommendedGitToolNames =
+    [
+        "git_status",
+        "git_diff_unstaged",
+        "git_restore",
+        "git_checkout",
+        "git_branch_list",
+        "git_add",
+        "git_commit",
+    ];
+
     private static readonly string[] DefaultRecommendedDiscoveryToolNames =
     [
         "recommend_tools",

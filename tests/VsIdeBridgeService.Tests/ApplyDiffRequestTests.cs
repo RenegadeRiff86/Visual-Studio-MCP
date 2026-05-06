@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 using VsIdeBridge.Tooling.Patches;
 using Xunit;
 
@@ -36,6 +37,41 @@ public sealed class ApplyDiffRequestTests
         ApplyDiffRequest request = ApplyDiffRequest.FromPatchText(Patch);
 
         Assert.Equal("src/New.cs", request.Operations.Single().MoveTo);
+    }
+
+    [Fact]
+    public void SimpleReplaceBuildsSupportedEditorPatch()
+    {
+        const string OldContent = @"var typedValue = Regex.Replace(input, @""[^ \t,<>\[\]]*\."", string.Empty);";
+        const string NewContent = @"string typedValue = Regex.Replace(input, @""[^ \t,<>\[\]]*\."", string.Empty);";
+        JsonObject args = new()
+        {
+            ["file"] = "CodeMaidShared/Helpers/TypeFormatHelper.cs",
+            ["old_content"] = OldContent,
+            ["new_content"] = NewContent,
+        };
+
+        ApplyDiffRequest request = ApplyDiffRequest.FromJsonObject(args);
+
+        Assert.Equal(2, request.MutationLineCount);
+        Assert.Contains("*** Update File: CodeMaidShared/Helpers/TypeFormatHelper.cs\n@@\n", request.Diff);
+        Assert.Contains("-" + OldContent + "\n", request.Diff);
+        Assert.Contains("+" + NewContent + "\n", request.Diff);
+        Assert.DoesNotContain("*** Replace in File:", request.Diff);
+    }
+
+    [Fact]
+    public void RejectsFullFileWriteShape()
+    {
+        JsonObject args = new()
+        {
+            ["file"] = "src/Foo.cs",
+            ["content"] = "public sealed class Foo { }",
+        };
+
+        ApplyDiffValidationException exception = Assert.Throws<ApplyDiffValidationException>(() => ApplyDiffRequest.FromJsonObject(args));
+
+        Assert.Contains("write_file", exception.Message);
     }
 
     [Theory]
