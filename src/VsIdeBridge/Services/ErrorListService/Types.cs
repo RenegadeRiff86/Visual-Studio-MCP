@@ -30,6 +30,8 @@ internal sealed class ErrorListQuery
     public string? GroupBy { get; set; }
     public int? Max { get; set; }
 
+    public string? File { get; set; }
+
     public ErrorListQuery WithoutMax()
     {
         return new ErrorListQuery
@@ -38,6 +40,7 @@ internal sealed class ErrorListQuery
             Code = Code,
             Project = Project,
             Path = Path,
+            File = File,
             Text = Text,
             GroupBy = GroupBy,
             Max = null,
@@ -52,6 +55,7 @@ internal sealed class ErrorListQuery
             ["code"] = Code ?? string.Empty,
             ["project"] = Project ?? string.Empty,
             ["path"] = Path ?? string.Empty,
+            ["file"] = File ?? string.Empty,
             ["text"] = Text ?? string.Empty,
             ["groupBy"] = GroupBy ?? string.Empty,
             ["max"] = (JToken?)Max ?? JValue.CreateNull(),
@@ -446,7 +450,7 @@ internal sealed partial class ErrorListService
                     content = entry.Message;
                     return true;
                 case StandardTableKeyNames.DocumentName:
-                    content = Path.GetFileName(entry.Location.File);
+                    content = entry.Location.File;
                     return true;
                 case StandardTableKeyNames.Path:
                     content = entry.Location.File;

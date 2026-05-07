@@ -148,6 +148,12 @@ internal sealed partial class ErrorListService
                 .IndexOf(query.Path, StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
+        string fileFilter = (query.File ?? string.Empty).Trim();
+        if (fileFilter.Length > 0)
+        {
+            filtered = filtered.Where(row => MatchesFileFilter(row, fileFilter));
+        }
+
         if (!string.IsNullOrWhiteSpace(query.Text))
         {
             filtered = filtered.Where(row => GetRowString(row, MessageKey)
@@ -160,6 +166,12 @@ internal sealed partial class ErrorListService
         }
 
         return [.. filtered];
+    }
+
+    private static bool MatchesFileFilter(JObject row, string file)
+    {
+        string value = GetRowString(row, FileKey);
+        return value.IndexOf(file, StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private delegate bool TableValueReader(string keyName, out object content);

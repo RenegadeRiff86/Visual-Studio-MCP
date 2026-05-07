@@ -20,6 +20,7 @@ internal static class McpServerMode
         BridgeConnection bridge = new(args);
         using StdioHostLease? hostLease = StdioHostLease.TryCreate();
         ServiceControlClient? controlClient = null;
+        SemaphoreSlim writeLock = new(1, 1);
 
         controlClient = await TryConnectControlPipeAsync().ConfigureAwait(false);
 
@@ -37,8 +38,8 @@ internal static class McpServerMode
                 catch (McpRequestException ex)
                 {
                     McpServerLog.Write($"read error code={ex.Code} message={ex.Message}");
-                    await McpProtocol.WriteAsync(output, McpProtocol.ErrorResponse(ex.Id, ex.Code, ex.Message),
-                        McpProtocol.WireFormat.HeaderFramed).ConfigureAwait(false);
+                    await WriteLockedAsync(output, McpProtocol.ErrorResponse(ex.Id, ex.Code, ex.Message),
+                        McpProtocol.WireFormat.HeaderFramed, writeLock).ConfigureAwait(false);
                     continue;
                 }
 
@@ -46,6 +47,22 @@ internal static class McpServerMode
                 {
                     McpServerLog.Write("stdin closed; exiting stdio loop");
                     break;
+                }
+
+                string incomingMethod = incoming.Request["method"]?.GetValue<string>() ?? string.Empty;
+
+                // Handle notifications immediately without blocking the read loop.
+                if (incomingMethod.StartsWith("notifications/", StringComparison.Ordinal))
+                {
+                    if (incomingMethod == "notifications/cancelled")
+                    {
+                        // Cancel the matching in-flight request's CTS so its polling loop exits.
+                        JsonNode? cancelId = incoming.Request["params"]?["requestId"]?.DeepClone();
+                        McpServerLog.Write($"cancel notification requestId={cancelId?.ToJsonString()}");
+                        RequestCancellationRegistry.Cancel(cancelId);
+                    }
+
+                    continue;
                 }
 
                 if (controlClient is not null)
@@ -76,14 +93,42 @@ internal static class McpServerMode
 
                 McpServerLog.WriteRequest(incoming.Request, incoming.Format);
 
-                JsonObject? response = await HandleRequestAsync(incoming.Request, bridge, controlClient)
-                    .ConfigureAwait(false);
-
-                if (response is not null)
+                // Dispatch on a background task so this read loop stays live for
+                // notifications/cancelled while a long-running tool (e.g. build with
+                // wait_for_completion=true) is in flight.
+                McpProtocol.IncomingMessage capturedIncoming = incoming;
+                ServiceControlClient? capturedControlClient = controlClient;
+                _ = Task.Run(async () =>
                 {
-                    McpServerLog.WriteResponse(response);
-                    await McpProtocol.WriteAsync(output, response, incoming.Format).ConfigureAwait(false);
-                }
+                    JsonNode? requestId = capturedIncoming.Request["id"]?.DeepClone();
+                    using CancellationTokenSource cts = RequestCancellationRegistry.Register(requestId);
+                    try
+                    {
+                        JsonObject? response = await HandleRequestAsync(
+                            capturedIncoming.Request, bridge, capturedControlClient)
+                            .ConfigureAwait(false);
+
+                        if (response is not null)
+                        {
+                            McpServerLog.WriteResponse(response);
+                            await WriteLockedAsync(output, response, capturedIncoming.Format, writeLock)
+                                .ConfigureAwait(false);
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        McpServerLog.Write($"tool cancelled id={requestId?.ToJsonString()}");
+                        // No response sent for cancelled requests.
+                    }
+                    catch (Exception ex)
+                    {
+                        McpServerLog.Write($"dispatch fatal id={requestId?.ToJsonString()} ex={ex}");
+                    }
+                    finally
+                    {
+                        RequestCancellationRegistry.Unregister(requestId);
+                    }
+                });
             }
         }
         finally
@@ -127,6 +172,10 @@ internal static class McpServerMode
         {
             McpServerLog.Write($"request error method={method} code={ex.Code} message={ex.Message}");
             return McpProtocol.ErrorResponse(ex.Id ?? id, ex.Code, ex.Message);
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // Propagate to the concurrent dispatch handler in RunAsync, which suppresses the response.
         }
         catch (Exception ex) when (ex is not null) // top-level MCP request boundary
         {
@@ -213,6 +262,21 @@ internal static class McpServerMode
         catch
         {
             return null;
+        }
+    }
+
+    // Serialize stdout writes across concurrent request tasks.
+    private static async Task WriteLockedAsync(
+        Stream output, JsonObject response, McpProtocol.WireFormat format, SemaphoreSlim writeLock)
+    {
+        await writeLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await McpProtocol.WriteAsync(output, response, format).ConfigureAwait(false);
+        }
+        finally
+        {
+            writeLock.Release();
         }
     }
 

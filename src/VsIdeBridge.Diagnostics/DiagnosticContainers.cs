@@ -94,6 +94,7 @@ public sealed class DiagnosticRow
             && MatchesPrefix(Code, options.Code)
             && Contains(Project, options.Project)
             && MatchesPath(options.Path)
+            && MatchesPath(options.File)
             && Contains(Message, options.Text);
     }
 
@@ -533,7 +534,8 @@ public sealed class DiagnosticQueryOptions(
     string? project,
     string? path,
     string? text,
-    string? groupBy)
+    string? groupBy,
+    string? file = null)
 {
     public int ChunkSize { get; } = chunkSize;
 
@@ -555,22 +557,27 @@ public sealed class DiagnosticQueryOptions(
 
     public string? GroupBy { get; } = groupBy;
 
+    public string? File { get; } = file;
+
     public bool HasContentFilters
         => !string.IsNullOrWhiteSpace(Severity)
             || !string.IsNullOrWhiteSpace(Code)
             || !string.IsNullOrWhiteSpace(Project)
             || !string.IsNullOrWhiteSpace(Path)
+            || !string.IsNullOrWhiteSpace(File)
             || !string.IsNullOrWhiteSpace(Text);
 
     public static DiagnosticQueryOptions FromJsonObject(JsonObject? args, int defaultChunkSize)
     {
         int chunkSize = GetOptionalNonNegativeInt(args, "chunk_size")
+            ?? GetOptionalNonNegativeInt(args, "chunk-size")
             ?? GetOptionalNonNegativeInt(args, "max")
             ?? defaultChunkSize;
         int chunkIndex = GetOptionalNonNegativeInt(args, "chunk_index") ?? 0;
         string? sortBy = NormalizeSortField(GetOptionalString(args, "sort_by"));
         bool sortDescending = IsDescendingSort(GetOptionalString(args, "sort_direction"));
         string? groupBy = NormalizeGroupBy(GetOptionalString(args, "group_by") ?? GetOptionalString(args, "group-by"));
+        string? file = NullIfWhiteSpace(GetOptionalString(args, "file"));
 
         return new DiagnosticQueryOptions(
             chunkSize,
@@ -582,7 +589,8 @@ public sealed class DiagnosticQueryOptions(
             NullIfWhiteSpace(GetOptionalString(args, "project")),
             NullIfWhiteSpace(GetOptionalString(args, "path")),
             NullIfWhiteSpace(GetOptionalString(args, "text")),
-            groupBy);
+            groupBy,
+            file);
     }
 
     public static string? NormalizeSortField(string? sortBy)

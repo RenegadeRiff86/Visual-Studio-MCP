@@ -72,6 +72,14 @@ internal sealed partial class PatchService
             PatchPaths paths = ResolvePatchPaths(dte, resolvedBaseDirectory, filePatch);
             EnsurePatchHasMeaningfulOperations(filePatch, paths);
             EnsureSafeToModifyOpenDocument(dte, paths.SourcePath);
+
+            // Auto-reload if the document is open in the editor.
+            // Prevents state drift between patches — very important for local models.
+            if (IsDocumentOpenInEditor(dte, paths.SourcePath))
+            {
+                await documentService.ReloadDocumentAsync(paths.SourcePath).ConfigureAwait(true);
+            }
+
             if (paths.IsMove)
             {
                 EnsureSafeToModifyOpenDocument(dte, paths.TargetPath);
@@ -410,5 +418,21 @@ internal sealed partial class PatchService
 
         return expectedContent.Length == currentContent.Length ? -1 : comparisonLength;
     }
+
+    private static bool IsDocumentOpenInEditor(DTE2 dte, string path)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+
+        foreach (Document doc in dte.Documents)
+        {
+            if (string.Equals(doc.FullName, path, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
 }
 

@@ -20,6 +20,7 @@ public sealed class DiagnosticToolRegistrationTests
         "code",
         "project",
         "path",
+        "file",
         "text",
         "group_by",
     ];

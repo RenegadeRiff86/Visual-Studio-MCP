@@ -32,14 +32,14 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
     private readonly BridgeUiSettingsService _uiSettings = uiSettings;
 
     public async Task<JObject> GetErrorListAsync(
-        IdeCommandContext context,
-        bool waitForIntellisense,
-        int timeoutMilliseconds,
-        bool quickSnapshot = false,
-        ErrorListQuery? query = null,
-        bool includeBuildOutputFallback = false,
-        bool afterEdit = false,
-        bool forceRefresh = false)
+       IdeCommandContext context,
+       bool waitForIntellisense,
+       int timeoutMilliseconds,
+       bool quickSnapshot = false,
+       ErrorListQuery? query = null,
+       bool includeBuildOutputFallback = false,
+       bool afterEdit = false,
+       bool forceRefresh = false)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
 
@@ -48,8 +48,6 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
             PublishBestPracticeRows(context.Dte, []);
         }
 
-        // Readiness is allowed to delay a passive snapshot, but it must not force the
-        // active refresh path that can clear and repopulate the Error List in large C++ solutions.
         if (waitForIntellisense)
         {
             await _readinessService.WaitForReadyAsync(context, timeoutMilliseconds, afterEdit).ConfigureAwait(true);
@@ -59,11 +57,6 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
         if (quickSnapshot)
         {
             EnsureErrorListWindow(context.Dte);
-            // Use the synchronous table read: subscribes and reads whatever is
-            // currently cached by each provider immediately, without holding the
-            // subscription open and waiting for WaitForStabilityAsync. That wait
-            // loop is what caused C++ projects to time out — normal IntelliSense
-            // background updates kept resetting the stability counter forever.
             if (!TryReadTableRows(out rows) || rows.Count == 0)
             {
                 try
@@ -106,9 +99,12 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
         }
 
         JObject[] matchingRows = [.. ApplyQuery(rows, query?.WithoutMax())];
-        JObject[] filteredRows = query?.Max > 0
+
+        // Respect chunk_size / Max
+        JObject[] filteredRows = (query?.Max > 0)
             ? [.. matchingRows.Take(query.Max.Value)]
             : matchingRows;
+
         Dictionary<string, int> severityCounts = CreateSeverityCounts();
         foreach (JObject row in filteredRows)
         {

@@ -36,7 +36,7 @@ internal static partial class ToolCatalog
             async (id, _, bridge) =>
             {
                 string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
-                return await GitRunner.RunAsync(id, repo, "status --porcelain=v1 --branch")
+                return await GitSdkReader.GetStatusAsync(id, repo)
                     .ConfigureAwait(false);
             },
             searchHints: BuildSearchHints(
@@ -107,7 +107,7 @@ internal static partial class ToolCatalog
             {
                 string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
                 int ctx = args?["context"]?.GetValue<int?>() ?? DefaultDiffContext;
-                return await GitRunner.RunAsync(id, repo, $"diff --no-color --unified={ctx}")
+                return await GitSdkReader.GetUnstagedDiffAsync(id, repo, ctx)
                     .ConfigureAwait(false);
             },
             searchHints: BuildSearchHints(

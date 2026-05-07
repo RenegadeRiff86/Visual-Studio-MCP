@@ -122,6 +122,7 @@ internal static partial class ToolCatalog
             Opt(Code, codeFilterDescription),
             Opt(Project, ProjectFilterDesc),
             Opt(Path, "Optional path filter."),
+            Opt(FileArg, "Optional file filter. Accepts a full path, path fragment, or file name."),
             Opt(Text, "Optional message text filter."),
             Opt(GroupBy, groupByDescription));
 
@@ -158,6 +159,7 @@ internal static partial class ToolCatalog
                 (Code, OptionalString(args, Code)),
                 (Project, OptionalString(args, Project)),
                 (Path, OptionalString(args, Path)),
+                (FileArg, OptionalString(args, FileArg)),
                 (Text, OptionalString(args, Text)),
                 ("group-by", OptionalString(args, GroupBy)));
             JsonObject response = await SendDiagnosticsCommandWithSnapshotFallbackAsync(
@@ -481,6 +483,7 @@ internal static partial class ToolCatalog
             (Code, OptionalString(args, Code)),
             (Project, OptionalString(args, Project)),
             (Path, OptionalString(args, Path)),
+            (FileArg, OptionalString(args, FileArg)),
             (Text, OptionalString(args, Text)),
             ("group-by", OptionalString(args, GroupBy)),
             (Max, GetBridgeDiagnosticsMax(args)),

@@ -535,11 +535,14 @@ internal sealed partial class PatchService
     {
         if (index >= existingLines.Count)
         {
-            throw new CommandErrorException(InvalidArgumentsCode,
+            throw new CommandErrorException(
+                InvalidArgumentsCode,
                 $"apply_diff failed: the patch references line {index + 1} but {path} only has {existingLines.Count} lines. " +
-                "Your hunk line numbers are off — likely because a prior hunk added or removed lines and the numbers were not adjusted. " +
-                "Call read_file on this file, copy the exact lines you want to change, and resubmit the patch. " +
-                "Alternatively, switch to editor patch format (*** Begin Patch / *** Update File / @@ / -old / +new / *** End Patch), which finds lines by content and never needs line numbers.");
+                "Your hunk line numbers are off — this happens when a previous hunk added or removed lines and later hunks weren't adjusted. " +
+                "FIX: (1) Call reload_document on this file, (2) Call read_file again to get current line numbers, " +
+                "(3) Rebuild your patch with the new line numbers from the fresh read. " +
+                "BETTER: Switch to editor patch format (*** Begin Patch / *** Update File / @@ / -old / +new / *** End Patch) — it matches by content and never needs line numbers.",
+                new { line = index + 1, fileLineCount = existingLines.Count });
         }
 
         if (!LinesMatchFuzzy(existingLines[index], expected))
@@ -554,9 +557,10 @@ internal sealed partial class PatchService
                 InvalidArgumentsCode,
                 $"apply_diff failed: the {operation} line in your patch does not match the file. " +
                 $"Your patch says \"{Truncate(expected, 80)}\" — the file at line {index + 1} has \"{Truncate(existingLines[index], 80)}\". " +
-                "This usually means line numbers shifted because a prior hunk in this patch added or removed lines. " +
-                "Call read_file around line " + (index + 1) + " to see what is actually there, copy the exact text, and resubmit. " +
-                "Alternatively, switch to editor patch format (*** Begin Patch / *** Update File / @@ / -old / +new / *** End Patch), which matches by content and never needs line numbers.",
+                "This is almost always caused by whitespace differences or the file changing between reads. " +
+                "FIX: (1) Call reload_document on this file, (2) Call read_file again to get the current exact content, " +
+                "(3) Copy the lines you want to change DIRECTLY from the read_file output — do not retype them, " +
+                "(4) Build a new patch using those exact lines as context.",
                 new { expected, actual = existingLines[index], line = index + 1, fileContext = context });
         }
     }

@@ -160,6 +160,11 @@ internal static partial class ToolCatalog
         DateTimeOffset deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeoutMs);
         JsonObject? lastBackgroundOperation = null;
 
+        // If the MCP client cancels this request (notifications/cancelled), the registry
+        // will have fired the token — Task.Delay will throw OperationCanceledException,
+        // which propagates up and stops the polling loop immediately.
+        CancellationToken ct = RequestCancellationRegistry.GetToken(id);
+
         while (true)
         {
             JsonObject snapshotResponse = await bridge.SendAsync(
@@ -190,7 +195,7 @@ internal static partial class ToolCatalog
             }
 
             TimeSpan delay = deadline - DateTimeOffset.UtcNow;
-            await Task.Delay(delay < BuildCourtesyPollInterval ? delay : BuildCourtesyPollInterval).ConfigureAwait(false);
+            await Task.Delay(delay < BuildCourtesyPollInterval ? delay : BuildCourtesyPollInterval, ct).ConfigureAwait(false);
         }
     }
 

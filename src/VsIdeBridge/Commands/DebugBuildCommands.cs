@@ -17,6 +17,10 @@ internal static partial class DebugBuildCommands
     private const string WaitForIntellisenseArgument = "wait-for-intellisense";
     private const string WaitForCompletionArgument = "wait-for-completion";
     private const string RequireCleanDiagnosticsArgument = "require-clean-diagnostics";
+    private const string MaxArgument = "max";
+    private const string FileArgument = "file";
+    private const string ChunkSizeArgument = "chunk-size";
+    private const string ChunkSizeJsonArgument = "chunk_size";
     private const int DefaultDebuggerTimeoutMilliseconds = 120000;
     private const int MinimumBuildErrorsTimeoutMilliseconds = 5000;
     private const int DefaultBuildTimeoutMilliseconds = 600000;
@@ -102,7 +106,7 @@ internal static partial class DebugBuildCommands
                 waitForIntellisense: false,
                 preflightTimeout,
                 quickSnapshot: true,
-                query: new ErrorListQuery { Max = args.GetNullableInt32("max") ?? DefaultBlockingDiagnosticsMax }).ConfigureAwait(true)
+                query: new ErrorListQuery { Max = GetDiagnosticsMax(args) ?? DefaultBlockingDiagnosticsMax }).ConfigureAwait(true)
             : await GetDiagnosticsSnapshotAsync(
                 context,
                 args,
@@ -119,7 +123,7 @@ internal static partial class DebugBuildCommands
             waitForIntellisense,
             timeoutMilliseconds,
             quickSnapshot: true,
-            query: new ErrorListQuery { Max = args.GetNullableInt32("max") ?? DefaultBlockingDiagnosticsMax }).ConfigureAwait(true);
+            query: new ErrorListQuery { Max = GetDiagnosticsMax(args) ?? DefaultBlockingDiagnosticsMax }).ConfigureAwait(true);
     }
 
     private static async Task<JObject> GetDiagnosticsWithFallbackAsync(

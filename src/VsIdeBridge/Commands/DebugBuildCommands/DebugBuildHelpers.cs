@@ -18,10 +18,28 @@ internal static partial class DebugBuildCommands
             Code = args.GetString("code"),
             Project = args.GetString("project"),
             Path = args.GetString("path"),
+            File = args.GetString(FileArgument),
             Text = args.GetString("text"),
             GroupBy = args.GetString("group-by"),
-            Max = args.GetNullableInt32("max"),
+            Max = GetDiagnosticsMax(args),
         };
+    }
+
+    private static int? GetDiagnosticsMax(CommandArguments args)
+        => GetNullableInt32(args, ChunkSizeArgument, ChunkSizeJsonArgument, MaxArgument);
+
+    private static int? GetNullableInt32(CommandArguments args, params string[] names)
+    {
+        foreach (string name in names)
+        {
+            int? value = args.GetNullableInt32(name);
+            if (value.HasValue)
+            {
+                return value;
+            }
+        }
+
+        return null;
     }
 
     private static bool GetDiagnosticsForceRefresh(CommandArguments args)

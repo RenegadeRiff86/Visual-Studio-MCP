@@ -21,3 +21,4 @@ C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Tooling\obj\Debug\net8
 C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Tooling\obj\Debug\net8.0\refint\VsIdeBridge.Tooling.dll
 C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Tooling\obj\Debug\net8.0\VsIdeBridge.Tooling.pdb
 C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Tooling\obj\Debug\net8.0\ref\VsIdeBridge.Tooling.dll
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Tooling\obj\Debug\net8.0\VsIdeBridge.Tooling.csproj.AssemblyReference.cache

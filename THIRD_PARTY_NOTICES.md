@@ -31,6 +31,6 @@ This project uses LibGit2Sharp for managed Git repository access in the bridge t
 
 Repository usage summary:
 
-- LibGit2Sharp is used to reduce reliance on command-line Git execution for read-only repository inspection flows.
+- LibGit2Sharp is used to reduce reliance on command-line Git execution for read-only repository inspection flows, including branch, diff, log, remote, and status reads.
 - This repository should retain the LibGit2Sharp copyright and license notice when redistributing builds that include the package.
 - If redistributed package contents include additional native dependency notices, those notices should be carried forward with the installer and release artifacts.

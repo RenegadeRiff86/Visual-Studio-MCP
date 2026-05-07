@@ -5,7 +5,7 @@
   },
   "projects": {
     "C:\\Users\\elsto\\source\\repos\\vs-ide-bridge\\src\\VsIdeBridge.Tooling\\VsIdeBridge.Tooling.csproj": {
-      "version": "2.2.12",
+      "version": "2.2.13",
       "restore": {
         "projectUniqueName": "C:\\Users\\elsto\\source\\repos\\vs-ide-bridge\\src\\VsIdeBridge.Tooling\\VsIdeBridge.Tooling.csproj",
         "projectName": "VsIdeBridge.Tooling",
@@ -59,11 +59,23 @@
         "net472": {
           "framework": "net472",
           "targetAlias": "net472",
+          "dependencies": {
+            "System.Text.Json": {
+              "target": "Package",
+              "version": "[9.0.0, )"
+            }
+          },
           "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.203\\RuntimeIdentifierGraph.json"
         },
         "net8.0": {
           "framework": "net8.0",
           "targetAlias": "net8.0",
+          "dependencies": {
+            "System.Text.Json": {
+              "target": "Package",
+              "version": "[9.0.0, )"
+            }
+          },
           "imports": [
             "net461",
             "net462",
