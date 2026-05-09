@@ -466,6 +466,9 @@ internal static partial class ToolCatalog
                 OptInt("max_lines", "Max total lines per stream when head_lines/tail_lines are not set (default 200).")),
             "system",
             (id, args, bridge) => ShellExecTool.ExecuteAsync(id, args, bridge),
+            aliases: ["bash", "shell", "run", "run_command", "run_shell_command", "terminal_command", "cmd", "powershell", "run_tests", "test", "lint"],
+            tags: ["shell", "bash", "run", "execute", "command", "test", "lint", "terminal"],
+            summary: "Run shell commands, scripts, tests, and lint/build helpers.",
             searchHints: BuildSearchHints(
                 related: [("execute_command", "Run a VS command instead"), ("build", "Use the build tool for compilation"), ("git_status", "Use git tools for version control")]));
 

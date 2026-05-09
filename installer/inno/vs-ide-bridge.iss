@@ -2,7 +2,7 @@
 #define MyAppFolderName "VsIdeBridge"
 #define MyAppPublisher "RenegadeRiff86"
 #define MyAppURL "https://github.com/RenegadeRiff86/Visual-Studio-MCP"
-#define MyAppVersion "2.2.13"
+#define MyAppVersion "2.3.0"
 #define ServiceName "VsIdeBridgeService"
 #define VsixId "RenegadeRiff86.VsIdeBridge"
 #define LegacyVsixId "StanElston.VsIdeBridge"
@@ -43,6 +43,11 @@ Name: "enablehttp"; Description: "Enable local HTTP MCP endpoint on localhost (r
 
 [Dirs]
 Name: "{commonappdata}\VsIdeBridge\state"; Permissions: users-modify; Flags: uninsneveruninstall
+Name: "{commonappdata}\VsIdeBridge\logs"; Permissions: users-modify; Flags: uninsneveruninstall
+Name: "{app}\logs"; Permissions: users-modify; Flags: uninsneveruninstall
+
+[Registry]
+Root: HKLM; Subkey: "SOFTWARE\VsIdeBridge"; ValueType: string; ValueName: "InstallPath"; ValueData: "{app}"; Flags: uninsdeletekey
 
 [InstallDelete]
 Type: filesandordirs; Name: "{app}\cli"
@@ -52,6 +57,7 @@ Source: "..\..\src\VsIdeBridgeService\bin\{#Configuration}\net8.0-windows\*"; De
 Source: "..\..\src\VsIdeBridgeLauncher\bin\{#Configuration}\*"; DestDir: "{app}\service"; Flags: recursesubdirs createallsubdirs ignoreversion restartreplace uninsrestartdelete
 Source: "..\..\src\VsIdeBridge\bin\{#Configuration}\net472\VsIdeBridge.vsix"; DestDir: "{app}\vsix"; Flags: ignoreversion
 Source: "..\..\src\VsIdeBridgeInstaller\bin\{#Configuration}\net8.0-windows\python-runtime\*"; DestDir: "{app}\python\managed-runtime"; Flags: recursesubdirs createallsubdirs ignoreversion uninsrestartdelete; Check: ShouldInstallManagedPython
+Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [UninstallRun]
 Filename: "{sys}\sc.exe"; Parameters: "stop ""{#ServiceName}"""; Flags: runhidden waituntilterminated; RunOnceId: "{#ServiceName}-stop"; StatusMsg: "Stopping VS IDE Bridge service..."

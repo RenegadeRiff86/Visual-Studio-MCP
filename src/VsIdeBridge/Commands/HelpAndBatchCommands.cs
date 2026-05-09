@@ -304,6 +304,22 @@ internal static partial class IdeCoreCommands
             });
     }
 
+    private static string? TryResolveInstallDocPath(string fileName)
+    {
+        try
+        {
+            string? installPath = BridgeLogPaths.GetInstallPath();
+            if (string.IsNullOrWhiteSpace(installPath))
+                return null;
+            string docPath = Path.Combine(installPath, fileName);
+            return File.Exists(docPath) ? docPath : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static string? TryResolveSolutionDocPath(IdeCommandContext context, string fileName)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
@@ -349,25 +365,23 @@ internal static partial class IdeCoreCommands
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
 
-        string? readmePath = TryResolveSolutionDocPath(context, "README.md");
-        string? bugsPath = TryResolveSolutionDocPath(context, "BUGS.md");
+        string? readmePath = TryResolveInstallDocPath("README.md") ?? TryResolveSolutionDocPath(context, "README.md");
+        string? bugsPath = TryResolveInstallDocPath("BUGS.md") ?? TryResolveSolutionDocPath(context, "BUGS.md");
         bool openedReadme = !string.IsNullOrWhiteSpace(readmePath);
         if (openedReadme)
         {
             context.Dte.ItemOperations.OpenFile(readmePath);
         }
-
-        string message = !openedReadme
-            ? "README.md could not be resolved from the current solution. Start with the repo README for setup and usage, check BUGS.md for current runtime gaps, and use Tools.IdeHelp only when you need the raw command catalog."
-            : $"Opened README.md for the main product guide.{Environment.NewLine}{Environment.NewLine}Check BUGS.md for current runtime gaps and use Tools.IdeHelp only when you need the raw command catalog.";
-
-        VsShellUtilities.ShowMessageBox(
-            context.Package,
-            message,
-            "VS IDE Bridge",
-            OLEMSGICON.OLEMSGICON_INFO,
-            OLEMSGBUTTON.OLEMSGBUTTON_OK,
-            OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
+        else
+        {
+            VsShellUtilities.ShowMessageBox(
+                context.Package,
+                "README.md was not found. Try reinstalling VS IDE Bridge, or visit the project page for documentation.",
+                "VS IDE Bridge",
+                OLEMSGICON.OLEMSGICON_INFO,
+                OLEMSGBUTTON.OLEMSGBUTTON_OK,
+                OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
+        }
 
         await Task.Yield();
         return (readmePath, bugsPath, openedReadme);

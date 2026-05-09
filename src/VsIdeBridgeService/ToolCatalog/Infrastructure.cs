@@ -245,7 +245,7 @@ internal static partial class ToolCatalog
                     response = transformResponse(response, args);
                 }
 
-                return BridgeResult(response, args);
+                return BridgeResult(response, args, toolName: definition.Name);
             });
 
     private static ToolEntry BridgeTool(
@@ -276,7 +276,7 @@ internal static partial class ToolCatalog
                     response = transformResponse(response, args);
                 }
 
-                return BridgeResult(response, args, dataOnly: outputSchema is not null);
+                return BridgeResult(response, args, dataOnly: outputSchema is not null, toolName: name);
             },
             title,
             annotations,
@@ -321,7 +321,7 @@ internal static partial class ToolCatalog
                     response = transformResponse(response, args);
                 }
 
-                return BridgeResult(response, args, dataOnly: outputSchema is not null);
+                return BridgeResult(response, args, dataOnly: outputSchema is not null, toolName: name);
             },
             title,
             annotations,
@@ -335,10 +335,27 @@ internal static partial class ToolCatalog
             destructive,
             searchHints);
 
-    private static JsonNode BridgeResult(JsonObject response, JsonObject? args = null, bool dataOnly = false)
+    private static JsonNode BridgeResult(JsonObject response, JsonObject? args = null, bool dataOnly = false, string? toolName = null)
     {
         bool success = (response["Success"] ?? response["success"])?.GetValue<bool>() ?? false;
-        return ToolResultFormatter.StructuredToolResult(response, args, isError: !success, dataOnly: dataOnly);
+        JsonObject? toolHelp = success ? null : BuildInlineToolHelp(toolName);
+        return ToolResultFormatter.StructuredToolResult(response, args, isError: !success, dataOnly: dataOnly, toolHelp: toolHelp);
+    }
+
+    private static JsonObject? BuildInlineToolHelp(string? toolName)
+    {
+        if (string.IsNullOrWhiteSpace(toolName) ||
+            !DefinitionRegistry.Value.TryGet(toolName, out ToolDefinition? definition))
+        {
+            return null;
+        }
+
+        return new JsonObject
+        {
+            ["Summary"] = $"Help for tool '{definition.Name}'.",
+            ["invocation"] = definition.BuildInvocationEntry(),
+            ["tool"] = definition.BuildToolObject(),
+        };
     }
 }
 
@@ -352,7 +369,8 @@ internal static class ToolResultFormatter
         JsonObject? args = null,
         bool isError = false,
         string? successText = null,
-        bool dataOnly = false)
+        bool dataOnly = false,
+        JsonObject? toolHelp = null)
     {
         string text;
         if (isError)
@@ -366,7 +384,7 @@ internal static class ToolResultFormatter
             string? diagnosticsText = errorMsg is null ? CreateDiagnosticsSuccessText(response) : null;
             string baseText = diagnosticsText ?? errorMsg ?? summary ?? response.ToJsonString();
             string? hint = GetErrorHint(errorCode);
-            text = hint is null ? baseText : baseText + " " + hint;
+            text = AppendToolHelp(hint is null ? baseText : baseText + " " + hint, toolHelp);
         }
         else if (WantsFullSuccessPayload(args))
         {
@@ -399,6 +417,17 @@ internal static class ToolResultFormatter
 
     private const int MaxDiagnosticTextRows = 10;
     private const int MaxDiagnosticPreviewRows = 2;
+
+    private static string AppendToolHelp(string text, JsonObject? toolHelp)
+    {
+        if (toolHelp is null)
+            return text;
+
+        string toolName = toolHelp["tool"]?["name"]?.GetValue<string>() ?? "this tool";
+        return text +
+            $"\n\nTool help for '{toolName}':\n{toolHelp.ToJsonString()}\n\n" +
+            "Retry using the invocation wrapper shown above. In lazy mode, do not call catalog tool names as top-level MCP tools unless they appear in the protocol tools/list response.";
+    }
 
     private static bool WantsFullSuccessPayload(JsonObject? args)
         => args?["verbose"]?.GetValue<bool?>() == true

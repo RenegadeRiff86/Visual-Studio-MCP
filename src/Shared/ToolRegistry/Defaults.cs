@@ -21,13 +21,29 @@ public sealed partial class ToolRegistry
         "write_file",
     ];
 
+    private static readonly string[] DefaultRecommendedDiagnosticToolNames =
+    [
+        "errors",
+        "warnings",
+        "messages",
+        "diagnostics_snapshot",
+        "build_errors",
+        "read_output",
+    ];
+
     private static readonly string[] DefaultRecommendedBuildToolNames =
     [
-        "build",
         "build_errors",
+        "build",
+        "build_solution",
+        "rebuild_solution",
+        "rebuild",
         "errors",
+        "warnings",
+        "messages",
         "build_configurations",
         "set_build_configuration",
+        "read_output",
     ];
 
     private static readonly string[] DefaultRecommendedGitToolNames =

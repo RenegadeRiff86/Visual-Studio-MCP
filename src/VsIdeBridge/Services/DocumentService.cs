@@ -7,6 +7,7 @@ internal sealed partial class DocumentService(IServiceProvider serviceProvider)
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private const string DefinitionFoundProperty = "definitionFound";
     private const string DefinitionLocationProperty = "definitionLocation";
+    private const string DefinitionStatusProperty = "definitionStatus";
     private const string DocumentNotFoundCode = "document_not_found";
     private const string ImplementationFoundProperty = "implementationFound";
     private const string ImplementationLocationProperty = "implementationLocation";

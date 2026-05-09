@@ -1,4 +1,5 @@
 using System.IO.Pipes;
+using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.ServiceProcess;
@@ -53,6 +54,23 @@ internal static class Program
             return;
         }
 
+        if (args.Length > 0 && args[0].Equals("mcp-streamable-http", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                McpServerLog.Write("mcp-streamable-http starting");
+                StreamableHttpMode.RunAsync(args[1..]).GetAwaiter().GetResult();
+                McpServerLog.Write("mcp-streamable-http stopped normally");
+            }
+            catch (Exception ex) when (ex is not null) // top-level MCP Streamable HTTP host boundary
+            {
+                McpServerLog.Write($"mcp-streamable-http fatal error: {ex}");
+                Environment.ExitCode = 1;
+            }
+
+            return;
+        }
+
         try
         {
             ServiceBase.Run(new BridgeService(args));
@@ -88,13 +106,14 @@ internal static class Program
             string logPath = Path.Combine(Path.GetTempPath(), "VsIdeBridgeService-bootstrap.log");
             File.AppendAllText(logPath, $"{DateTime.Now:O} {message}{Environment.NewLine}");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not null) // defensive log write — any IO/access failure is non-fatal
         {
             McpServerLog.WriteException("bootstrap log write failed", ex);
         }
     }
 }
 
+[SupportedOSPlatform("windows")]
 internal sealed class BridgeService : ServiceBase
 {
     private const int ControlPipeBufferSize = 4096;
@@ -127,6 +146,8 @@ internal sealed class BridgeService : ServiceBase
         // --enable-http writes the flag file; RestoreState() in OnStart() starts the server.
         if (GetFlagArg(args, "enable-http"))
             HttpServerController.MarkEnabled();
+        if (GetFlagArg(args, "enable-streamable-http"))
+            StreamableHttpServerController.MarkEnabled();
         _logPath = ResolveLogPath();
     }
 
@@ -140,10 +161,14 @@ internal sealed class BridgeService : ServiceBase
         _acceptLoop = AcceptLoopAsync(_stopCts.Token);
         _idleLoop = IdleLoopAsync(_stopCts.Token);
         HttpServerController.RestoreState();
+        StreamableHttpServerController.RestoreState();
 
         Log(HttpServerController.IsRunning
             ? $"service started (HTTP MCP on {HttpServerController.Url})"
             : "service started (HTTP MCP disabled)");
+        Log(StreamableHttpServerController.IsRunning
+            ? $"service started (Streamable HTTP MCP on {StreamableHttpServerController.Url})"
+            : "service started (Streamable HTTP MCP disabled)");
     }
 
     protected override void OnStop()
@@ -152,6 +177,7 @@ internal sealed class BridgeService : ServiceBase
 
         _stopCts?.Cancel();
         HttpServerController.StopAndWait(TimeSpan.FromSeconds(ShutdownWaitTimeoutSeconds));
+        StreamableHttpServerController.StopAndWait(TimeSpan.FromSeconds(ShutdownWaitTimeoutSeconds));
 
         Task.WaitAll([.. new[] { _acceptLoop, _idleLoop }.OfType<Task>()], TimeSpan.FromSeconds(ShutdownWaitTimeoutSeconds));
 
@@ -402,6 +428,14 @@ internal sealed class BridgeService : ServiceBase
                     _lastActivityUtc = DateTime.UtcNow;
                     HandleHttpDisable();
                     break;
+                case "STREAMABLE_HTTP_ENABLE":
+                    _lastActivityUtc = DateTime.UtcNow;
+                    HandleStreamableHttpEnable();
+                    break;
+                case "STREAMABLE_HTTP_DISABLE":
+                    _lastActivityUtc = DateTime.UtcNow;
+                    HandleStreamableHttpDisable();
+                    break;
                 default:
                     Log($"unknown control event '{evt}'");
                     break;
@@ -432,6 +466,32 @@ internal sealed class BridgeService : ServiceBase
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             Log($"control event HTTP_DISABLE failed: {ex.Message}");
+        }
+    }
+
+    private void HandleStreamableHttpEnable()
+    {
+        try
+        {
+            StreamableHttpServerController.Enable();
+            Log("control event STREAMABLE_HTTP_ENABLE handled");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            Log($"control event STREAMABLE_HTTP_ENABLE failed: {ex.Message}");
+        }
+    }
+
+    private void HandleStreamableHttpDisable()
+    {
+        try
+        {
+            StreamableHttpServerController.Disable();
+            Log("control event STREAMABLE_HTTP_DISABLE handled");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            Log($"control event STREAMABLE_HTTP_DISABLE failed: {ex.Message}");
         }
     }
 

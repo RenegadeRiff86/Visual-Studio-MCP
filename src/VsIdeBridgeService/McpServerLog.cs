@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using VsIdeBridge.Shared;
 
 namespace VsIdeBridgeService;
 
@@ -82,36 +83,28 @@ internal static class McpServerLog
 
     private static string ResolveLogPath()
     {
-        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        string tempPath = Path.GetTempPath();
-        string[] candidates =
-        [
-            Path.Combine(localAppData, "VsIdeBridge"),
-            tempPath,
-        ];
-
-        foreach (string directory in candidates)
+        string directory = BridgeLogPaths.GetSharedLogDirectory();
+        try
         {
-            try
-            {
-                Directory.CreateDirectory(directory);
-                return Path.Combine(directory, "mcp-server.log");
-            }
-            catch (IOException ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"McpServerLog.ResolveLogPath failed for '{directory}': {ex}");
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"McpServerLog.ResolveLogPath failed for '{directory}': {ex}");
-            }
-            catch (NotSupportedException ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"McpServerLog.ResolveLogPath failed for '{directory}': {ex}");
-            }
+            Directory.CreateDirectory(directory);
+            return BridgeLogPaths.GetMcpServerLogPath();
+        }
+        catch (IOException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"McpServerLog.ResolveLogPath failed for '{directory}': {ex}");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"McpServerLog.ResolveLogPath failed for '{directory}': {ex}");
+        }
+        catch (NotSupportedException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"McpServerLog.ResolveLogPath failed for '{directory}': {ex}");
         }
 
-        return Path.Combine(tempPath, "mcp-server.log");
+        string fallbackDirectory = BridgeLogPaths.GetTempLogDirectory();
+        Directory.CreateDirectory(fallbackDirectory);
+        return BridgeLogPaths.GetMcpServerTempLogPath();
     }
 
     private static string FormatId(JsonNode? id)

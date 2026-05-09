@@ -13,6 +13,10 @@ public sealed partial class ToolRegistry
                 return new JsonObject
                 {
                     ["Summary"] = $"Help for tool '{tool.Name}'.",
+                    ["invocationHint"] = tool.Name == "call_tool"
+                        ? "call_tool is directly callable and cannot dispatch to itself."
+                        : $"In lazy mode, invoke this catalog tool with call_tool: {{ \"name\": \"call_tool\", \"arguments\": {{ \"name\": \"{tool.Name}\", \"arguments\": {{ ... }} }} }}.",
+                    ["invocation"] = tool.BuildInvocationEntry(),
                     ["tool"] = tool.BuildToolObject(),
                 };
             }

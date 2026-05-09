@@ -11,9 +11,18 @@ public static partial class ToolDefinitionCatalog
             "list_tools",
             "system",
             "List all tools.",
-            "Return every tool in a compact scan-friendly format with category and safety flags.",
+            "Return every bridge catalog tool in a compact scan-friendly format with category, safety flags, and call_tool invocation guidance. Names returned here are not necessarily directly exposed MCP tools in lazy mode.",
             parameterSchema,
             tags: [DiscoveryTag, "catalog", "list"]);
+
+    public static ToolDefinition CallTool(JsonObject parameterSchema)
+        => CreateMutatingTool(
+            "call_tool",
+            "system",
+            "Call a discovered bridge tool.",
+            "Invoke a bridge catalog tool by name after discovering it with recommend_tools, list_tools, or tool_help. Use this wrapper for tools such as read_file, find_text, apply_diff, and git_status when they are not directly exposed in the MCP protocol tools/list response. The target tool may be read-only or mutating, so inspect the target schema before destructive operations.",
+            parameterSchema,
+            tags: [DiscoveryTag, "dispatch", "lazy"]);
 
     public static ToolDefinition ListToolCategories(JsonObject parameterSchema)
         => CreateReadOnlyTool(
@@ -29,7 +38,7 @@ public static partial class ToolDefinitionCatalog
             "list_tools_by_category",
             "system",
             "List tools in one category.",
-            "Return the tools for one category in the same compact discovery format.",
+            "Return bridge catalog tools for one category in the same compact discovery format, including call_tool invocation guidance.",
             parameterSchema,
             tags: [DiscoveryTag, "category", "catalog"]);
 

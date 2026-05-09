@@ -79,4 +79,33 @@ internal static partial class DebugBuildCommands
                 Max = max,
             });
     }
+
+    /// <summary>
+    /// Produces bridge-level advisory warnings pointing to severity categories that were
+    /// NOT the primary focus of this call, so the model is reminded to check them.
+    /// </summary>
+    private static JArray BuildDiagnosticsCrossReferenceAdvisories(JObject result, params string[] otherSeverities)
+    {
+        JToken? counts = result["totalSeverityCounts"];
+        if (counts is null)
+            return [];
+
+        JArray advisories = [];
+        foreach (string severity in otherSeverities)
+        {
+            int count = counts[severity]?.Value<int>() ?? 0;
+            if (count > 0)
+            {
+                string callHint = severity switch
+                {
+                    "Error" => "run errors",
+                    "Warning" => "run warnings",
+                    "Message" => "run warnings with severity=Message",
+                    _ => $"run {severity.ToLowerInvariant()}",
+                };
+                advisories.Add($"Also found {count} {severity.ToLowerInvariant()}(s) — {callHint}.");
+            }
+        }
+        return advisories;
+    }
 }

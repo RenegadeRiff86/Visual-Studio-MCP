@@ -15,7 +15,7 @@ public static partial class ToolDefinitionCatalog
             parameterSchema,
             bridgeCommand: "find-files",
             title: "Solution Explorer File Search",
-            aliases: ["solution_explorer_search", "search_solution_explorer", "find_solution_file", "search_files", "find_file_by_name", "find", "ls_files"],
+            aliases: ["ls", "list_directory", "find_files_by_name", "solution_explorer_search", "search_solution_explorer", "find_solution_file", "search_files", "find_file_by_name", "find", "ls_files"],
             tags: ["code", NavigationTag, "files", "path", "solution", "explorer"]);
 
     public static ToolDefinition FindText(JsonObject parameterSchema)
@@ -27,7 +27,7 @@ public static partial class ToolDefinitionCatalog
             parameterSchema,
             bridgeCommand: "find-text",
             title: "Text Search",
-            aliases: ["search_text", "text_search", "grep_text", "grep", "rg", "ripgrep"],
+            aliases: ["search", "search_code", "search_file_content", "grep_search", "search_text", "text_search", "grep_text", "grep", "rg", "ripgrep"],
             tags: ["code", NavigationTag, "search", "text", "grep"]);
 
     public static ToolDefinition FindTextBatch(JsonObject parameterSchema)
@@ -39,7 +39,7 @@ public static partial class ToolDefinitionCatalog
             parameterSchema,
             bridgeCommand: "find-text-batch",
             title: "Batched Text Search",
-            aliases: ["search_text_batch", "text_search_batch", "grep_text_batch", "multi_grep", "grep_batch"],
+            aliases: ["search_many", "search_batch", "search_text_batch", "text_search_batch", "grep_text_batch", "multi_grep", "grep_batch"],
             tags: ["code", NavigationTag, "search", "text", "batch", "grep"]);
 
 }

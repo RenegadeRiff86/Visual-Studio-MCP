@@ -139,7 +139,10 @@ internal static partial class DebugBuildCommands
                 CreateErrorListQuery(args),
                 forceRefresh).ConfigureAwait(true);
 
-            return new CommandExecutionResult($"Captured {errorListResult["count"]} Error List row(s).", errorListResult);
+            return new CommandExecutionResult(
+                $"Captured {errorListResult["count"]} Error List row(s).",
+                errorListResult,
+                BuildDiagnosticsCrossReferenceAdvisories(errorListResult, "Warning", "Message"));
         }
     }
 
@@ -159,7 +162,10 @@ internal static partial class DebugBuildCommands
                 CreateErrorListQuery(args, "warning"),
                 forceRefresh).ConfigureAwait(true);
 
-            return new CommandExecutionResult($"Captured {warningListResult["count"]} warning row(s).", warningListResult);
+            return new CommandExecutionResult(
+                $"Captured {warningListResult["count"]} warning row(s).",
+                warningListResult,
+                BuildDiagnosticsCrossReferenceAdvisories(warningListResult, "Error", "Message"));
         }
     }
 
@@ -179,7 +185,10 @@ internal static partial class DebugBuildCommands
                 CreateErrorListQuery(args, "message"),
                 forceRefresh).ConfigureAwait(true);
 
-            return new CommandExecutionResult($"Captured {messageListResult["count"]} message row(s).", messageListResult);
+            return new CommandExecutionResult(
+                $"Captured {messageListResult["count"]} message row(s).",
+                messageListResult,
+                BuildDiagnosticsCrossReferenceAdvisories(messageListResult, "Error", "Warning"));
         }
     }
 

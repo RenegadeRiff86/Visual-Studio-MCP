@@ -17,8 +17,8 @@ public static partial class ToolDefinitionCatalog
             parameterSchema,
             bridgeCommand: "apply-diff",
             title: "Apply Diff",
-            aliases: ["apply_patch", "patch_file", "patch_code"],
-            tags: ["edit", "patch", "diff", "code", "file"],
+            aliases: ["edit", "edit_file", "apply_patch", "patch_file", "patch_code", "replace", "replace_text", "multi_edit", "multiedit"],
+            tags: ["edit", "patch", "diff", "replace", "modify", "code", "file"],
             destructive: true);
 
     public static ToolDefinition WriteFile(JsonObject parameterSchema)
@@ -30,8 +30,8 @@ public static partial class ToolDefinitionCatalog
             parameterSchema,
             bridgeCommand: "write-file",
             title: "Write File",
-            aliases: ["create_file", "overwrite_file", "replace_file"],
-            tags: ["edit", "write", "file", "create", "replace"],
+            aliases: ["write", "create", "create_file", "overwrite_file", "replace_file", "write_new_file"],
+            tags: ["edit", "write", "file", "create", "overwrite", "replace"],
             destructive: true);
 
     public static ToolDefinition ReadFile(JsonObject parameterSchema)
@@ -43,7 +43,7 @@ public static partial class ToolDefinitionCatalog
             parameterSchema,
             bridgeCommand: "document-slice",
             title: "Read File Slice",
-            aliases: ["read_code", "read_source", "open_file_slice"],
+            aliases: ["read", "view_file", "cat", "read_code", "read_source", "open_file_slice"],
             tags: ["code", NavigationTag, "read", "file", "slice"]);
 
     public static ToolDefinition ReadFileBatch(JsonObject parameterSchema)
@@ -55,6 +55,6 @@ public static partial class ToolDefinitionCatalog
             parameterSchema,
             bridgeCommand: "document-slices",
             title: "Read File Slices",
-            aliases: ["read_code_batch", "read_source_batch", "open_file_slices"],
+            aliases: ["read_many_files", "read_many", "multi_read", "read_multiple_files", "read_code_batch", "read_source_batch", "open_file_slices"],
             tags: ["code", NavigationTag, "read", "file", "slice", "batch"]);
 }

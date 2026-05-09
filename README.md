@@ -1,299 +1,156 @@
 # VS IDE Bridge
 
-VS IDE Bridge is an MCP server that connects AI assistants to a live Visual Studio instance. It gives an LLM real-time access to your code, diagnostics, symbols, editor, debugger, Git history, and project structure — all through the IDE that is already open on your machine.
-
-## How It Works
-
-Two components run side by side:
-
-- **VsIdeBridge** — a Visual Studio extension that runs inside VS, owns the named pipe server, and exposes IDE operations.
-- **VsIdeBridgeService** — a Windows service that is the MCP-facing runtime. It routes bridge-tool calls through the pipe to whichever VS instance is active, and hosts service-native tools that do not require VS to be open.
-
-When Visual Studio starts, the extension registers a live bridge instance. The service discovers it and makes it available to any connected MCP client.
-
-```
-MCP Client  ──►  VsIdeBridgeService  ──►  [named pipe]  ──►  VsIdeBridge (inside VS)
-                  (HTTP or stdio MCP)                          (extension, live IDE)
-```
+VS IDE Bridge connects your AI assistant to Visual Studio. Once connected, your assistant can read and edit code, check errors, run builds, inspect debugger state, and work with Git — all against the live project that is already open on your machine.
 
 ## Requirements
 
 - Windows 10 or Windows 11
-- Visual Studio 2022 (17.x) or Visual Studio 2025 (18.x)
-- A compatible MCP client (Codex, Claude Code, Cursor, or any client that speaks HTTP MCP or stdio MCP)
+- Visual Studio 2022 (17.x) or Visual Studio 2026 (18.x)
+- An AI assistant with MCP support (Claude Code, Cursor, LM Studio, or any MCP-compatible client)
 
 ## Installation
 
-1. Download the latest release installer.
-2. Run the installer. It installs the Windows service, the VS extension, and optional managed Python support.
-3. Start Visual Studio. The extension auto-registers the bridge instance on startup.
-4. Connect your MCP client using one of the config examples below.
+1. Download and run the latest installer.
+2. Open Visual Studio. The extension activates automatically on startup.
+3. Connect your AI assistant using the setup below.
 
-After installation, the default layout is:
+## Connecting Your AI Assistant
 
+Pick the connection method that matches your client.
+
+### Claude Code (stdio)
+
+```bash
+# Register for the current project
+claude mcp add --transport stdio --scope project vs-ide-bridge "C:\Program Files\VsIdeBridge\service\VsIdeBridgeService.exe" mcp-server
+
+# Or register globally (available from any project)
+claude mcp add --transport stdio --scope user vs-ide-bridge "C:\Program Files\VsIdeBridge\service\VsIdeBridgeService.exe" mcp-server
 ```
-C:\Program Files\VsIdeBridge\
-  service\VsIdeBridgeService.exe   ← MCP host and Windows service
-  vsix\VsIdeBridge.vsix            ← VS extension payload
-  python\managed-runtime\          ← optional managed Python runtime
-```
 
-## MCP Client Setup
+Restart Claude Code after adding. Visual Studio must be running before you start a session.
 
-The bridge supports two connection models.
+If the server stops appearing after a reinstall, re-run the command above and restart Claude Code.
 
-### HTTP MCP (recommended)
+### HTTP (Codex, Cursor, and most web-based clients)
 
-Use this when your client can speak HTTP MCP. It reuses the already-running Windows service instead of starting a second foreground host process.
-
-Current installers enable the local HTTP endpoint on `http://localhost:8080/` by default.
-
-If you turned it off, or you are upgrading from an older install that predates the shared HTTP state fix, re-enable it once:
-
-In Visual Studio: **Tools → IdeVSBridgeMenu → Enable HTTP MCP**
-
-Or call the bridge `http_enable` tool.
-
-#### Codex
-
-Codex supports MCP in both the CLI and the IDE extension, and both share the same MCP config. Add the bridge to `~/.codex/config.toml` (or a trusted project-scoped `.codex/config.toml`):
+The bridge listens on `http://localhost:43117/` by default.
 
 ```toml
+# Codex — ~/.codex/config.toml
 [mcp_servers.vs-ide-bridge]
-url = "http://localhost:8080/"
+url = "http://localhost:43117/"
 enabled = true
 ```
 
-If you prefer the Codex CLI, you can register the same HTTP endpoint with:
-
-```bash
-codex mcp add vs-ide-bridge --url http://localhost:8080/
-```
-
-#### Other HTTP clients
-
-Use the equivalent HTTP MCP entry in your client config, for example:
-
 ```json
+// Generic HTTP MCP config
 {
   "mcpServers": {
     "vs-ide-bridge": {
-      "transport": {
-        "type": "http",
-        "url": "http://localhost:8080/"
-      }
+      "transport": { "type": "http", "url": "http://localhost:43117/" }
     }
   }
 }
 ```
 
-### Stdio MCP
+If the endpoint is off, enable it from Visual Studio: **Tools → VS IDE Bridge → Toggle HTTP MCP Server**
 
-Use this when your client requires stdio, or when you intentionally want a dedicated foreground host process. It does not attach to the already-running Windows service.
-
-#### Claude Code
-
-Choose one registration scope:
-
-```bash
-# project-scoped (.mcp.json in the current repo)
-claude mcp add --transport stdio --scope project vs-ide-bridge "C:\Program Files\VsIdeBridge\service\VsIdeBridgeService.exe" mcp-server
-
-# user-scoped (~/.claude.json, available everywhere)
-claude mcp add --transport stdio --scope user vs-ide-bridge "C:\Program Files\VsIdeBridge\service\VsIdeBridgeService.exe" mcp-server
-```
-
-If you add the server manually, the entry must include `"type": "stdio"`. Use the same server object in either a repo `.mcp.json` or `~/.claude.json` under `mcpServers`:
+### Streamable HTTP (LM Studio and local models)
 
 ```json
 {
   "mcpServers": {
     "vs-ide-bridge": {
-      "type": "stdio",
-      "command": "C:\\Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe",
-      "args": ["mcp-server"],
-      "env": {}
+      "transport": { "type": "streamable-http", "url": "http://localhost:43118/mcp" }
     }
   }
 }
 ```
 
-#### Other stdio clients
+Enable from Visual Studio: **Tools → VS IDE Bridge → Toggle Streamable HTTP MCP Server**
 
-Use the same `command` / `args` pattern in your client's MCP config file.
+## What You Can Do
 
-### Re-registering after reinstall (Claude Code)
+Once connected, describe what you want in plain language. The assistant figures out how to use the bridge.
 
-If the MCP server stops appearing in Claude Code after a bridge reinstall or the command path changes, re-run one of the registration commands above. Use `--scope project` when you want a repo-local `.mcp.json`, or `--scope user` when you want the server available from any working directory via `~/.claude.json`.
+**Navigate code**
+- "Find all the places where `ProcessOrder` is called."
+- "What does this method do? Show me its definition."
+- "Show me everything that calls into this class."
 
-```bash
-# project-scoped (.mcp.json in the current repo)
-claude mcp add --transport stdio --scope project vs-ide-bridge "C:\Program Files\VsIdeBridge\service\VsIdeBridgeService.exe" mcp-server
+**Make changes**
+- "Rename this variable everywhere it's used."
+- "Extract this block into a new helper method."
+- "Add null checks to all the public methods in this file."
 
-# user-scoped (~/.claude.json, available everywhere)
-claude mcp add --transport stdio --scope user vs-ide-bridge "C:\Program Files\VsIdeBridge\service\VsIdeBridgeService.exe" mcp-server
-```
+**Diagnose and build**
+- "What errors are in the project right now?"
+- "Fix all the warnings in this file."
+- "Build the solution and tell me what broke."
 
-To verify registration took effect:
+**Debug**
+- "Set a breakpoint on line 42 and start the debugger."
+- "What are the local variables at the current line?"
+- "Show me the call stack."
 
-```bash
-claude mcp list
-```
+**Git**
+- "What files have I changed since the last commit?"
+- "Commit everything with a sensible message."
+- "Show me the diff for this file."
 
-After adding, restart Claude Code — the MCP server is launched as a child process on session start. VS with the extension must already be running so that discovery can find the named-pipe registration.
+**Project and packages**
+- "What NuGet packages does this project reference?"
+- "Add the latest version of Newtonsoft.Json."
 
-### Tool safety
+## Tips
 
-If your client supports per-tool controls, disable `shell_exec` by default:
+- **Open Visual Studio first.** The bridge connects to a running VS instance. If VS is not open, the assistant cannot see your code.
+- **Multiple VS windows?** Tell your assistant which solution to work with: *"Bind to MySolution.sln."*
+- **After a build error?** Ask *"what errors came up?"* instead of reading the Output window yourself — the assistant gets a structured list it can act on immediately.
+- **Slow start?** IntelliSense takes a moment to load after VS opens. If the assistant reports incomplete symbol results, wait a few seconds and try again.
 
-```json
-{
-  "mcpServers": {
-    "vs-ide-bridge": {
-      "type": "stdio",
-      "command": "C:\\Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe",
-      "args": ["mcp-server"],
-      "disabledTools": ["shell_exec"]
-    }
-  }
-}
-```
+## Logs
 
-See [Shell Safety](#shell-safety) below.
+Logs are written to `C:\Program Files\VsIdeBridge\logs\`:
 
-## Quick Start
+- `mcp-server.log` — MCP request and response log
+- `vs-ide-bridge-yyyy-MM-dd.log` — Visual Studio extension activity log
 
-Once connected, the bridge auto-binds to a live VS instance when it sees one clear target. Explicit binding is better when you have multiple VS windows open:
+## Troubleshooting
 
-```
-list_instances        ← see what VS instances are available
-bind_instance         ← bind the session to one specific instance
-wait_for_ready        ← wait for IntelliSense to finish loading
-```
+**Assistant says it can't find Visual Studio or the solution**
+Visual Studio must be running with your solution open before you start the AI session. Try telling your assistant: *"Connect to Visual Studio"* or *"Bind to MySolution.sln."*
 
-From there you can read code, navigate symbols, apply edits, inspect diagnostics, and run builds without leaving your AI chat.
+**Tools stopped working after a reinstall**
+Re-run the registration command for your client (see [Connecting Your AI Assistant](#connecting-your-ai-assistant)), then restart the client.
 
-## Tool Overview
-
-The bridge currently exposes **147 tools** across 9 categories. Use `list_tool_categories`, `list_tools`, and `list_tools_by_category` for live discovery, and `recommend_tools` to ask the bridge which tools fit a given task.
-
-### core — Session and binding
-
-Connect to the right VS instance and manage the current session.
-
-`list_instances` · `bind_instance` · `bind_solution` · `bridge_health` · `vs_state` · `wait_for_ready` · `open_file` · `save_document` · `reload_document` · `activate_document` · `activate_window` · `list_windows` · `http_enable` · `http_status`
-
-### search — Code navigation
-
-Find files, inspect symbols, read code, and trace definitions and references.
-
-`find_files` · `glob` · `find_text` · `find_text_batch` · `search_symbols` · `read_file` · `read_file_batch` · `file_outline` · `file_symbols` · `symbol_info` · `peek_definition` · `goto_definition` · `goto_implementation` · `find_references` · `count_references` · `call_hierarchy` · `smart_context`
-
-### diagnostics — Errors and build
-
-Inspect the live Error List and drive builds.
-
-`errors` · `warnings` · `messages` · `diagnostics_snapshot` · `build` · `build_solution` · `rebuild_solution` · `build_errors` · `build_configurations` · `set_build_configuration` · `run_code_analysis`
-
-### documents — Editor and files
-
-Patch code through the live editor and manage open documents.
-
-`apply_diff` · `capture_vs_window` · `write_file` · `list_documents` · `list_tabs` · `copy_file` · `delete_file` · `format_document`
-
-`apply_diff` uses the bridge editor-patch format:
-
-```
-*** Begin Patch
-*** Update File: src/MyProject/MyClass.cs
-@@
--        string result = oldValue;
-+        string result = newValue;
-*** End Patch
-```
-
-### debug — Debugger inspection
-
-Inspect and control an active debug session.
-
-`debug_threads` · `debug_stack` · `debug_locals` · `debug_watch` · `debug_modules` · `debug_exceptions` · `set_breakpoint` · `list_breakpoints` · `enable_breakpoint` · `disable_breakpoint` · `debug_start` · `debug_break` · `debug_continue` · `debug_stop` · `debug_step_into` · `debug_step_over` · `debug_step_out`
-
-### git — Version control
-
-Bridge-managed Git operations with structured results.
-
-`git_status` · `git_diff_unstaged` · `git_diff_staged` · `git_add` · `git_commit` · `git_push` · `git_pull` · `git_branch_list` · `git_checkout` · `git_log` · `git_show` · `git_stash_push` · `git_stash_pop`
-
-### project — Projects and solutions
-
-Inspect and modify project structure, references, NuGet packages, and outputs.
-
-`list_projects` · `query_project_items` · `query_project_properties` · `query_project_references` · `query_project_outputs` · `query_project_configurations` · `scan_project_dependencies` · `add_file_to_project` · `remove_file_from_project` · `nuget_add_package` · `nuget_remove_package` · `set_startup_project`
-
-### python — Python runtime
-
-Interpreter discovery, package management, and stateless scratchpad execution.
-
-`python_eval` · `python_exec` · `python_list_envs` · `python_env_info` · `python_list_packages` · `python_install_package` · `python_remove_package` · `python_create_env`
-
-Note: this is a stateless scratchpad surface, not a persistent REPL.
-
-### system — Discovery and host
-
-Tool-catalog discovery and host-level control.
-
-`list_tool_categories` · `list_tools` · `list_tools_by_category` · `recommend_tools` · `tool_help` · `wait_for_instance` · `vs_close` · `shell_exec` · `set_version`
-
-`capture_vs_window` activates the bound Visual Studio window, brings it to the foreground, and writes a PNG to `%TEMP%\vs-ide-bridge\screenshots` by default so one-off captures do not dirty the repo.
+**Bridge is not responding**
+Check that the `VsIdeBridgeService` Windows service is running. Open Services (`services.msc`) and look for **VS IDE Bridge Service**.
 
 ## Shell Safety
 
-`shell_exec` can run arbitrary commands on the host machine with the permissions of the bridge process. Treat it as an operator-approved escape hatch:
+The bridge can run arbitrary shell commands on your machine when asked. This is intentional for advanced tasks, but treat it as a power tool:
 
-- Prefer typed bridge tools for editing, diagnostics, builds, Git, and project work before reaching for `shell_exec`.
-- Do not expose `shell_exec` to untrusted prompts or unattended automation without review.
-- If your MCP client supports tool allowlists or approval rules, add `shell_exec` to the requires-approval list.
-
-## Best Practice Analyzer
-
-VS IDE Bridge ships a built-in best-practice analyzer that runs over the solution and surfaces structural guidance alongside normal diagnostics — things like oversized files, long methods, accessor-heavy types, and commented-out code. The warnings appear in the Visual Studio Error List alongside normal compiler output and can be queried with `warnings`.
-
-## Project Structure
-
-```
-src/
-  VsIdeBridge/              ← VS extension: pipe server, commands, IDE services
-  VsIdeBridgeService/       ← Windows service: MCP runtime, tool catalog, service tools
-  Shared/                   ← tool metadata, schemas, shared registry
-  VsIdeBridge.Diagnostics/  ← best-practice rules and warning projection
-  VsIdeBridgeInstaller/     ← installer entry point
-  VsIdeBridgeLauncher/      ← VS launch helper
-installer/                  ← Inno Setup packaging
-tests/                      ← unit and integration tests
-codex/                      ← SDK notes and workflow skills
-```
+- Prefer asking for typed actions (edit this file, run a build, commit this change) before asking for raw shell commands.
+- Do not use unattended automation that includes shell commands without review.
+- If your MCP client supports tool approval rules, add `shell_exec` to the requires-approval list.
 
 ## Building from Source
 
 Prerequisites: Visual Studio 2022 or later with the Visual Studio extension development workload.
 
-```
+```bash
 git clone https://github.com/<owner>/vs-ide-bridge
 cd vs-ide-bridge
 dotnet build
 ```
 
-Open `VsIdeBridge.sln` in Visual Studio to work on the extension. The VSIX project sets up the experimental instance automatically for F5 debugging.
-
-### Building the installer
-
-Open `VsIdeBridge.sln` in Visual Studio and run **Build → Rebuild Solution**. The post-build step invokes Inno Setup automatically and produces the setup executable at:
+Open `VsIdeBridge.sln` in Visual Studio to work on the extension. Build the installer with **Build → Rebuild Solution** — the post-build step runs Inno Setup automatically and produces:
 
 ```
 installer\output\vs-ide-bridge-setup-<version>.exe
 ```
-
-Run that installer to deploy the updated extension and service. Visual Studio must be closed before installing so the extension DLL is not locked.
 
 ## Third-Party Notices
 

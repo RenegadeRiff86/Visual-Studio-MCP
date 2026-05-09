@@ -315,14 +315,19 @@ internal sealed partial class PatchService
 
     private static bool CanRevealEditedFile(string path)
     {
+        return !IsDiskBackedPatchFile(path);
+    }
+
+    private static bool IsDiskBackedPatchFile(string path)
+    {
         string extension = Path.GetExtension(path);
-        return !string.Equals(extension, ".csproj", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(extension, ".vcxproj", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(extension, ".vbproj", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(extension, ".fsproj", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(extension, ".props", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(extension, ".targets", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(extension, ".sln", StringComparison.OrdinalIgnoreCase);
+        return string.Equals(extension, ".csproj", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".vcxproj", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".vbproj", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".fsproj", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".props", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".targets", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".sln", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void ThrowIfPatchProducedNoContentChange(string targetPath, FilePatch filePatch, ApplyFilePatchResult result, bool alreadySatisfied)

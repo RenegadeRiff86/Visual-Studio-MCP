@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.3.0
+
+- Changed the default local MCP HTTP ports away from the common `8080` default: shared HTTP now uses `http://localhost:43117/`, and Streamable HTTP now uses `http://localhost:43118/mcp`.
+- Centralized HTTP port defaults in `HttpServerDefaults` so the VSIX, Windows service, foreground HTTP hosts, tool descriptions, and setup docs do not drift apart.
+- Fixed `apply_diff` verification for project and MSBuild files (`.csproj`, `.vcxproj`, `.props`, `.targets`, and `.sln`) by treating disk-backed patch files as disk source-of-truth instead of reading stale open Visual Studio project-file buffers.
+- Added the lazy MCP tool surface so default `tools/list` stays compact while `call_tool`, `recommend_tools`, `tool_help`, and `list_tools` still expose the full bridge surface on demand.
+- Improved tool recommendations for local coding models by recognizing common search/read/edit/run wording plus Claude, Codex, Qwen, Gemini, Grok, and DeepSeek provider cues.
+- Documented the Visual Studio `Tools → VS IDE Bridge → Toggle Streamable HTTP MCP Server` path for enabling the service-owned Streamable HTTP MCP endpoint, and renamed the root menu command from `IdeBridgeMenu` to `VsIdeBridgeMenu`.
+- Fixed explicit build/rebuild waits to use the Visual Studio build completion path and longer build timeout instead of falling back into courtesy polling loops.
+- Fixed post-filtered search results so path and project filters accept either forward slashes or backslashes, keeping `find_text` and `find_text_batch` counts aligned with returned rows.
+- Added an explicit VSCT `MenuText` for the Tools menu so Visual Studio displays `VS IDE Bridge` instead of a command/symbol name.
+- Moved bridge file logs to `C:\ProgramData\VsIdeBridge\logs` and documented the service and extension log files.
+
 ## 2.2.13
 
 - Added paged diagnostics retrieval so large warning, error, and message sets can be read in chunks with counts, offsets, filters, and sorting instead of flooding the model with every row at once.

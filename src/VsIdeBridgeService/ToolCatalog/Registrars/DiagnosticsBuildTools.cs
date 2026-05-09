@@ -60,7 +60,8 @@ internal static partial class ToolCatalog
         bool waitForCompletion = OptionalBool(args, WaitForCompletion, defaultWaitForCompletion);
         bool errorsOnly = args?[ErrorsOnly]?.GetValue<bool>() ?? false;
         // Detect whether the caller explicitly provided wait_for_completion (vs. accepting the default).
-        // Explicit callers get a 10-minute poll window; default callers get the 10-second courtesy wait.
+        // Explicit waits use the VS build command's completion path; default solution-wide builds
+        // start in the background and get only the short courtesy wait.
         bool waitForCompletionExplicit = args?[WaitForCompletion] is not null;
         if (!waitForCompletion && errorsOnly)
         {
@@ -73,13 +74,17 @@ internal static partial class ToolCatalog
         }
 
         JsonObject? preBuild = errorsOnly || !waitForCompletion ? null : await TryCapturePreBuildDiagnosticsAsync(id, bridge).ConfigureAwait(false);
-        bool useCourtesyWait = waitForCompletion && IsSolutionWideBuild(includeProject, args);
-        int waitTimeoutMs = waitForCompletionExplicit ? BuildExplicitWaitMilliseconds : BuildCourtesyWaitMilliseconds;
-        JsonObject response = await bridge.SendAsync(
-                id,
-                pipeCommand,
-                BuildBuildCommandArgs(args, includeProject, waitForCompletion && !useCourtesyWait, defaultWaitForCompletion))
-            .ConfigureAwait(false);
+        bool useCourtesyWait = ShouldUseCourtesyWaitForBuild(waitForCompletion, waitForCompletionExplicit, includeProject, args);
+        bool useDirectBuildWait = waitForCompletion && !useCourtesyWait;
+        string buildCommandArgs = BuildBuildCommandArgs(args, includeProject, useDirectBuildWait, defaultWaitForCompletion);
+        JsonObject response = useDirectBuildWait
+            ? await bridge.SendAsync(
+                    id,
+                    pipeCommand,
+                    buildCommandArgs,
+                    BridgeConnection.ToolTimeoutProfile.BuildWait)
+                .ConfigureAwait(false)
+            : await bridge.SendAsync(id, pipeCommand, buildCommandArgs).ConfigureAwait(false);
 
         if (!waitForCompletion)
         {
@@ -88,6 +93,7 @@ internal static partial class ToolCatalog
 
         if (useCourtesyWait)
         {
+            int waitTimeoutMs = BuildCourtesyWaitMilliseconds;
             string expectedOperation = pipeCommand.StartsWith("rebuild", StringComparison.OrdinalIgnoreCase) ? "rebuild" : "build";
             string? expectedStartedAtUtc = response["Data"]?["startedAtUtc"]?.GetValue<string>();
 
@@ -150,12 +156,22 @@ internal static partial class ToolCatalog
     private static bool IsSolutionWideBuild(bool includeProject, JsonObject? args)
         => !includeProject || string.IsNullOrWhiteSpace(OptionalString(args, Project));
 
+    internal static bool ShouldUseCourtesyWaitForBuild(
+        bool waitForCompletion,
+        bool waitForCompletionExplicit,
+        bool includeProject,
+        JsonObject? args)
+        => waitForCompletion
+            && !waitForCompletionExplicit
+            && IsSolutionWideBuild(includeProject, args);
+
     private static async Task<(JsonObject? BuildResult, JsonObject? BackgroundOperation, bool PromptUser)> WaitForBackgroundBuildAsync(
         BridgeConnection bridge,
         JsonNode? id,
         string expectedOperation,
         string? expectedStartedAtUtc,
         int timeoutMs = BuildCourtesyWaitMilliseconds)
+    // Courtesy waits poll only default solution-wide builds; explicit waits stay on the VS build command path.
     {
         DateTimeOffset deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeoutMs);
         JsonObject? lastBackgroundOperation = null;

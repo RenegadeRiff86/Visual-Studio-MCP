@@ -243,11 +243,11 @@ internal static partial class ToolCatalog
                 related: [("python_sync_env", "Sync bridge interpreter to VS project")]));
 
         yield return BridgeTool("python_set_startup_file",
-            "Set the startup FileArg for the active Python project.",
+            "Set the startup file for the active Python project.",
             ObjectSchema(
-                Req(FileArg, "Path to the Python FileArg to set as startup."),
+                Req(FileArg, "Path to the Python file to set as startup."),
                 Opt(Project, "Python project name or path. Defaults to the active project.")),
-            "set-python-startup-FileArg",
+            "set-python-startup-file",
             a => Build(
                 (FileArg, OptionalString(a, FileArg)),
                 (Project, OptionalString(a, Project))),
@@ -256,10 +256,10 @@ internal static partial class ToolCatalog
                 related: [("python_get_startup_file", "Read the current startup file")]));
 
         yield return BridgeTool("python_get_startup_file",
-            "Get the startup FileArg configured for the active Python project.",
+            "Get the startup file configured for the active Python project.",
             ObjectSchema(
                 Opt(Project, "Python project name or path. Defaults to the active project.")),
-            "get-python-startup-FileArg",
+            "get-python-startup-file",
             a => Build((Project, OptionalString(a, Project))),
             Project,
             searchHints: BuildSearchHints(

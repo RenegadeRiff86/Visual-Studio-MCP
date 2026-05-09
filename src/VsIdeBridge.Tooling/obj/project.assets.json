@@ -634,7 +634,7 @@
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
   },
   "project": {
-    "version": "2.2.13",
+    "version": "2.3.0",
     "restore": {
       "projectUniqueName": "C:\\Users\\elsto\\source\\repos\\vs-ide-bridge\\src\\VsIdeBridge.Tooling\\VsIdeBridge.Tooling.csproj",
       "projectName": "VsIdeBridge.Tooling",

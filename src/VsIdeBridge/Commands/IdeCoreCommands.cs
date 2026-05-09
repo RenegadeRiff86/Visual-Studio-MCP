@@ -153,6 +153,54 @@ internal static partial class IdeCoreCommands
         }
     }
 
+    private static async Task<CommandExecutionResult> ToggleStreamableHttpServerAsync(IdeCommandContext _)
+    {
+        bool enabled = !StreamableHttpServerStateManager.IsEnabled;
+
+        try
+        {
+            if (enabled)
+                await StreamableHttpServerStateManager.EnableAndReconcileAsync().ConfigureAwait(true);
+            else
+                await StreamableHttpServerStateManager.DisableAndReconcileAsync().ConfigureAwait(true);
+
+            string statusMessage = enabled
+                ? $"Streamable HTTP MCP server enabled on {StreamableHttpServerStateManager.Url}"
+                : "Streamable HTTP MCP server disabled.";
+
+            return new CommandExecutionResult(
+                statusMessage,
+                new JObject
+                {
+                    ["enabled"] = enabled,
+                    ["port"] = StreamableHttpServerStateManager.DefaultPort,
+                    ["url"] = StreamableHttpServerStateManager.Url
+                });
+        }
+        catch (Exception ex) when (ex is not null)
+        {
+            throw new CommandErrorException("streamable_http_toggle_failed", $"Failed to toggle the Streamable HTTP server: {ex.Message}. Wait a moment and retry, or restart Visual Studio if it persists.");
+        }
+    }
+
+    internal sealed class IdeToggleStreamableHttpServerMenuCommand : IdeCommandBase
+    {
+        public IdeToggleStreamableHttpServerMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x0267, acceptsParameters: false)
+        {
+            MenuCommand.BeforeQueryStatus += (_, _) => MenuCommand.Checked = StreamableHttpServerStateManager.IsEnabled;
+        }
+
+        protected override string CanonicalName => "Tools.VsIdeBridgeToggleStreamableHttpServer";
+
+        internal override bool AllowAutomationInvocation => false;
+
+        protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            return ToggleStreamableHttpServerAsync(context);
+        }
+    }
+
     internal sealed class IdeRequestApprovalCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
         : IdeCommandBase(package, runtime, commandService, 0x024B)
     {

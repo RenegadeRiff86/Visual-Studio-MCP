@@ -161,15 +161,23 @@ internal static class GitSdkReader
                      .OrderBy(static b => b.IsRemote)
                      .ThenBy(static b => b.FriendlyName, StringComparer.OrdinalIgnoreCase))
         {
-            branches.Add(new JsonObject
+            string? trackedBranch = TryGetTrackedBranchFriendlyName(branch, out string? trackingError);
+            JsonObject branchPayload = new()
             {
                 ["name"] = branch.FriendlyName,
                 ["canonicalName"] = branch.CanonicalName,
                 ["isRemote"] = branch.IsRemote,
                 ["isCurrent"] = branch.IsCurrentRepositoryHead,
                 ["sha"] = branch.Tip?.Sha,
-                ["trackedBranch"] = branch.TrackedBranch?.FriendlyName,
-            });
+                ["trackedBranch"] = trackedBranch,
+            };
+
+            if (!string.IsNullOrWhiteSpace(trackingError))
+            {
+                branchPayload["trackingError"] = trackingError;
+            }
+
+            branches.Add(branchPayload);
         }
 
         JsonObject payload = new()
@@ -183,6 +191,20 @@ internal static class GitSdkReader
         return Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(
             payload,
             successText: $"Listed {branches.Count} branches."));
+    }
+
+    private static string? TryGetTrackedBranchFriendlyName(Branch branch, out string? error)
+    {
+        try
+        {
+            error = null;
+            return branch.TrackedBranch?.FriendlyName;
+        }
+        catch (Exception ex) when (ex is LibGit2SharpException or ArgumentException)
+        {
+            error = ex.Message;
+            return null;
+        }
     }
 
     public static Task<JsonNode> GetLogAsync(JsonNode? id, string repoDirectory, int maxCount)

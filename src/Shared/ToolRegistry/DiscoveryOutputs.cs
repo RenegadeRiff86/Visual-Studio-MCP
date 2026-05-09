@@ -51,7 +51,8 @@ public sealed partial class ToolRegistry
 
         return new JsonObject
         {
-            ["Summary"] = $"{tools.Count} tools. Use list_tools_by_category for a focused list.",
+            ["Summary"] = $"{tools.Count} catalog tools. Use list_tools_by_category for a focused list. Invoke catalog tools through call_tool unless the tool appears in the MCP protocol tools/list response.",
+            ["invocationHint"] = "This is a bridge catalog, not the MCP protocol tools/list. In lazy mode, most names listed here are not top-level MCP tools. Invoke them as { \"name\": \"call_tool\", \"arguments\": { \"name\": \"read_file\", \"arguments\": { ... } } }.",
             ["navigationToolsFirst"] = true,
             ["count"] = tools.Count,
             ["tools"] = tools,
@@ -78,7 +79,8 @@ public sealed partial class ToolRegistry
 
         return new JsonObject
         {
-            ["Summary"] = $"{tools.Count} tools in category '{categoryDefinition.Name}'.",
+            ["Summary"] = $"{tools.Count} catalog tools in category '{categoryDefinition.Name}'. Invoke rows through call_tool unless the tool appears in the MCP protocol tools/list response.",
+            ["invocationHint"] = "Use call_tool for catalog rows: { \"name\": \"call_tool\", \"arguments\": { \"name\": \"<tool name>\", \"arguments\": { ... } } }.",
             ["category"] = categoryDefinition.Name,
             ["summary"] = categoryDefinition.Summary,
             ["description"] = categoryDefinition.Description,

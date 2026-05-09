@@ -471,6 +471,11 @@ internal static class Program
 
     private static void EnsureAdmin()
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("The VS IDE Bridge installer is Windows-only.");
+        }
+
         using WindowsIdentity identity = WindowsIdentity.GetCurrent();
         WindowsPrincipal principal = new(identity);
         if (!principal.IsInRole(WindowsBuiltInRole.Administrator))

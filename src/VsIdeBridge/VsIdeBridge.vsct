@@ -97,6 +97,7 @@
       <IDSymbol name="cmdidIdeSetPythonStartupFile" value="0x0250" />
       <IDSymbol name="cmdidIdeGetPythonStartupFile" value="0x0251" />
       <IDSymbol name="cmdidIdeCreateProject" value="0x0260" />
+      <IDSymbol name="cmdidIdeToggleStreamableHttpServerMenu" value="0x0267" />
     </GuidSymbol>
   </Symbols>
 
@@ -114,8 +115,9 @@
       <Menu guid="guidVsIdeBridgeMenu" id="BridgeMenu" priority="0x0100" type="Menu">
         <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeMenuGroup" />
         <Strings>
-          <ButtonText>IDE Bridge</ButtonText>
-          <CommandName>IdeBridgeMenu</CommandName>
+          <ButtonText>VS IDE Bridge</ButtonText>
+          <MenuText>VS IDE Bridge</MenuText>
+          <CommandName>VS IDE Bridge</CommandName>
         </Strings>
       </Menu>
     </Menus>
@@ -137,6 +139,15 @@
           <CommandName>IdeToggleHttpServerMenu</CommandName>
           <CanonicalName>Tools.VsIdeBridgeToggleHttpServer</CanonicalName>
           <LocCanonicalName>.Tools.VsIdeBridgeToggleHttpServer</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeToggleStreamableHttpServerMenu" priority="0x0150" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <Strings>
+          <ButtonText>Toggle Streamable HTTP MCP Server</ButtonText>
+          <CommandName>IdeToggleStreamableHttpServerMenu</CommandName>
+          <CanonicalName>Tools.VsIdeBridgeToggleStreamableHttpServer</CanonicalName>
+          <LocCanonicalName>.Tools.VsIdeBridgeToggleStreamableHttpServer</LocCanonicalName>
         </Strings>
       </Button>
       <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeHelp" priority="0x01F0" type="Button">

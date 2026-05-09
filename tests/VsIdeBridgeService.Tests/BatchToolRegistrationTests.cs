@@ -18,6 +18,7 @@ public sealed class BatchToolRegistrationTests
         "success",
         "text",
         "group_by",
+        "max_steps",
         "data_mode",
     ];
 

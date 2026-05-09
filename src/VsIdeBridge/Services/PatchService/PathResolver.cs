@@ -391,12 +391,17 @@ internal sealed partial class PatchService
 
     /// <summary>
     /// Reads file content from the VS editor buffer if the file is open, otherwise from disk.
-    /// The editor buffer is the source of truth -- it may contain unsaved changes from a
-    /// previous apply_diff or user edits that haven't been flushed to disk yet.
+    /// Disk-backed project and MSBuild files are the exception because Visual Studio can
+    /// keep stale project-file buffers after the bridge writes them directly to disk.
     /// </summary>
     private static string ReadContentFromEditorOrDisk(DTE2 dte, string path)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (IsDiskBackedPatchFile(path))
+        {
+            return File.Exists(path) ? File.ReadAllText(path) : string.Empty;
+        }
 
         try
         {

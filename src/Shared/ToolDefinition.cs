@@ -21,6 +21,8 @@ public sealed class ToolDefinition(
     IEnumerable<string>? hints = null,
     JsonObject? searchHints = null)
 {
+    private const string CallToolName = "call_tool";
+
     public string Name { get; } = name;
 
     public string Category { get; } = category;
@@ -123,6 +125,7 @@ public sealed class ToolDefinition(
             ["readOnly"] = ReadOnly,
             ["mutating"] = Mutating,
             ["destructive"] = Destructive,
+            ["invocation"] = BuildInvocationEntry(),
         };
 
         if (Aliases.Count > 0)
@@ -135,6 +138,28 @@ public sealed class ToolDefinition(
             entry[SearchHintsPropertyName] = SearchHints.DeepClone();
 
         return entry;
+    }
+
+    public JsonObject BuildInvocationEntry()
+    {
+        if (string.Equals(Name, CallToolName, StringComparison.Ordinal))
+        {
+            return new JsonObject
+            {
+                ["mode"] = "direct",
+                ["tool"] = CallToolName,
+                ["hint"] = "call_tool is directly callable and cannot dispatch to itself.",
+            };
+        }
+
+        return new JsonObject
+        {
+            ["mode"] = "call_tool",
+            ["tool"] = CallToolName,
+            ["name"] = Name,
+            ["argumentsProperty"] = "arguments",
+            ["pattern"] = $"{{ \"name\": \"call_tool\", \"arguments\": {{ \"name\": \"{Name}\", \"arguments\": {{ ... }} }} }}",
+        };
     }
 
     public JsonObject BuildToolObject()

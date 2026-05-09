@@ -5,7 +5,7 @@
   },
   "projects": {
     "C:\\Users\\elsto\\source\\repos\\vs-ide-bridge\\src\\VsIdeBridge.Diagnostics\\VsIdeBridge.Diagnostics.csproj": {
-      "version": "2.2.13",
+      "version": "2.3.0",
       "restore": {
         "projectUniqueName": "C:\\Users\\elsto\\source\\repos\\vs-ide-bridge\\src\\VsIdeBridge.Diagnostics\\VsIdeBridge.Diagnostics.csproj",
         "projectName": "VsIdeBridge.Diagnostics",

@@ -24,4 +24,11 @@ public static class HttpServerStatePaths
     {
         return Path.Combine(GetSharedStateDirectory(), HttpEnabledFlagFileName);
     }
+
+    private const string StreamableHttpEnabledFlagFileName = "streamable-http-enabled.flag";
+
+    public static string GetStreamableHttpEnabledFlagPath()
+    {
+        return Path.Combine(GetSharedStateDirectory(), StreamableHttpEnabledFlagFileName);
+    }
 }

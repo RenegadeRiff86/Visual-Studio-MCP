@@ -23,8 +23,8 @@ internal static class HttpServerStateManager
 {
     private static readonly string FlagFilePath = HttpServerStatePaths.GetHttpEnabledFlagPath();
 
-    public const int DefaultPort = 8080;
-    public static string Url => $"http://localhost:{DefaultPort}/";
+    public const int DefaultPort = HttpServerDefaults.HttpPort;
+    public static string Url => HttpServerDefaults.HttpUrl;
 
     private const int PipeConnectTimeoutMs = 1000;
     private static readonly TimeSpan ListenerStateWaitTimeout = TimeSpan.FromSeconds(3);

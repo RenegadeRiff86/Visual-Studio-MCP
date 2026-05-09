@@ -28,12 +28,28 @@ internal sealed class ToolExecutionRegistry
         => _definitions.TryGet(name, out definition);
 
     public JsonArray BuildToolsList()
+        => BuildToolsList(McpToolSurface.Full);
+
+    public JsonArray BuildToolsList(McpToolSurface surface)
     {
         JsonArray result = [];
-        foreach (ToolEntry entry in _all)
+        foreach (ToolEntry entry in GetMcpVisibleEntries(surface))
             result.Add(entry.Definition.BuildToolObject());
 
         return result;
+    }
+
+    private IEnumerable<ToolEntry> GetMcpVisibleEntries(McpToolSurface surface)
+    {
+        if (surface.IsFull)
+        {
+            return _all;
+        }
+
+        return surface.VisibleToolNames!
+            .Select(name => _byLookupName.TryGetValue(name, out ToolEntry? entry) ? entry : null)
+            .OfType<ToolEntry>()
+            .DistinctBy(static entry => entry.Name);
     }
 
     public async Task<JsonNode> DispatchAsync(JsonNode? id, string name, JsonObject? args, BridgeConnection bridge)
@@ -48,30 +64,257 @@ internal sealed class ToolExecutionRegistry
 
         try
         {
+            ValidateArguments(id, entry, args);
             return await entry.Handler(id, args, bridge).ConfigureAwait(false);
         }
-        catch (McpRequestException ex) when (ex.Code == McpErrorCodes.InvalidParams)
+        catch (McpRequestException ex)
         {
-            // Convert InvalidParams into a content-level isError result so the model can
-            // self-correct using the embedded input schema rather than receiving a JSON-RPC error.
-            McpServerLog.Write($"tool invalid-params tool={name} message={ex.Message}");
-            return BuildInvalidParamsResult(ex.Message, entry);
+            // Convert known-tool failures into a content-level isError result so the model can
+            // self-correct using the embedded help instead of spiraling after a JSON-RPC error.
+            McpServerLog.Write($"tool failure tool={name} code={ex.Code} message={ex.Message}");
+            return BuildToolFailureResult(ex, entry);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            McpServerLog.Write($"tool unhandled failure tool={name} exception={ex.GetType().Name} message={ex.Message}");
+            return BuildToolFailureResult(
+                new McpRequestException(
+                    id,
+                    McpErrorCodes.BridgeError,
+                    $"Tool '{entry.Name}' failed before it could return a structured error: {ex.Message}"),
+                entry);
         }
     }
 
-    private static JsonObject BuildInvalidParamsResult(string message, ToolEntry entry)
+    private static void ValidateArguments(JsonNode? id, ToolEntry entry, JsonObject? args)
     {
-        string schema = entry.Definition.ParameterSchema?.ToJsonString() ?? "{}";
+        JsonObject schema = entry.Definition.ParameterSchema;
+        if (!SchemaTypeIs(schema, "object"))
+            return;
+
+        JsonObject actual = args ?? [];
+        if (!TryValidateObject(actual, schema, out string? error))
+            throw new McpRequestException(
+                id,
+                McpErrorCodes.InvalidParams,
+                error ?? $"Arguments for tool '{entry.Name}' failed schema validation.");
+    }
+
+    private static bool TryValidateObject(JsonObject actual, JsonObject schema, out string? error)
+        => TryValidateObject(actual, schema, path: null, out error);
+
+    private static bool TryValidateObject(JsonObject actual, JsonObject schema, string? path, out string? error)
+    {
+        JsonObject? properties = schema["properties"] as JsonObject;
+        HashSet<string> allowed = properties is null
+            ? []
+            : properties.Select(static property => property.Key).ToHashSet(StringComparer.Ordinal);
+
+        if (SchemaBoolean(schema, "additionalProperties") == false)
+        {
+            foreach (KeyValuePair<string, JsonNode?> property in actual)
+            {
+                if (!allowed.Contains(property.Key))
+                {
+                    error = $"Unexpected argument '{FormatPath(path, property.Key)}'.";
+                    return false;
+                }
+            }
+        }
+
+        foreach (string required in RequiredProperties(schema))
+        {
+            if (!actual.ContainsKey(required) || actual[required] is null)
+            {
+                error = $"Missing required argument '{FormatPath(path, required)}'.";
+                return false;
+            }
+        }
+
+        if (properties is not null)
+        {
+            foreach (KeyValuePair<string, JsonNode?> property in actual)
+            {
+                if (!properties.TryGetPropertyValue(property.Key, out JsonNode? propertySchemaNode) ||
+                    propertySchemaNode is not JsonObject propertySchema)
+                {
+                    continue;
+                }
+
+                string propertyPath = FormatPath(path, property.Key);
+                if (!TryValidateValue(property.Value, propertySchema, propertyPath, out error))
+                    return false;
+            }
+        }
+
+        error = null;
+        return true;
+    }
+
+    private static bool TryValidateValue(JsonNode? value, JsonObject schema, string path, out string? error)
+    {
+        string? type = SchemaType(schema);
+        if (type is null)
+        {
+            error = null;
+            return true;
+        }
+
+        if (value is null)
+        {
+            error = $"Argument '{path}' must be {DescribeType(type)}.";
+            return false;
+        }
+
+        switch (type)
+        {
+            case "string":
+                return TryValidateScalar<string>(value, path, type, out error);
+            case "integer":
+                return TryValidateInteger(value, path, out error);
+            case "number":
+                return TryValidateNumber(value, path, out error);
+            case "boolean":
+                return TryValidateScalar<bool>(value, path, type, out error);
+            case "array":
+                return TryValidateArray(value, schema, path, out error);
+            case "object":
+                if (value is JsonObject child)
+                    return TryValidateObject(child, schema, path, out error);
+
+                error = $"Argument '{path}' must be {DescribeType(type)}.";
+                return false;
+            default:
+                error = null;
+                return true;
+        }
+    }
+
+    private static bool TryValidateScalar<T>(JsonNode value, string path, string type, out string? error)
+    {
+        if (value is JsonValue jsonValue && jsonValue.TryGetValue<T>(out _))
+        {
+            error = null;
+            return true;
+        }
+
+        error = $"Argument '{path}' must be {DescribeType(type)}.";
+        return false;
+    }
+
+    private static bool TryValidateInteger(JsonNode value, string path, out string? error)
+    {
+        if (value is JsonValue jsonValue &&
+            (jsonValue.TryGetValue<int>(out _) || jsonValue.TryGetValue<long>(out _)))
+        {
+            error = null;
+            return true;
+        }
+
+        error = $"Argument '{path}' must be an integer.";
+        return false;
+    }
+
+    private static bool TryValidateNumber(JsonNode value, string path, out string? error)
+    {
+        if (value is JsonValue jsonValue &&
+            (jsonValue.TryGetValue<double>(out _) || jsonValue.TryGetValue<decimal>(out _)))
+        {
+            error = null;
+            return true;
+        }
+
+        error = $"Argument '{path}' must be a number.";
+        return false;
+    }
+
+    private static bool TryValidateArray(JsonNode value, JsonObject schema, string path, out string? error)
+    {
+        if (value is not JsonArray array)
+        {
+            error = $"Argument '{path}' must be an array.";
+            return false;
+        }
+
+        if (schema["items"] is JsonObject itemSchema)
+        {
+            for (int index = 0; index < array.Count; index++)
+            {
+                if (!TryValidateValue(array[index], itemSchema, $"{path}[{index}]", out error))
+                    return false;
+            }
+        }
+
+        error = null;
+        return true;
+    }
+
+    private static IEnumerable<string> RequiredProperties(JsonObject schema)
+    {
+        if (schema["required"] is not JsonArray required)
+            yield break;
+
+        foreach (JsonNode? value in required)
+        {
+            if (value is JsonValue jsonValue && jsonValue.TryGetValue<string>(out string? name) &&
+                !string.IsNullOrWhiteSpace(name))
+            {
+                yield return name;
+            }
+        }
+    }
+
+    private static bool SchemaTypeIs(JsonObject schema, string expected)
+        => string.Equals(SchemaType(schema), expected, StringComparison.OrdinalIgnoreCase);
+
+    private static string? SchemaType(JsonObject schema)
+        => schema["type"] is JsonValue typeValue && typeValue.TryGetValue<string>(out string? type)
+            ? type
+            : null;
+
+    private static bool? SchemaBoolean(JsonObject schema, string propertyName)
+        => schema[propertyName] is JsonValue value && value.TryGetValue<bool>(out bool boolValue)
+            ? boolValue
+            : null;
+
+    private static string FormatPath(string? parent, string child)
+        => string.IsNullOrEmpty(parent) ? child : $"{parent}.{child}";
+
+    private static string DescribeType(string type)
+        => type switch
+        {
+            "integer" => "an integer",
+            "array" => "an array",
+            "object" => "an object",
+            _ when StartsWithVowel(type) => $"an {type}",
+            _ => $"a {type}",
+        };
+
+    private static bool StartsWithVowel(string value)
+        => value.Length > 0 && "aeiou".Contains(char.ToLowerInvariant(value[0]));
+
+    private static JsonObject BuildToolFailureResult(McpRequestException exception, ToolEntry entry)
+    {
+        JsonObject help = BuildInlineToolHelp(entry);
         string text =
-            $"{message}\n\n" +
-            $"Input schema for '{entry.Name}':\n{schema}\n\n" +
-            $"Call tool_help with name=\"{entry.Name}\" for full documentation.";
+            $"{exception.Message}\n\n" +
+            $"Tool '{entry.Name}' failed with MCP error code {exception.Code}.\n\n" +
+            $"Tool help for '{entry.Name}':\n{help.ToJsonString()}\n\n" +
+            "Retry using the invocation wrapper shown above. In lazy mode, do not call catalog tool names as top-level MCP tools unless they appear in the protocol tools/list response.";
         return new JsonObject
         {
             ["content"] = new JsonArray { new JsonObject { ["type"] = "text", ["text"] = text } },
             ["isError"] = true,
         };
     }
+
+    private static JsonObject BuildInlineToolHelp(ToolEntry entry)
+        => new()
+        {
+            ["Summary"] = $"Help for tool '{entry.Name}'.",
+            ["invocation"] = entry.Definition.BuildInvocationEntry(),
+            ["tool"] = entry.Definition.BuildToolObject(),
+        };
 
     private JsonObject BuildUnknownToolResult(string attemptedName)
     {

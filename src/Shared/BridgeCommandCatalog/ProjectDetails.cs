@@ -48,6 +48,12 @@ public static partial class BridgeCommandCatalog
             case "set-python-project-env":
                 detail = ("Set the active Python interpreter for the open .pyproj project or open-folder workspace in Visual Studio (affects IntelliSense and debugging).", ExampleCommand("set-python-project-env", @"{""path"":""%USERPROFILE%\\miniconda3\\envs\\superslicer\\python.exe""}"));
                 return true;
+            case "set-python-startup-file":
+                detail = ("Set the startup Python file for the open .pyproj project.", ExampleCommand("set-python-startup-file", @"{""file"":""C:\\repo\\MyApp\\main.py"",""project"":""MyApp""}"));
+                return true;
+            case "get-python-startup-file":
+                detail = ("Get the startup Python file configured for the open .pyproj project.", ExampleCommand("get-python-startup-file", @"{""project"":""MyApp""}"));
+                return true;
             default:
                 detail = default;
                 return false;

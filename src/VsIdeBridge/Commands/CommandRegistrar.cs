@@ -28,6 +28,7 @@ internal static class CommandRegistrar
     {
         RegisterCommandSafely(() => new IdeCoreCommands.IdeHelpMenuCommand(package, runtime, commandService));
         RegisterCommandSafely(() => new IdeCoreCommands.IdeToggleHttpServerMenuCommand(package, runtime, commandService));
+        RegisterCommandSafely(() => new IdeCoreCommands.IdeToggleStreamableHttpServerMenuCommand(package, runtime, commandService));
         RegisterCommandSafely(() => new IdeCoreCommands.IdeRequestApprovalCommand(package, runtime, commandService));
         RegisterCommandSafely(() => new IdeCoreCommands.IdeHelpCommand(package, runtime, commandService));
         RegisterCommandSafely(() => new IdeCoreCommands.IdeSmokeTestCommand(package, runtime, commandService));

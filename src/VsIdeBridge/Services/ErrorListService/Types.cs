@@ -20,7 +20,9 @@ using static VsIdeBridge.Diagnostics.ErrorListConstants;
 
 namespace VsIdeBridge.Services;
 
-internal sealed class ErrorListQuery
+// Query-parameter DTO: uses record for value-equality semantics and to signal
+// that this type is intentionally a data carrier, not a behavioural class.
+internal sealed record ErrorListQuery
 {
     public string? Severity { get; set; }
     public string? Code { get; set; }
@@ -32,20 +34,7 @@ internal sealed class ErrorListQuery
 
     public string? File { get; set; }
 
-    public ErrorListQuery WithoutMax()
-    {
-        return new ErrorListQuery
-        {
-            Severity = Severity,
-            Code = Code,
-            Project = Project,
-            Path = Path,
-            File = File,
-            Text = Text,
-            GroupBy = GroupBy,
-            Max = null,
-        };
-    }
+    public ErrorListQuery WithoutMax() => this with { Max = null };
 
     public JObject ToJson()
     {

@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Net;
 using System.Text;
 using System.IO;
+using VsIdeBridge.Shared;
 
 namespace VsIdeBridgeService;
 
@@ -18,6 +19,7 @@ internal static class McpServerMode
         Stream input = Console.OpenStandardInput();
         Stream output = Console.OpenStandardOutput();
         BridgeConnection bridge = new(args);
+        McpToolSurface toolSurface = McpToolSurface.FromArgs(args);
         using StdioHostLease? hostLease = StdioHostLease.TryCreate();
         ServiceControlClient? controlClient = null;
         SemaphoreSlim writeLock = new(1, 1);
@@ -96,39 +98,7 @@ internal static class McpServerMode
                 // Dispatch on a background task so this read loop stays live for
                 // notifications/cancelled while a long-running tool (e.g. build with
                 // wait_for_completion=true) is in flight.
-                McpProtocol.IncomingMessage capturedIncoming = incoming;
-                ServiceControlClient? capturedControlClient = controlClient;
-                _ = Task.Run(async () =>
-                {
-                    JsonNode? requestId = capturedIncoming.Request["id"]?.DeepClone();
-                    using CancellationTokenSource cts = RequestCancellationRegistry.Register(requestId);
-                    try
-                    {
-                        JsonObject? response = await HandleRequestAsync(
-                            capturedIncoming.Request, bridge, capturedControlClient)
-                            .ConfigureAwait(false);
-
-                        if (response is not null)
-                        {
-                            McpServerLog.WriteResponse(response);
-                            await WriteLockedAsync(output, response, capturedIncoming.Format, writeLock)
-                                .ConfigureAwait(false);
-                        }
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        McpServerLog.Write($"tool cancelled id={requestId?.ToJsonString()}");
-                        // No response sent for cancelled requests.
-                    }
-                    catch (Exception ex)
-                    {
-                        McpServerLog.Write($"dispatch fatal id={requestId?.ToJsonString()} ex={ex}");
-                    }
-                    finally
-                    {
-                        RequestCancellationRegistry.Unregister(requestId);
-                    }
-                });
+                _ = Task.Run(() => DispatchRequestAsync(incoming, output, bridge, controlClient, writeLock, toolSurface));
             }
         }
         finally
@@ -140,10 +110,50 @@ internal static class McpServerMode
         }
     }
 
-    private static async Task<JsonObject?> HandleRequestAsync(
+    // Isolated per-request dispatch method so RunAsync stays within line-length budget and
+    // nesting depth stays shallow. Owns the CTS lifetime and the write-lock acquire.
+    private static async Task DispatchRequestAsync(
+        McpProtocol.IncomingMessage incoming,
+        Stream output,
+        BridgeConnection bridge,
+        ServiceControlClient? controlClient,
+        SemaphoreSlim writeLock,
+        McpToolSurface toolSurface)
+    {
+        JsonNode? requestId = incoming.Request["id"]?.DeepClone();
+        using CancellationTokenSource cts = RequestCancellationRegistry.Register(requestId);
+        try
+        {
+            JsonObject? response = await HandleRequestAsync(incoming.Request, bridge, controlClient, toolSurface)
+                .ConfigureAwait(false);
+
+            if (response is not null)
+            {
+                McpServerLog.WriteResponse(response);
+                await WriteLockedAsync(output, response, incoming.Format, writeLock)
+                    .ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            McpServerLog.Write($"tool cancelled id={requestId?.ToJsonString()}");
+            // No response sent for cancelled requests.
+        }
+        catch (Exception ex) when (ex is not null) // top-level dispatch boundary — fire-and-forget task
+        {
+            McpServerLog.Write($"dispatch fatal id={requestId?.ToJsonString()} ex={ex}");
+        }
+        finally
+        {
+            RequestCancellationRegistry.Unregister(requestId);
+        }
+    }
+
+    internal static async Task<JsonObject?> HandleRequestAsync(
         JsonObject request,
         BridgeConnection bridge,
-        ServiceControlClient? controlClient)
+        ServiceControlClient? controlClient,
+        McpToolSurface? toolSurface = null)
     {
         JsonNode? id = request["id"]?.DeepClone();
         string method = request["method"]?.GetValue<string>() ?? string.Empty;
@@ -156,8 +166,8 @@ internal static class McpServerMode
         {
             JsonNode result = method switch
             {
-                "initialize"                => InitializeResult(@params),
-                "tools/list"                => new JsonObject { ["tools"] = Registry.BuildToolsList() },
+                "initialize"                => InitializeResult(@params, toolSurface ?? McpToolSurface.Lazy),
+                "tools/list"                => new JsonObject { ["tools"] = Registry.BuildToolsList(toolSurface ?? McpToolSurface.Lazy) },
                 "tools/call"                => await DispatchToolAsync(id, @params, bridge, controlClient).ConfigureAwait(false),
                 "resources/list"            => EmptyResourcesList(),
                 "resources/templates/list"  => EmptyResourceTemplatesList(),
@@ -184,7 +194,7 @@ internal static class McpServerMode
         }
     }
 
-    private static JsonObject InitializeResult(JsonObject? @params)
+    private static JsonObject InitializeResult(JsonObject? @params, McpToolSurface toolSurface)
     {
         string clientVersion = @params?["protocolVersion"]?.GetValue<string>() ?? string.Empty;
         string negotiated = McpProtocol.SelectProtocolVersion(clientVersion);
@@ -202,12 +212,25 @@ internal static class McpServerMode
                 ["name"]    = "vs_ide_bridge",
                 ["version"] = "0.1.0",
             },
+            ["toolSurface"] = toolSurface.ToJsonObject(),
             ["instructions"] =
-                "VS IDE Bridge MCP server. " +
-                "Call list_tools (no parameters) to see every available tool name. " +
-                "Call tool_help with name=<tool> for the full schema and usage examples. " +
-                "If you get an unknown-tool error, call list_tools first — do not guess tool names.",
+                BuildInstructions(toolSurface),
         };
+    }
+
+    private static string BuildInstructions(McpToolSurface toolSurface)
+    {
+        string surfaceText = toolSurface.IsFull
+            ? "The full tool surface is exposed in tools/list. "
+            : "A compact lazy tool surface is exposed in tools/list. ";
+
+        return
+            "VS IDE Bridge MCP server. " +
+            surfaceText +
+            "Use recommend_tools for task-based discovery, list_tools for every bridge catalog tool name, " +
+            "and tool_help with name=<tool> for the full schema. " +
+            "In lazy mode, catalog names such as read_file, find_text, apply_diff, and git_status are not top-level MCP tools; invoke them through call_tool with name and arguments. " +
+            "If you get an unknown-tool error, call list_tools first; do not guess tool names.";
     }
 
     private static JsonObject EmptyResourcesList()
@@ -282,7 +305,7 @@ internal static class McpServerMode
 
     public static async Task RunHttpAsync(string[] args, CancellationToken cancellationToken = default)
     {
-        int port = 8080;
+        int port = HttpServerDefaults.HttpPort;
         for (int i = 0; i < args.Length - 1; i++)
         {
             if (string.Equals(args[i], "--port", StringComparison.OrdinalIgnoreCase))
@@ -295,6 +318,7 @@ internal static class McpServerMode
 
         string prefix = $"http://localhost:{port}/";
         BridgeConnection bridge = new(args);
+        McpToolSurface toolSurface = McpToolSurface.FromArgs(args);
 
         McpServerLog.Write($"MCP HTTP server starting on {prefix}");
 
@@ -327,7 +351,7 @@ internal static class McpServerMode
             try
             {
                 context = await listener.GetContextAsync().ConfigureAwait(false);
-                await HandleHttpRequestAsync(context, bridge).ConfigureAwait(false);
+                await HandleHttpRequestAsync(context, bridge, toolSurface).ConfigureAwait(false);
             }
             catch (HttpListenerException) when (listener.IsListening == false)
             {
@@ -348,7 +372,7 @@ internal static class McpServerMode
         }
     }
 
-    private static async Task HandleHttpRequestAsync(HttpListenerContext context, BridgeConnection bridge)
+    private static async Task HandleHttpRequestAsync(HttpListenerContext context, BridgeConnection bridge, McpToolSurface toolSurface)
     {
         try
         {
@@ -379,7 +403,7 @@ internal static class McpServerMode
 
             McpServerLog.WriteRequest(request, McpProtocol.WireFormat.RawJson);
 
-            JsonObject? response = await HandleRequestAsync(request, bridge, controlClient: null).ConfigureAwait(false);
+            JsonObject? response = await HandleRequestAsync(request, bridge, controlClient: null, toolSurface).ConfigureAwait(false);
 
             if (response is not null)
             {

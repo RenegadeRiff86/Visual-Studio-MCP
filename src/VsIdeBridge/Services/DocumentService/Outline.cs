@@ -41,6 +41,34 @@ internal sealed partial class DocumentService
         vsCMElement.vsCMElementVariable,
     ];
 
+    private static readonly HashSet<string> s_textFunctionRejectNames = new(StringComparer.Ordinal)
+    {
+        "alignof",
+        "assert",
+        "catch",
+        "double",
+        "float",
+        "for",
+        "if",
+        "return",
+        "sizeof",
+        "static_assert",
+        "switch",
+        "while",
+    };
+
+    private static readonly string[] s_textFunctionRejectPrefixes =
+    [
+        "return ",
+        "return(",
+        "co_return ",
+        "throw ",
+        "assert(",
+        "static_assert(",
+        "sizeof(",
+        "alignof(",
+    ];
+
     public async Task<JObject> GetFileOutlineAsync(DTE2 dte, string? filePath, int maxDepth, string? kindFilter = null)
     {
         (string resolvedPath, JArray symbols, int count, string? note) =
@@ -304,6 +332,11 @@ internal sealed partial class DocumentService
     private static bool LooksLikeTextFunction(string trimmedLine, out string? functionName)
     {
         functionName = null;
+        if (StartsWithRejectedTextFunctionPrefix(trimmedLine))
+        {
+            return false;
+        }
+
         int openParen = trimmedLine.IndexOf('(');
         int closeParen = trimmedLine.LastIndexOf(')');
         if (openParen <= 0 || closeParen <= openParen)
@@ -323,12 +356,19 @@ internal sealed partial class DocumentService
             return false;
         }
 
+        string declarationPrefix = beforeParen.Substring(0, beforeParen.Length - candidate.Length).TrimEnd();
+        string suffix = trimmedLine.Substring(closeParen + 1).TrimStart();
+        if (HasExpressionPrefix(declarationPrefix) || !HasFunctionDeclarationShape(declarationPrefix, candidate, suffix))
+        {
+            return false;
+        }
+
         int qualifierIndex = candidate.LastIndexOf("::", StringComparison.Ordinal);
         string bareName = qualifierIndex >= 0
             ? candidate.Substring(qualifierIndex + 2)
             : candidate;
 
-        if (bareName is "if" or "for" or "while" or "switch" or "catch")
+        if (s_textFunctionRejectNames.Contains(bareName))
         {
             return false;
         }
@@ -336,6 +376,56 @@ internal sealed partial class DocumentService
         functionName = candidate;
         return true;
     }
+
+    private static bool StartsWithRejectedTextFunctionPrefix(string trimmedLine)
+    {
+        foreach (string prefix in s_textFunctionRejectPrefixes)
+        {
+            if (trimmedLine.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasExpressionPrefix(string declarationPrefix)
+        => declarationPrefix.Contains("->", StringComparison.Ordinal)
+           || declarationPrefix.Contains(".", StringComparison.Ordinal)
+           || declarationPrefix.Contains("=", StringComparison.Ordinal)
+           || declarationPrefix.Contains("[", StringComparison.Ordinal)
+           || declarationPrefix.Contains("]", StringComparison.Ordinal);
+
+    private static bool HasFunctionDeclarationShape(string declarationPrefix, string candidate, string suffix)
+    {
+        bool hasDeclarationPrefix = !string.IsNullOrWhiteSpace(declarationPrefix);
+        bool isQualifiedName = candidate.Contains("::", StringComparison.Ordinal);
+        if (string.IsNullOrWhiteSpace(suffix))
+        {
+            return hasDeclarationPrefix || isQualifiedName;
+        }
+
+        if (suffix.StartsWith("{", StringComparison.Ordinal) || suffix.StartsWith(":", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (suffix.StartsWith(";", StringComparison.Ordinal))
+        {
+            return hasDeclarationPrefix;
+        }
+
+        return (hasDeclarationPrefix || isQualifiedName) && StartsWithFunctionQualifier(suffix);
+    }
+
+    private static bool StartsWithFunctionQualifier(string suffix)
+        => suffix.StartsWith("const", StringComparison.Ordinal)
+           || suffix.StartsWith("noexcept", StringComparison.Ordinal)
+           || suffix.StartsWith("override", StringComparison.Ordinal)
+           || suffix.StartsWith("final", StringComparison.Ordinal)
+           || suffix.StartsWith("->", StringComparison.Ordinal)
+           || suffix.StartsWith("&", StringComparison.Ordinal);
 
     private static string ExtractTrailingQualifiedName(string text)
     {

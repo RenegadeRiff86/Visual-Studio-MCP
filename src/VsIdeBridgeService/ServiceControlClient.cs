@@ -22,6 +22,11 @@ internal sealed class ServiceControlClient : IAsyncDisposable
 
     public static async Task<ServiceControlClient> ConnectAsync(CancellationToken cancellationToken = default)
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("VsIdeBridgeService control pipes are Windows-only.");
+        }
+
         NamedPipeClientStream pipe = new(".", NamedPipeAccessDefaults.ServiceControlPipeName, PipeDirection.Out, PipeOptions.Asynchronous);
         try
         {
@@ -56,6 +61,12 @@ internal sealed class ServiceControlClient : IAsyncDisposable
 
     public async Task NotifyHttpDisableAsync(CancellationToken cancellationToken = default)
         => await SendAsync("HTTP_DISABLE", cancellationToken).ConfigureAwait(false);
+
+    public async Task NotifyStreamableHttpEnableAsync(CancellationToken cancellationToken = default)
+        => await SendAsync("STREAMABLE_HTTP_ENABLE", cancellationToken).ConfigureAwait(false);
+
+    public async Task NotifyStreamableHttpDisableAsync(CancellationToken cancellationToken = default)
+        => await SendAsync("STREAMABLE_HTTP_DISABLE", cancellationToken).ConfigureAwait(false);
 
     public async ValueTask DisposeAsync()
     {

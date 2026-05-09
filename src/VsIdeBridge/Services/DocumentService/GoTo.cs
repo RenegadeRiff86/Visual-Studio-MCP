@@ -98,6 +98,7 @@ internal sealed partial class DocumentService
                 [SourceLocationProperty] = sourceLocation,
                 [DefinitionLocationProperty] = JValue.CreateNull(),
                 [DefinitionFoundProperty] = false,
+                [DefinitionStatusProperty] = "no-symbol",
                 ["note"] = "No navigable symbol was found under the caret.",
             };
         }
@@ -112,6 +113,9 @@ internal sealed partial class DocumentService
                 [SourceLocationProperty] = sourceLocation,
                 [DefinitionLocationProperty] = null,
                 [DefinitionFoundProperty] = false,
+                [DefinitionStatusProperty] = "navigation-no-result",
+                ["note"] = "Visual Studio did not report a definition location after Go To Definition.",
+                ["suggestedFallback"] = CreateDefinitionFallback(sourceLocation),
             };
         }
 
@@ -122,12 +126,23 @@ internal sealed partial class DocumentService
         bool definitionFound = !string.Equals(sourcePath, definitionPath, StringComparison.OrdinalIgnoreCase)
             || sourceLine != definitionLine;
 
-        return new JObject
+        JObject result = new()
         {
             [SourceLocationProperty] = sourceLocation,
             [DefinitionLocationProperty] = definitionLocation,
             [DefinitionFoundProperty] = definitionFound,
         };
+
+        if (definitionFound)
+        {
+            result[DefinitionStatusProperty] = "found";
+        }
+        else
+        {
+            AddDefinitionFallbackStatus(result, sourceLocation, definitionLocation, "navigation-did-not-move");
+        }
+
+        return result;
     }
 
     public async Task<JObject> GoToImplementationAsync(
@@ -261,6 +276,7 @@ internal sealed partial class DocumentService
                 [DefinitionFoundProperty] = false,
                 [DefinitionLocationProperty] = JValue.CreateNull(),
                 ["definitionContext"] = JValue.CreateNull(),
+                [DefinitionStatusProperty] = "no-symbol",
                 ["note"] = "No symbol was found under the caret.",
             };
         }
@@ -282,7 +298,7 @@ internal sealed partial class DocumentService
                 (int?)sourceLocation["column"] ?? column ?? 1).ConfigureAwait(false);
         }
 
-        return new JObject
+        JObject result = new()
         {
             ["word"] = word,
             [SourceLocationProperty] = sourceLocation,
@@ -290,6 +306,17 @@ internal sealed partial class DocumentService
             [DefinitionLocationProperty] = defLocation ?? (JToken)JValue.CreateNull(),
             ["definitionContext"] = definitionSlice ?? (JToken)JValue.CreateNull(),
         };
+
+        if (definitionFound)
+        {
+            result[DefinitionStatusProperty] = "found";
+        }
+        else
+        {
+            AddDefinitionFallbackStatus(result, sourceLocation, defLocation, defLocation is null ? "navigation-no-result" : "navigation-did-not-move");
+        }
+
+        return result;
     }
 
     public async Task<JObject> PeekDefinitionAsync(DTE2 dte, string? filePath, string? documentQuery, int? line, int? column)
@@ -313,6 +340,7 @@ internal sealed partial class DocumentService
                 [DefinitionLocationProperty] = JValue.CreateNull(),
                 ["definitionSource"] = JValue.CreateNull(),
                 ["definitionContext"] = JValue.CreateNull(),
+                [DefinitionStatusProperty] = "no-symbol",
                 ["note"] = "No symbol was found under the caret.",
             };
         }
@@ -354,7 +382,50 @@ internal sealed partial class DocumentService
             result["note"] = note;
         }
 
+        if (definitionFound)
+        {
+            result[DefinitionStatusProperty] = "found";
+        }
+        else
+        {
+            AddDefinitionFallbackStatus(result, sourceLocation, definitionLocation, definitionLocation is null ? "navigation-no-result" : "navigation-did-not-move");
+        }
+
         return result;
+    }
+
+    private static void AddDefinitionFallbackStatus(JObject result, JObject sourceLocation, JObject? definitionLocation, string status)
+    {
+        result[DefinitionStatusProperty] = status;
+        result["definitionNavigation"] = new JObject
+        {
+            ["status"] = status,
+            ["source"] = sourceLocation,
+            ["definition"] = definitionLocation ?? (JToken)JValue.CreateNull(),
+        };
+        result["suggestedFallback"] = CreateDefinitionFallback(sourceLocation);
+        result["note"] = status == "navigation-no-result"
+            ? "Visual Studio did not report a definition location after Go To Definition. Try search_symbols with the selected word for text/index-based fallback results."
+            : "Visual Studio Go To Definition stayed at the source location. In C++ folder-view projects this usually means VS could not navigate the symbol through IntelliSense; try search_symbols with the selected word for fallback matches.";
+    }
+
+    private static JObject CreateDefinitionFallback(JObject sourceLocation)
+    {
+        string word = ((string?)sourceLocation[SelectedTextProperty] ?? string.Empty).Trim();
+        string sourcePath = (string?)sourceLocation[ResolvedPathProperty] ?? string.Empty;
+        JObject fallback = new()
+        {
+            ["tool"] = "search_symbols",
+            ["query"] = word,
+            ["reason"] = "Use symbol search when VS navigation cannot resolve a definition from the active editor context.",
+        };
+
+        if (!string.IsNullOrWhiteSpace(sourcePath))
+        {
+            fallback["file"] = sourcePath;
+        }
+
+        return fallback;
     }
 
     private async Task TryRestoreLocationAsync(DTE2 dte, string? filePath, int? line, int? column)

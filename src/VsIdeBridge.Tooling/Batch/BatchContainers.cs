@@ -429,7 +429,7 @@ public sealed class BatchResultCollection
         result[BatchJsonNames.ChunkStart] = page.ChunkStart;
         result[BatchJsonNames.ChunkEnd] = page.ChunkEnd;
         result[BatchJsonNames.HasMoreChunks] = page.HasMoreChunks;
-        result[BatchJsonNames.Truncated] = page.IsTruncated();
+        result[BatchJsonNames.Truncated] = ReadBool(source, BatchJsonNames.Truncated, false) || page.IsTruncated();
         result[BatchJsonNames.ChunkOutOfRange] = page.ChunkOutOfRange;
         result[BatchJsonNames.SortBy] = options.NormalizedSortBy;
         result[BatchJsonNames.SortDirection] = options.SortDescending ? "desc" : "asc";
