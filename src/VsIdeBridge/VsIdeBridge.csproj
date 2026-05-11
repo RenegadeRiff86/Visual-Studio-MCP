@@ -49,12 +49,10 @@
     <Reference Include="System.ComponentModel.Composition" />
     <Reference Include="PresentationCore" />
     <Reference Include="Microsoft.CSharp" />
-    <!-- CallHierarchy types changed in VS 2026; exclude for now -->
-  </ItemGroup>
-
-  <!-- Exclude CallHierarchyWindow.cs — depends on CallHierarchy APIs not available in VS 2026 -->
-  <ItemGroup>
-    <Compile Remove="Services\SearchService\CallHierarchyWindow.cs" />
+    <Reference Include="Microsoft.VisualStudio.Language.CallHierarchy">
+      <HintPath>$(DevEnvDir)CommonExtensions\Microsoft\CallHierarchy\Microsoft.VisualStudio.Language.CallHierarchy.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>
