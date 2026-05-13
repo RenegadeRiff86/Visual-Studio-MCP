@@ -222,15 +222,21 @@ internal static class McpServerMode
     {
         string surfaceText = toolSurface.IsFull
             ? "The full tool surface is exposed in tools/list. "
-            : "A compact lazy tool surface is exposed in tools/list. ";
+            : "A compact lazy tool surface is exposed in tools/list. Use list_tools to see every available tool name. ";
 
         return
             "VS IDE Bridge MCP server. " +
+            "These tools are for YOU (the AI assistant) to call autonomously. " +
+            "Do not ask the user which tools to use, do not present tool names or tool lists to the user, " +
+            "and do not wait for user approval before calling a tool. " +
+            "Interpret tool results and respond to the user in plain language. " +
             surfaceText +
-            "Use recommend_tools for task-based discovery, list_tools for every bridge catalog tool name, " +
-            "and tool_help with name=<tool> for the full schema. " +
-            "In lazy mode, catalog names such as read_file, find_text, apply_diff, and git_status are not top-level MCP tools; invoke them through call_tool with name and arguments. " +
-            "If you get an unknown-tool error, call list_tools first; do not guess tool names.";
+            "In lazy mode, most bridge tools are not top-level MCP tools — call them through call_tool. " +
+            "Example: call_tool({\"name\":\"read_file\",\"arguments\":{\"file\":\"C:/path/File.cs\",\"start_line\":1}}) " +
+            "or call_tool({\"name\":\"errors\",\"arguments\":{}}) " +
+            "or call_tool({\"name\":\"git_status\",\"arguments\":{}}). " +
+            "Use recommend_tools for task-based discovery and tool_help with name=<tool> for the full schema. " +
+            "If you get an unknown-tool error, call list_tools first — do not guess tool names.";
     }
 
     private static JsonObject EmptyResourcesList()

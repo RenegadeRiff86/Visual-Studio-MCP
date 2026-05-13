@@ -13,6 +13,9 @@
 - Added an explicit VSCT `MenuText` for the Tools menu so Visual Studio displays `VS IDE Bridge` instead of a command/symbol name.
 - Moved bridge file logs to `C:\Program Files\VsIdeBridge\logs` (the install directory) via a registry key written by the installer, so both the service and the VSIX extension write to the same location regardless of process identity.
 - Fixed git tools routing to a parent mega-repo when the solution directory has no `.git` of its own. `ResolveRepoRootDirectory` now verifies that at least one tracked file exists under the solution directory before accepting an ancestor repo root, and `OpenRepository` adds a post-open mismatch guard that throws a clear error naming both the expected and found paths if `Repository.Discover` walked up to the wrong repository.
+- Updated the MCP `initialize` instructions to tell models that bridge tools are for autonomous use: do not ask the user which tools to call, do not present tool names or lists to the user, and do not wait for approval before calling a tool. Added three concrete `call_tool` JSON examples so weaker models have an unambiguous pattern to follow.
+- Updated the `vs_state` response summary to include next-step guidance naming the most common follow-on tools (`errors`, `read_file`, `find_text`, `list_projects`, `list_tool_categories`), so models do not stall after a successful state check.
+- Fixed CA2249: replaced `IndexOf(...) >= 0` with `Contains(...)` in `BestPracticeAnalyzerHelpers.cs`.
 
 ## 2.2.13
 

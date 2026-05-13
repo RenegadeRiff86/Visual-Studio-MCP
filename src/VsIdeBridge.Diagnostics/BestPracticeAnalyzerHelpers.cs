@@ -533,9 +533,9 @@ internal static partial class BestPracticeAnalyzerHelpers
 
         // Catch project-level test folders: Foo.Tests\, Foo.UnitTests\, Foo.IntegrationTests\, Tests\
         string fullPath = Path.GetFullPath(file);
-        return fullPath.IndexOf(".Tests", StringComparison.OrdinalIgnoreCase) >= 0
-            || fullPath.IndexOf($"{Path.DirectorySeparatorChar}Tests{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) >= 0
-            || fullPath.IndexOf($"{Path.AltDirectorySeparatorChar}Tests{Path.AltDirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) >= 0;
+        return fullPath.Contains(".Tests", StringComparison.OrdinalIgnoreCase)
+            || fullPath.Contains($"{Path.DirectorySeparatorChar}Tests{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
+            || fullPath.Contains($"{Path.AltDirectorySeparatorChar}Tests{Path.AltDirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase);
     }
 
     internal static int GetLineNumber(string content, int index)

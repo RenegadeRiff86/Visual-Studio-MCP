@@ -237,7 +237,12 @@ internal static partial class IdeCoreCommands
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
             JObject state = await context.Runtime.IdeStateService.GetStateAsync(context.Dte).ConfigureAwait(true);
-            return new CommandExecutionResult("IDE state captured.", state);
+            return new CommandExecutionResult(
+                "IDE state captured. " +
+                "Next: call_tool with name \"errors\" to check the Error List, " +
+                "\"read_file\" to read a file, \"find_text\" to search, " +
+                "\"list_projects\" to list projects, or \"list_tool_categories\" to browse all available tools.",
+                state);
         }
     }
 
