@@ -95,16 +95,27 @@ internal sealed partial class SearchService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
 
+        // All DTE access must happen on the main thread.
         Dictionary<string, SolutionFileLocator.Match> merged = [];
-
         foreach (SolutionFileLocator.Match fileMatch in SolutionFileLocator.FindMatches(context.Dte, query, pathFilter, extensions))
         {
             merged[fileMatch.Path.ToLowerInvariant()] = fileMatch;
         }
 
+        // Capture the solution directory on the main thread, then release it for the disk crawl.
+        string solutionDirectory = includeNonProject
+            ? SolutionFileLocator.GetSolutionDirectory(context.Dte)
+            : string.Empty;
+
         if (includeNonProject)
         {
-            foreach (SolutionFileLocator.Match fileMatch in SolutionFileLocator.FindDiskMatches(context.Dte, query, pathFilter, extensions, Math.Max(100, maxResults * 2)))
+            // Directory.EnumerateFiles on a large repo blocks for hundreds of ms.
+            // Run it on a thread-pool thread so the VS UI thread stays responsive.
+            IReadOnlyList<SolutionFileLocator.Match> diskMatches = await System.Threading.Tasks.Task.Run(
+                () => SolutionFileLocator.FindDiskMatches(solutionDirectory, query, pathFilter, extensions, Math.Max(100, maxResults * 2)),
+                context.CancellationToken).ConfigureAwait(false);
+
+            foreach (SolutionFileLocator.Match fileMatch in diskMatches)
             {
                 if (!merged.TryGetValue(fileMatch.Path.ToLowerInvariant(), out SolutionFileLocator.Match existing) || fileMatch.Score > existing.Score)
                 {
@@ -120,14 +131,7 @@ internal sealed partial class SearchService
             .ThenBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
             .Take(Math.Max(1, maxResults))];
 
-        JArray matches = [..items.Select(item => new JObject
-        {
-            ["path"] = item.Path,
-            ["name"] = Path.GetFileName(item.Path),
-            ["project"] = item.ProjectUniqueName,
-            ["score"] = item.Score,
-            ["source"] = item.Source,
-        })];
+        JArray matches = [.. items.Select(item => item.ToJson())];
 
         return new JObject
         {
