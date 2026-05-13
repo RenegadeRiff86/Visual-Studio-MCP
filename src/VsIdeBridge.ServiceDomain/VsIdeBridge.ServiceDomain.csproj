@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>VsIdeBridge.ServiceDomain</RootNamespace>
+    <Description>Domain objects for VS IDE Bridge service-layer tools.</Description>
+  </PropertyGroup>
+</Project>

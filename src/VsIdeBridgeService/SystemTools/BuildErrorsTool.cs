@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Text.Json.Nodes;
+using VsIdeBridge.ServiceDomain;
 
 namespace VsIdeBridgeService.SystemTools;
 
@@ -214,32 +215,6 @@ internal static partial class BuildErrorsTool
     }
 
     private sealed record BuildRunResult(BuildRunCode ResultCode, List<BuildDiagnostic> Diagnostics);
-
-    private readonly record struct BuildDiagnostic(
-        string FilePath,
-        int LineNumber,
-        int ColumnNumber,
-        string Code,
-        string Message,
-        string Project,
-        string ProjectPath)
-    {
-        public string FileName => string.IsNullOrWhiteSpace(FilePath)
-            ? string.Empty
-            : Path.GetFileName(FilePath);
-
-        public JsonObject ToJson() => new()
-        {
-            ["file"] = FileName,
-            ["path"] = FilePath,
-            ["line"] = LineNumber,
-            ["column"] = ColumnNumber,
-            ["code"] = Code,
-            ["message"] = Message,
-            ["project"] = Project,
-            ["projectPath"] = ProjectPath,
-        };
-    }
 
     private static string FindSolutionFile(string directory)
     {

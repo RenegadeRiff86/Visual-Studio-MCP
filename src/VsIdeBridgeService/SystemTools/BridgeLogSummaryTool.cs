@@ -2,7 +2,9 @@ using System.Globalization;
 using System.IO;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using VsIdeBridge.ServiceDomain;
 using VsIdeBridge.Shared;
+using static VsIdeBridge.ServiceDomain.BridgeLogTerms;
 
 namespace VsIdeBridgeService.SystemTools;
 
@@ -16,89 +18,8 @@ internal static partial class BridgeLogSummaryTool
     private const int MaxLineChars = 1000;
     private const int MaxMessageChars = 500;
 
-    private static readonly string[] ErrorTerms =
-    [
-        "fatal",
-        "exception",
-        "failed",
-        "failure",
-        "timed out",
-        "timeout",
-        " error",
-        "error:",
-    ];
-
-    private static readonly string[] WarningTerms =
-    [
-        "warning",
-        "degraded",
-        "fallback",
-    ];
-
-    private static readonly string[] LifecycleTerms =
-    [
-        "starting",
-        "started",
-        "stopped",
-        "stdin closed",
-        "shutdown",
-        "exiting",
-        "lease",
-        "superseded",
-        "parent process",
-    ];
-
-    private static readonly string[] RequestTerms =
-    [
-        "request",
-        "dispatch",
-        "response",
-        "tool complete",
-        "tool cancelled",
-        "stdout write",
-    ];
-
     private const string KindExtension = "extension";
     private const string KindMcp = "mcp";
-
-    // Ordinal values enable Level >= minLevel comparisons for severity filtering.
-    private enum BridgeLogLevel { Info = 0, Warning = 1, Error = 2 }
-
-    // Typed domain object for extension log lines: [timestamp] [LEVEL] [Source] message
-    private readonly record struct ExtensionLogEntry(
-        int LineIndex,
-        string? TimestampRaw,
-        BridgeLogLevel Level,
-        string? Source,
-        string Message,
-        string RawLine)
-    {
-        public bool MatchesSeverity(BridgeLogLevel minLevel) => Level >= minLevel;
-
-        public bool MatchesSource(string filter) =>
-            Source is not null && Source.Contains(filter, StringComparison.OrdinalIgnoreCase);
-
-        public bool ContainsText(string text) =>
-            RawLine.Contains(text, StringComparison.OrdinalIgnoreCase);
-    }
-
-    // Typed domain object for MCP server log lines: ISO_TIMESTAMP [pid:NNN] message
-    // No explicit level tags — severity is inferred from message keywords.
-    private readonly record struct McpLogEntry(
-        int LineIndex,
-        string? TimestampRaw,
-        string? ProcessId,
-        string Message,
-        string RawLine)
-    {
-        public bool IsFailure => ContainsAny(Message, ErrorTerms);
-        public bool IsWarning => ContainsAny(Message, WarningTerms);
-        public bool IsLifecycle => ContainsAny(Message, LifecycleTerms);
-        public bool IsRequest => ContainsAny(Message, RequestTerms);
-
-        public bool ContainsText(string text) =>
-            RawLine.Contains(text, StringComparison.OrdinalIgnoreCase);
-    }
 
     public static Task<JsonNode> ExecuteAsync(JsonNode? id, JsonObject? args, BridgeConnection _)
     {
@@ -516,8 +437,6 @@ internal static partial class BridgeLogSummaryTool
         return new(lineIndex, timestamp, processId, message, Truncate(line, MaxLineChars));
     }
 
-    private static bool ContainsAny(string value, IEnumerable<string> terms)
-        => terms.Any(term => value.Contains(term, StringComparison.Ordinal));
 
     private static string? NormalizeOptionalString(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

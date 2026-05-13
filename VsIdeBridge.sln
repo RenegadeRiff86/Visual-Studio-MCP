@@ -25,6 +25,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VsIdeBridgeLauncher", "src\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VsIdeBridgeLauncher.Tests", "tests\VsIdeBridgeLauncher.Tests\VsIdeBridgeLauncher.Tests.csproj", "{C697AF1A-FDD5-03EF-A12A-12F50E9D5569}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VsIdeBridge.ServiceDomain", "src\VsIdeBridge.ServiceDomain\VsIdeBridge.ServiceDomain.csproj", "{09CDB4CB-D35E-47BE-9859-B1C82F8228D2}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VsIdeBridgeService.Tests", "tests\VsIdeBridgeService.Tests\VsIdeBridgeService.Tests.csproj", "{A3F38490-E331-1767-A094-D27DE3AEDBF9}"
 EndProject
 Global
@@ -167,6 +169,18 @@ Global
 		{A3F38490-E331-1767-A094-D27DE3AEDBF9}.Release|Any CPU.Build.0 = Release|Any CPU
 		{A3F38490-E331-1767-A094-D27DE3AEDBF9}.Release|x64.ActiveCfg = Release|Any CPU
 		{A3F38490-E331-1767-A094-D27DE3AEDBF9}.Release|x64.Build.0 = Release|Any CPU
+		{09CDB4CB-D35E-47BE-9859-B1C82F8228D2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{09CDB4CB-D35E-47BE-9859-B1C82F8228D2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{09CDB4CB-D35E-47BE-9859-B1C82F8228D2}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{09CDB4CB-D35E-47BE-9859-B1C82F8228D2}.Debug|x64.Build.0 = Debug|Any CPU
+		{09CDB4CB-D35E-47BE-9859-B1C82F8228D2}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{09CDB4CB-D35E-47BE-9859-B1C82F8228D2}.Debug|x86.Build.0 = Debug|Any CPU
+		{09CDB4CB-D35E-47BE-9859-B1C82F8228D2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{09CDB4CB-D35E-47BE-9859-B1C82F8228D2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{09CDB4CB-D35E-47BE-9859-B1C82F8228D2}.Release|x64.ActiveCfg = Release|Any CPU
+		{09CDB4CB-D35E-47BE-9859-B1C82F8228D2}.Release|x64.Build.0 = Release|Any CPU
+		{09CDB4CB-D35E-47BE-9859-B1C82F8228D2}.Release|x86.ActiveCfg = Release|Any CPU
+		{09CDB4CB-D35E-47BE-9859-B1C82F8228D2}.Release|x86.Build.0 = Release|Any CPU
 		{A3F38490-E331-1767-A094-D27DE3AEDBF9}.Release|x86.ActiveCfg = Release|Any CPU
 		{A3F38490-E331-1767-A094-D27DE3AEDBF9}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
