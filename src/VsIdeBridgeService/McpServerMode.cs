@@ -229,7 +229,7 @@ internal static class McpServerMode
     {
         string surfaceText = toolSurface.IsFull
             ? "The full tool surface is exposed in tools/list. "
-            : "A compact lazy tool surface is exposed in tools/list. Use list_tools to see every available tool name. ";
+            : "A compact lazy tool surface is exposed in tools/list. Use recommend_tools for task-based discovery, list_tools_by_category to browse a specific category, or list_tools as a last resort to see every available tool name. ";
 
         return
             "VS IDE Bridge MCP server. " +
@@ -243,7 +243,7 @@ internal static class McpServerMode
             "or call_tool({\"name\":\"errors\",\"arguments\":{}}) " +
             "or call_tool({\"name\":\"git_status\",\"arguments\":{}}). " +
             "Use recommend_tools for task-based discovery and tool_help with name=<tool> for the full schema. " +
-            "If you get an unknown-tool error, call list_tools first — do not guess tool names.";
+            "If you get an unknown-tool error, use recommend_tools or list_tools_by_category to find the right tool — do not guess tool names.";
     }
 
     private static JsonObject EmptyResourcesList()

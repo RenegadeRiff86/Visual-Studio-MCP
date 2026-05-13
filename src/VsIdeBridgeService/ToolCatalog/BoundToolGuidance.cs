@@ -5,14 +5,14 @@ namespace VsIdeBridgeService;
 internal static partial class ToolCatalog
 {
     internal static string BoundSessionHint =>
-        "A Visual Studio instance is bound. Prefer bridge MCP tools for this solution; use git_restore instead of shell git checkout -- <path> for file restore, and call list_tools when a needed tool is not visible.";
+        "A Visual Studio instance is bound. Prefer bridge MCP tools for this solution; use git_restore instead of shell git checkout -- <path> for file restore, and use recommend_tools or list_tools_by_category when a needed tool is not visible.";
 
     internal static JsonObject BuildToolDiscoveryGuidance()
     {
         return new JsonObject
         {
-            ["hint"] = "Call list_tools to browse every bridge tool, list_tool_categories for tool groups, list_tools_by_category for focused browsing, or recommend_tools for task-based discovery.",
-            ["tools"] = new JsonArray { "list_tools", "list_tool_categories", "list_tools_by_category", "recommend_tools", "tool_help" },
+            ["hint"] = "Use recommend_tools for task-based discovery, list_tools_by_category to load a focused group, list_tool_categories to enumerate all groups, or list_tools as a last resort to see every tool at once.",
+            ["tools"] = new JsonArray { "recommend_tools", "list_tool_categories", "list_tools_by_category", "tool_help", "list_tools" },
             ["recommendedTools"] = BuildBoundRecommendedTools(),
         };
     }
@@ -21,8 +21,9 @@ internal static partial class ToolCatalog
     {
         return
         [
-            RecommendedTool("list_tools", "Browse the full bridge tool surface when the current client only exposed a subset."),
-            RecommendedTool("recommend_tools", "Ask the bridge which tools fit the current task."),
+            RecommendedTool("recommend_tools", "Ask the bridge which tools fit the current task — narrower and faster than list_tools."),
+            RecommendedTool("list_tools_by_category", "Load a focused group of tools (search, git, project, debug, etc.) instead of the full catalog."),
+            RecommendedTool("list_tools", "Last resort: dump every bridge tool name when narrower discovery has not found what you need."),
             RecommendedTool("bridge_health", "Confirm the bound instance and rediscover bridge guidance."),
             RecommendedTool("vs_state", "Inspect the active solution, document, build state, and debugger state."),
             RecommendedTool("find_files", "Locate files through the bound solution instead of shell directory crawling."),

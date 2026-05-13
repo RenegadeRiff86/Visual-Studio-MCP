@@ -330,11 +330,16 @@ internal sealed class ToolExecutionRegistry
         string text =
             $"{suggestion}Unknown tool '{attemptedName}'.\n\n" +
             "To find the correct tool name:\n\n" +
-            "1. Call list_tools (no parameters) — returns every available tool name.\n" +
+            "1. Describe what you need to recommend_tools — returns the best matching tools for your task.\n" +
+            "   Example: { \"name\": \"recommend_tools\", \"arguments\": { \"task\": \"find all callers of a method\" } }\n\n" +
+            "2. Or browse a focused category with list_tools_by_category:\n" +
+            "   Example: { \"name\": \"list_tools_by_category\", \"arguments\": { \"category\": \"search\" } }\n" +
+            "   Categories: core, search, documents, diagnostics, debug, git, project, python, system, developer_tools\n\n" +
+            "3. Or call list_tool_categories to see all category names and counts.\n\n" +
+            "4. As a last resort, call list_tools (no parameters) to see every available tool name.\n" +
             "   Example: { \"name\": \"list_tools\", \"arguments\": {} }\n\n" +
-            "2. Then call tool_help with the exact name to get its full schema:\n" +
-            "   Example: { \"name\": \"tool_help\", \"arguments\": { \"name\": \"find_files\" } }\n\n" +
-            "Do not guess tool names. Always confirm with list_tools first.";
+            "Once you have the correct name, call tool_help to get its full schema:\n" +
+            "   Example: { \"name\": \"tool_help\", \"arguments\": { \"name\": \"find_files\" } }";
 
         return new JsonObject
         {
