@@ -59,14 +59,7 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
             EnsureErrorListWindow(context.Dte);
             if (!TryReadTableRows(out rows) || rows.Count == 0)
             {
-                try
-                {
-                    rows = await ReadDteRowsAsync(context, rows).ConfigureAwait(true);
-                }
-                catch (InvalidOperationException ex)
-                {
-                    LogNonCriticalException(ex);
-                }
+                rows = await ReadDteRowsAsync(context, rows).ConfigureAwait(true);
             }
         }
         else

@@ -51,6 +51,19 @@ internal static class McpServerLog
             return;
         }
 
+        // When the outer call is call_tool, also surface the inner tool name so the
+        // log shows which catalog tool was actually invoked, not just "call_tool".
+        if (string.Equals(toolName, "call_tool", StringComparison.Ordinal))
+        {
+            JsonObject? arguments = @params?["arguments"] as JsonObject;
+            string innerName = arguments?["name"]?.GetValue<string>() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(innerName))
+            {
+                Write($"request format={format} id={FormatId(id)} method={method} tool={toolName} inner={innerName}");
+                return;
+            }
+        }
+
         Write($"request format={format} id={FormatId(id)} method={method} tool={toolName}");
     }
 
@@ -87,7 +100,9 @@ internal static class McpServerLog
         try
         {
             Directory.CreateDirectory(directory);
-            return BridgeLogPaths.GetMcpServerLogPath();
+            string logPath = BridgeLogPaths.GetMcpServerLogPath();
+            BridgeLogPaths.RotateMcpServerLog(logPath);
+            return logPath;
         }
         catch (IOException ex)
         {

@@ -544,12 +544,21 @@ internal static partial class ToolCatalog
         JsonObject snapshot = bridge.DocumentDiagnostics.QueueRefreshAndGetSnapshot(sourceTool);
         JsonObject? errorsData = snapshot["errors"]?["Data"]?.AsObject();
         bool hasErrors = errorsData?["hasErrors"]?.GetValue<bool>() ?? false;
-        int errorCount = errorsData?["severityCounts"]?["Error"]?.GetValue<int>() ?? 0;
+        int errorCount   = errorsData?["totalSeverityCounts"]?["Error"]?.GetValue<int>()   ?? 0;
+        int warningCount = errorsData?["totalSeverityCounts"]?["Warning"]?.GetValue<int>() ?? 0;
+        int messageCount = errorsData?["totalSeverityCounts"]?["Message"]?.GetValue<int>() ?? 0;
+        bool anyIssues = errorCount + warningCount + messageCount > 0;
+        string summary = anyIssues
+            ? $"{errorCount} error(s) · {warningCount} warning(s) · {messageCount} message(s) — fix all before building."
+            : $"0 errors · 0 warnings · 0 messages — clean.";
         JsonObject result = new()
         {
             ["mode"] = "background-refresh",
             ["hasErrors"] = hasErrors,
             ["errorCount"] = errorCount,
+            ["warningCount"] = warningCount,
+            ["messageCount"] = messageCount,
+            ["summary"] = summary,
         };
         if (hasErrors)
             result["errors"] = errorsData?["rows"]?.DeepClone();

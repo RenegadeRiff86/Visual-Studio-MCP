@@ -37,6 +37,8 @@ internal static partial class ToolCatalog
             .. ProjectTools(),
             // ── git (service-native subprocess) ───────────────────────────────
             .. GitTools(),
+            // ── github (gh CLI subprocess) ────────────────────────────────────
+            .. GitHubTools(),
             // ── python env/package management (service-native subprocess) ──────
             .. PythonNativeTools(),
             // ── nuget package management (service-native subprocess) ───────────

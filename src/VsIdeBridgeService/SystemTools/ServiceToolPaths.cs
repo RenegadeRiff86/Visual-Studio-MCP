@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Linq;
 using LibGit2Sharp;
@@ -7,6 +8,12 @@ namespace VsIdeBridgeService.SystemTools;
 
 internal static class ServiceToolPaths
 {
+    // Cache the repo root per solution directory so ResolveRepoRootDirectory doesn't
+    // re-run FindGitRoot + HasTrackedFilesUnder (LibGit2Sharp index scan) on every
+    // git tool call in a session.  The repo root for a given solution doesn't change
+    // at runtime, so this is safe to cache for the process lifetime.
+    private static readonly ConcurrentDictionary<string, string> _repoRootCache =
+        new(StringComparer.OrdinalIgnoreCase);
     public static string ResolveInstalledCompanionPath(string fileName, string? solutionPath = null)
     {
         if (string.IsNullOrWhiteSpace(fileName))
@@ -118,6 +125,15 @@ internal static class ServiceToolPaths
                 "Call list_instances and bind_solution or bind_instance before running this tool.");
         }
 
+        return _repoRootCache.GetOrAdd(solutionDirectory, ComputeRepoRoot);
+    }
+
+    /// <summary>
+    /// Resolves the repo root for <paramref name="solutionDirectory"/> without caching.
+    /// Called at most once per unique solution directory per process lifetime.
+    /// </summary>
+    private static string ComputeRepoRoot(string solutionDirectory)
+    {
         string? repoRoot = FindGitRoot(solutionDirectory);
         if (repoRoot is null)
             return solutionDirectory;

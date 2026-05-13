@@ -81,6 +81,25 @@ internal static partial class DebugBuildCommands
     }
 
     /// <summary>
+    /// Builds a compact one-line summary that always shows counts for all three severity
+    /// levels regardless of which severity was filtered. Models read Summary first, so
+    /// embedding the full picture here prevents them from declaring victory on 0 errors
+    /// while warnings or messages remain.
+    /// Example: "0 errors · 1 warning · 2 messages — fix all before building."
+    /// </summary>
+    internal static string BuildDiagnosticsCountSummary(JObject result)
+    {
+        JToken? total = result["totalSeverityCounts"];
+        int errors   = total?["Error"]?.Value<int>()   ?? 0;
+        int warnings = total?["Warning"]?.Value<int>() ?? 0;
+        int messages = total?["Message"]?.Value<int>() ?? 0;
+        string counts = $"{errors} error(s) · {warnings} warning(s) · {messages} message(s)";
+        return errors == 0 && warnings == 0 && messages == 0
+            ? $"{counts} — clean."
+            : $"{counts} — fix all before building.";
+    }
+
+    /// <summary>
     /// Produces bridge-level advisory warnings pointing to severity categories that were
     /// NOT the primary focus of this call, so the model is reminded to check them.
     /// </summary>

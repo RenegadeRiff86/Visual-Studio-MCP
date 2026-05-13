@@ -518,7 +518,9 @@ internal sealed partial class DocumentService
         }
         catch (COMException ex)
         {
-            BridgeActivityLog.LogWarning(nameof(DocumentService), "Failed to center the active editor point in the viewport", ex);
+            // Viewport centering is best-effort; transient COM failures (E_UNEXPECTED etc.)
+            // do not affect the navigation result. Log at verbose only — not to the log file.
+            BridgeActivityLog.LogVerbose(nameof(DocumentService), "Failed to center the active editor point in the viewport", ex);
         }
     }
 

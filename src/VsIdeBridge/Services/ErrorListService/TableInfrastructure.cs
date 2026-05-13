@@ -328,12 +328,9 @@ internal sealed partial class ErrorListService
         Window? window = TryGetErrorListWindow(context.Dte);
         if (window?.Object is not ErrorList errorList)
         {
-            if (tableRows.Count > 0)
-            {
-                return tableRows;
-            }
-
-            throw new InvalidOperationException("Error List window is not available.");
+            // Error List window is not open yet. This is a normal startup condition.
+            // Return whatever table rows we have (may be empty) without throwing.
+            return tableRows;
         }
 
         return CaptureDteRows(errorList);

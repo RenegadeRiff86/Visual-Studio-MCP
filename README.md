@@ -112,10 +112,24 @@ Once connected, describe what you want in plain language. The assistant figures 
 
 ## Logs
 
-Logs are written to `C:\Program Files\VsIdeBridge\logs\`:
+All logs are written to the same directory. The location is resolved in this order:
 
-- `mcp-server.log` — MCP request and response log
-- `vs-ide-bridge-yyyy-MM-dd.log` — Visual Studio extension activity log
+| Scenario | Path |
+|---|---|
+| Installed (default) | `C:\Program Files\VsIdeBridge\logs\` |
+| No installer, `%COMMONAPPDATA%` present | `C:\ProgramData\VsIdeBridge\logs\` |
+| Fallback | `%TEMP%\VsIdeBridge\logs\` |
+
+The installed path is read from the registry key `HKLM\SOFTWARE\VsIdeBridge\InstallPath` written by the installer. Both the Windows service and the Visual Studio extension use `BridgeLogPaths.GetSharedLogDirectory()` (in `src/Shared/BridgeLogPaths.cs`) so they always land in the same folder.
+
+Two files are written:
+
+- `mcp-server.log` — MCP request/response traffic (written by the Windows service)
+- `vs-ide-bridge-yyyy-MM-dd.log` — extension warnings and errors (written by the VS extension, one file per day)
+
+**Retention** — logs are managed automatically. `mcp-server.log` is rotated to `mcp-server.log.old` when it exceeds 5 MB (one backup kept, ~10 MB cap). Daily extension logs older than 7 days are deleted on the first write of each VS session.
+
+> **Developer note** — when running from source without running the installer first, the registry key is absent and logs go to `C:\ProgramData\VsIdeBridge\logs\`. If you need to change the retention limits or add new log files, all path and cleanup logic is centralised in `src/Shared/BridgeLogPaths.cs`.
 
 ## Troubleshooting
 
@@ -151,6 +165,8 @@ Open `VsIdeBridge.sln` in Visual Studio to work on the extension. Build the inst
 ```
 installer\output\vs-ide-bridge-setup-<version>.exe
 ```
+
+When developing without the installer, logs are written to `C:\ProgramData\VsIdeBridge\logs\` instead of the default install directory. See [Logs](#logs) for the full path resolution and retention details.
 
 ## Third-Party Notices
 

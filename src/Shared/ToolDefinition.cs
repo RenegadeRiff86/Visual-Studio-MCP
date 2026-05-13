@@ -360,7 +360,10 @@ public sealed class ToolDefinition(
                 or "git_show"
                 or "git_stash_list"
                 or "git_tag_list"
-                or "github_issue_search";
+                or "github_issue_search"
+                or "github_pr_list"
+                or "github_pr_view"
+                or "github_pr_diff";
     }
 
     private static bool InferDestructive(string name)

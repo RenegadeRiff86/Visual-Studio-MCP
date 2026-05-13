@@ -140,7 +140,7 @@ internal static partial class DebugBuildCommands
                 forceRefresh).ConfigureAwait(true);
 
             return new CommandExecutionResult(
-                $"Captured {errorListResult["count"]} Error List row(s).",
+                BuildDiagnosticsCountSummary(errorListResult),
                 errorListResult,
                 BuildDiagnosticsCrossReferenceAdvisories(errorListResult, "Warning", "Message"));
         }
@@ -163,7 +163,7 @@ internal static partial class DebugBuildCommands
                 forceRefresh).ConfigureAwait(true);
 
             return new CommandExecutionResult(
-                $"Captured {warningListResult["count"]} warning row(s).",
+                BuildDiagnosticsCountSummary(warningListResult),
                 warningListResult,
                 BuildDiagnosticsCrossReferenceAdvisories(warningListResult, "Error", "Message"));
         }
@@ -186,7 +186,7 @@ internal static partial class DebugBuildCommands
                 forceRefresh).ConfigureAwait(true);
 
             return new CommandExecutionResult(
-                $"Captured {messageListResult["count"]} message row(s).",
+                BuildDiagnosticsCountSummary(messageListResult),
                 messageListResult,
                 BuildDiagnosticsCrossReferenceAdvisories(messageListResult, "Error", "Warning"));
         }

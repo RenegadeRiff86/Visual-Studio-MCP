@@ -172,11 +172,10 @@ internal static partial class ToolCatalog
                 "or [\".\" ] to stage everything.",
                 ObjectSchema(ReqArr(Paths, "Array of file paths or globs to stage, e.g. [\"src/Foo.cs\"] or [\".\"].")),
                 Git,
-                async (id, args, bridge) =>
+                 async (id, args, bridge) =>
                 {
                     string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
-                    string pathList = BuildPathList(args, Paths);
-                    return await GitRunner.RunAsync(id, repo, $"add -- {pathList}")
+                    return await GitSdkReader.StageAsync(id, repo, GetPathList(args, Paths))
                         .ConfigureAwait(false);
                 },
                 searchHints: BuildSearchHints(
@@ -188,12 +187,10 @@ internal static partial class ToolCatalog
                 "Does not touch the index.",
                 ObjectSchema(ReqArr(Paths, "Array of file paths to restore, e.g. [\"src/Foo.cs\"].")),
                 Git,
-                async (id, args, bridge) =>
+                 async (id, args, bridge) =>
                 {
                     string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
-                    string pathList = BuildPathList(args, Paths);
-                    return await GitRunner.RunAsync(id, repo,
-                        $"restore --source=HEAD --worktree -- {pathList}")
+                    return await GitSdkReader.RestoreAsync(id, repo, GetPathList(args, Paths))
                         .ConfigureAwait(false);
                 },
                 searchHints: BuildSearchHints(
@@ -203,12 +200,10 @@ internal static partial class ToolCatalog
                 "Unstage files (mixed reset). If no paths are given, unstages everything.",
                 ObjectSchema(OptArr(Paths, "Array of paths to unstage, or omit for all.")),
                 Git,
-                async (id, args, bridge) =>
+                 async (id, args, bridge) =>
                 {
                     string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
-                    string pathList = BuildPathList(args, Paths);
-                    string pathSpec = pathList == "." ? string.Empty : $"-- {pathList}";
-                    return await GitRunner.RunAsync(id, repo, $"reset {pathSpec}".TrimEnd())
+                    return await GitSdkReader.UnstageAsync(id, repo, GetPathListOrNull(args, Paths))
                         .ConfigureAwait(false);
                 },
                 searchHints: BuildSearchHints(
@@ -453,5 +448,33 @@ internal static partial class ToolCatalog
         string? single = args?[argName]?.GetValue<string>();
         return string.IsNullOrWhiteSpace(single) ? "." : EscapeArg(single);
     }
+
+    /// <summary>
+    /// Extract path strings from a JSON array arg for use with LibGit2Sharp.
+    /// Falls back to <c>["."]</c> if the arg is absent.
+    /// </summary>
+    private static IEnumerable<string> GetPathList(JsonObject? args, string argName)
+    {
+        if (args?[argName] is JsonArray arr)
+        {
+            List<string> items =
+            [
+                .. arr
+                    .Select(n => n?.GetValue<string>() ?? string.Empty)
+                    .Where(s => !string.IsNullOrWhiteSpace(s)),
+            ];
+            return items.Count > 0 ? items : ["."];
+        }
+
+        string? single = args?[argName]?.GetValue<string>();
+        return string.IsNullOrWhiteSpace(single) ? ["."] : [single];
+    }
+
+    /// <summary>
+    /// Like <see cref="GetPathList"/> but returns <see langword="null"/> when the arg is absent,
+    /// signalling "all paths" to operations like unstage.
+    /// </summary>
+    private static IEnumerable<string>? GetPathListOrNull(JsonObject? args, string argName)
+        => args?[argName] is null ? null : GetPathList(args, argName);
 
 }

@@ -62,21 +62,25 @@ internal sealed class ToolExecutionRegistry
             return BuildUnknownToolResult(name);
         }
 
+        McpServerLog.Write($"tool dispatch name={name}");
+        System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             ValidateArguments(id, entry, args);
-            return await entry.Handler(id, args, bridge).ConfigureAwait(false);
+            JsonNode result = await entry.Handler(id, args, bridge).ConfigureAwait(false);
+            McpServerLog.Write($"tool complete name={name} ms={sw.ElapsedMilliseconds}");
+            return result;
         }
         catch (McpRequestException ex)
         {
             // Convert known-tool failures into a content-level isError result so the model can
             // self-correct using the embedded help instead of spiraling after a JSON-RPC error.
-            McpServerLog.Write($"tool failure tool={name} code={ex.Code} message={ex.Message}");
+            McpServerLog.Write($"tool failure tool={name} ms={sw.ElapsedMilliseconds} code={ex.Code} message={ex.Message}");
             return BuildToolFailureResult(ex, entry);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            McpServerLog.Write($"tool unhandled failure tool={name} exception={ex.GetType().Name} message={ex.Message}");
+            McpServerLog.Write($"tool unhandled failure tool={name} ms={sw.ElapsedMilliseconds} exception={ex.GetType().Name} message={ex.Message}");
             return BuildToolFailureResult(
                 new McpRequestException(
                     id,

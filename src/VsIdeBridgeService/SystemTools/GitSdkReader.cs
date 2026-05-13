@@ -9,6 +9,7 @@ namespace VsIdeBridgeService.SystemTools;
 internal static class GitSdkReader
 {
     private const string RepositoryPathProperty = "repositoryPath";
+    private const string ExitCodeProperty = "exitCode";
 
     public static Task<JsonNode> GetCurrentBranchAsync(JsonNode? id, string repoDirectory)
     {
@@ -64,7 +65,7 @@ internal static class GitSdkReader
         JsonObject payload = new()
         {
             ["success"] = true,
-            ["exitCode"] = 0,
+            [ExitCodeProperty] = 0,
             ["stdout"] = stdout,
             ["stderr"] = string.Empty,
             [RepositoryPathProperty] = repo.Info.WorkingDirectory,
@@ -137,7 +138,7 @@ internal static class GitSdkReader
         JsonObject payload = new()
         {
             ["success"] = true,
-            ["exitCode"] = 0,
+            [ExitCodeProperty] = 0,
             ["stdout"] = stdout,
             ["stderr"] = string.Empty,
             [RepositoryPathProperty] = repo.Info.WorkingDirectory,
@@ -364,6 +365,109 @@ internal static class GitSdkReader
             return '?';
 
         return ' ';
+    }
+
+    /// <summary>
+    /// Stage the given paths (equivalent to <c>git add -- paths</c>).
+    /// Uses LibGit2Sharp in-process to avoid subprocess hang issues on Windows service accounts.
+    /// </summary>
+    public static Task<JsonNode> StageAsync(JsonNode? id, string repoDirectory, IEnumerable<string> paths)
+    {
+        using Repository repo = OpenRepository(id, repoDirectory);
+        List<string> normalized = [.. paths.Select(NormalizeGitPath)];
+        try
+        {
+            Commands.Stage(repo, normalized);
+        }
+        catch (LibGit2SharpException ex)
+        {
+            throw new McpRequestException(id, McpErrorCodes.BridgeError,
+                $"git add failed: {ex.Message}");
+        }
+
+        JsonObject payload = new()
+        {
+            ["success"] = true,
+            [ExitCodeProperty] = 0,
+            ["stdout"] = string.Join(Environment.NewLine, normalized.Select(p => $"staged: {p}")) + Environment.NewLine,
+            ["stderr"] = string.Empty,
+            ["count"] = normalized.Count,
+        };
+        return Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(
+            payload,
+            successText: $"Staged {normalized.Count} path(s)."));
+    }
+
+    /// <summary>
+    /// Unstage the given paths (equivalent to <c>git reset HEAD -- paths</c>).
+    /// Pass null or an empty list to unstage all staged files.
+    /// </summary>
+    public static Task<JsonNode> UnstageAsync(JsonNode? id, string repoDirectory, IEnumerable<string>? paths)
+    {
+        using Repository repo = OpenRepository(id, repoDirectory);
+
+        // If no paths supplied, unstage everything currently in the index.
+        List<string> targets = paths is not null
+            ? [.. paths.Select(NormalizeGitPath)]
+            : [.. repo.Index.Select(e => e.Path)];
+
+        try
+        {
+            Commands.Unstage(repo, targets);
+        }
+        catch (LibGit2SharpException ex)
+        {
+            throw new McpRequestException(id, McpErrorCodes.BridgeError,
+                $"git reset failed: {ex.Message}");
+        }
+
+        string label = targets.Count > 0 ? string.Join(", ", targets) : "nothing";
+        JsonObject payload = new()
+        {
+            ["success"] = true,
+            [ExitCodeProperty] = 0,
+            ["stdout"] = $"Unstaged: {label}{Environment.NewLine}",
+            ["stderr"] = string.Empty,
+            ["count"] = targets.Count,
+        };
+        return Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(
+            payload,
+            successText: $"Unstaged {targets.Count} path(s)."));
+    }
+
+    /// <summary>
+    /// Restore working-tree files from HEAD (equivalent to <c>git restore --source=HEAD --worktree -- paths</c>).
+    /// </summary>
+    public static Task<JsonNode> RestoreAsync(JsonNode? id, string repoDirectory, IEnumerable<string> paths)
+    {
+        using Repository repo = OpenRepository(id, repoDirectory);
+        if (repo.Head.Tip is null)
+            throw new McpRequestException(id, McpErrorCodes.BridgeError,
+                "Cannot restore files: repository has no commits yet.");
+
+        List<string> normalized = [.. paths.Select(NormalizeGitPath)];
+        try
+        {
+            repo.CheckoutPaths(repo.Head.Tip.Sha, normalized,
+                new CheckoutOptions { CheckoutModifiers = CheckoutModifiers.Force });
+        }
+        catch (LibGit2SharpException ex)
+        {
+            throw new McpRequestException(id, McpErrorCodes.BridgeError,
+                $"git restore failed: {ex.Message}");
+        }
+
+        JsonObject payload = new()
+        {
+            ["success"] = true,
+            [ExitCodeProperty] = 0,
+            ["stdout"] = string.Join(Environment.NewLine, normalized.Select(p => $"restored: {p}")) + Environment.NewLine,
+            ["stderr"] = string.Empty,
+            ["count"] = normalized.Count,
+        };
+        return Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(
+            payload,
+            successText: $"Restored {normalized.Count} path(s) from HEAD."));
     }
 
     private static string NormalizeGitPath(string path)
