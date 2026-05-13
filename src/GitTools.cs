@@ -217,7 +217,7 @@ internal static partial class ToolCatalog
                 {
                     string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
                     string msg = args?[Message]?.GetValue<string>() ?? string.Empty;
-                    return await GitRunner.RunAsync(id, repo, $"commit -m {EscapeArg(msg)}")
+                    return await GitSdkReader.CommitAsync(id, repo, msg)
                         .ConfigureAwait(false);
                 },
                 searchHints: BuildSearchHints(
@@ -234,12 +234,8 @@ internal static partial class ToolCatalog
                 {
                     string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
                     string? msg = args?[Message]?.GetValue<string>();
-                    bool noEdit = string.IsNullOrWhiteSpace(msg) &&
-                                  (args?["no_edit"]?.GetValue<bool?>() ?? true);
-                    string msgArg = !string.IsNullOrWhiteSpace(msg)
-                        ? $"-m {EscapeArg(msg)}"
-                        : noEdit ? "--no-edit" : string.Empty;
-                    return await GitRunner.RunAsync(id, repo, $"commit --amend {msgArg}".TrimEnd())
+                    // Pass null when no message supplied so AmendCommitAsync keeps the existing message.
+                    return await GitSdkReader.AmendCommitAsync(id, repo, msg)
                         .ConfigureAwait(false);
                 },
                 searchHints: BuildSearchHints(

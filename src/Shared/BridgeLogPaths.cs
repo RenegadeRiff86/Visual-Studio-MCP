@@ -75,6 +75,33 @@ public static class BridgeLogPaths
     }
 
     /// <summary>
+    /// Removes log files from the CommonAppData fallback directory when the active log
+    /// directory is the installer-managed location. Prevents stale pre-install logs from
+    /// accumulating alongside current logs in a different folder.
+    /// Called once per process at startup. Failures are silently swallowed.
+    /// </summary>
+    public static void CleanupLegacyLogs(string currentLogDir)
+    {
+        try
+        {
+            string commonAppData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+            if (string.IsNullOrWhiteSpace(commonAppData))
+                return;
+            string legacyDir = Path.Combine(commonAppData, ProductDirectoryName, LogsDirectoryName);
+            if (string.Equals(legacyDir, currentLogDir, StringComparison.OrdinalIgnoreCase))
+                return;  // already writing to this location — nothing to clean
+            if (!Directory.Exists(legacyDir))
+                return;
+            foreach (string file in Directory.GetFiles(legacyDir, "vs-ide-bridge-*.log"))
+                File.Delete(file);
+            foreach (string file in Directory.GetFiles(legacyDir, "mcp-server.log*"))
+                File.Delete(file);
+        }
+        catch (IOException ex) { Debug.WriteLine($"BridgeLogPaths.CleanupLegacyLogs failed: {ex.Message}"); }
+        catch (UnauthorizedAccessException ex) { Debug.WriteLine($"BridgeLogPaths.CleanupLegacyLogs failed: {ex.Message}"); }
+    }
+
+    /// <summary>
     /// Deletes daily extension log files older than <paramref name="keepDays"/> days.
     /// Called once per process on first log write. Failures are silently swallowed.
     /// </summary>

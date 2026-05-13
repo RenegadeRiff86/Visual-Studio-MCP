@@ -131,6 +131,8 @@ internal static partial class ToolCatalog
                 related: [("find_files", "Locate files by name"), ("search_symbols", "Search named definitions"), (HintReadFileTool, "Read the matched file contents")]),
             "documents" => BuildSearchHints(
                 related: [(HintReadFileTool, "Read file contents"), ("apply_diff", "Make targeted edits"), (HintOpenFileTool, "Open a file in the editor")]),
+            "developer_tools" => BuildSearchHints(
+                related: [("bridge_log_summary", "Parse installed bridge MCP and VSIX logs"), ("set_version", "Update bridge release version files"), ("bridge_health", "Inspect binding and discovery state")]),
             _ => null,
         };
     }

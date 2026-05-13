@@ -79,6 +79,7 @@ public sealed partial class ToolRegistry
         new("git", "Version control", "Bridge-managed Git and GitHub helpers, with fallback paths where needed."),
         new("python", "Python runtime", "Python environments, packages, and stateless scratchpad tools."),
         new("project", "Projects and solutions", "Projects, references, outputs, NuGet, and solution structure."),
+        new("developer_tools", "Bridge development", "Bridge-code-only maintenance tools for installed logs, release versioning, and VS IDE Bridge internals."),
         new("system", "Discovery and host", "Tool discovery, host control, and last-resort process execution."),
     ];
 

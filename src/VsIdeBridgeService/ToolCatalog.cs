@@ -43,6 +43,8 @@ internal static partial class ToolCatalog
             .. PythonNativeTools(),
             // ── nuget package management (service-native subprocess) ───────────
             .. NugetTools(),
+            // ── bridge development / release maintenance ───────────────────────
+            .. DeveloperTools(),
         ];
 
         return

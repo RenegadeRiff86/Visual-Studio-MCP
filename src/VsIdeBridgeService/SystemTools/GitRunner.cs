@@ -58,6 +58,7 @@ internal static class GitRunner
         {
             FileName = gitExe,
             WorkingDirectory = repoDirectory,
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -81,6 +82,7 @@ internal static class GitRunner
         using Process process = Process.Start(psi)
             ?? throw new McpRequestException(id, McpErrorCodes.BridgeError,
                 $"Failed to start git process at '{psi.FileName}'.");
+        process.StandardInput.Close();
 
         Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
         Task<string> stderrTask = process.StandardError.ReadToEndAsync();

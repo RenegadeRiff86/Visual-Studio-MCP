@@ -102,6 +102,7 @@ internal static class McpServerLog
             Directory.CreateDirectory(directory);
             string logPath = BridgeLogPaths.GetMcpServerLogPath();
             BridgeLogPaths.RotateMcpServerLog(logPath);
+            BridgeLogPaths.CleanupLegacyLogs(directory);
             return logPath;
         }
         catch (IOException ex)

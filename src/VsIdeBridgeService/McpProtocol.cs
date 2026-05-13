@@ -36,22 +36,26 @@ internal static class McpProtocol
         return await ReadHeaderFramedMessageAsync(input, firstByte.Value).ConfigureAwait(false);
     }
 
-    public static async Task WriteAsync(Stream output, JsonObject response, WireFormat format)
+    public static async Task WriteAsync(
+        Stream output,
+        JsonObject response,
+        WireFormat format,
+        CancellationToken cancellationToken = default)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(response.ToJsonString());
         if (format == WireFormat.RawJson)
         {
-            await output.WriteAsync(bytes).ConfigureAwait(false);
-            await output.WriteAsync(RawJsonTerminator).ConfigureAwait(false);
+            await output.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+            await output.WriteAsync(RawJsonTerminator, cancellationToken).ConfigureAwait(false);
         }
         else
         {
             byte[] header = Encoding.ASCII.GetBytes($"Content-Length: {bytes.Length}\r\n\r\n");
-            await output.WriteAsync(header).ConfigureAwait(false);
-            await output.WriteAsync(bytes).ConfigureAwait(false);
+            await output.WriteAsync(header, cancellationToken).ConfigureAwait(false);
+            await output.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
         }
 
-        await output.FlushAsync().ConfigureAwait(false);
+        await output.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public static JsonObject ErrorResponse(JsonNode? id, int code, string message) => new()

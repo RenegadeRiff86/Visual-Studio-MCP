@@ -531,11 +531,13 @@ internal static partial class BestPracticeAnalyzerHelpers
             return true;
         }
 
-        // Catch project-level test folders: Foo.Tests\, Foo.UnitTests\, Foo.IntegrationTests\, Tests\
-        string fullPath = Path.GetFullPath(file);
-        return fullPath.Contains(".Tests", StringComparison.OrdinalIgnoreCase)
-            || fullPath.Contains($"{Path.DirectorySeparatorChar}Tests{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
-            || fullPath.Contains($"{Path.AltDirectorySeparatorChar}Tests{Path.AltDirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase);
+        // Catch project-level test folders without letting the process current
+        // directory turn a bare relative file name into a test path.
+        string normalizedPath = file.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+        string testDirectorySegment = $"{Path.DirectorySeparatorChar}Tests{Path.DirectorySeparatorChar}";
+        return normalizedPath.Contains(".Tests", StringComparison.OrdinalIgnoreCase)
+            || normalizedPath.StartsWith($"Tests{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
+            || normalizedPath.Contains(testDirectorySegment, StringComparison.OrdinalIgnoreCase);
     }
 
     internal static int GetLineNumber(string content, int index)

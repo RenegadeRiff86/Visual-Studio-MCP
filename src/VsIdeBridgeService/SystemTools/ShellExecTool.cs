@@ -32,6 +32,7 @@ internal static class ShellExecTool
             FileName = executable,
             Arguments = arguments,
             WorkingDirectory = workingDirectory,
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -40,6 +41,7 @@ internal static class ShellExecTool
 
         using Process process = Process.Start(processStartInfo)
             ?? throw new McpRequestException(id, McpErrorCodes.BridgeError, $"Failed to start process '{executable}'.");
+        process.StandardInput.Close();
 
         Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
         Task<string> stderrTask = process.StandardError.ReadToEndAsync();

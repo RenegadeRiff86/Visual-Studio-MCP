@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json.Nodes;
 using System.Text.Json;
 using System.Net;
@@ -12,7 +13,9 @@ namespace VsIdeBridgeService;
 internal static class McpServerMode
 {
     private static readonly ToolExecutionRegistry Registry = ToolCatalog.Registry;
+    private static readonly TimeSpan StdoutWriteTimeout = TimeSpan.FromSeconds(30);
     private const int BadRequestStatusCode = 400;
+    private const int StdoutWriteTimeoutExitCode = 2;
 
     public static async Task RunAsync(string[] args)
     {
@@ -51,6 +54,7 @@ internal static class McpServerMode
                     break;
                 }
 
+                StdioHostLease.MarkActivity();
                 string incomingMethod = incoming.Request["method"]?.GetValue<string>() ?? string.Empty;
 
                 // Handle notifications immediately without blocking the read loop.
@@ -121,6 +125,8 @@ internal static class McpServerMode
         McpToolSurface toolSurface)
     {
         JsonNode? requestId = incoming.Request["id"]?.DeepClone();
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        using IDisposable leaseActivity = StdioHostLease.BeginActivity();
         using CancellationTokenSource cts = RequestCancellationRegistry.Register(requestId);
         try
         {
@@ -145,6 +151,7 @@ internal static class McpServerMode
         }
         finally
         {
+            McpServerLog.Write($"dispatch finished id={FormatId(requestId)} ms={stopwatch.ElapsedMilliseconds}");
             RequestCancellationRegistry.Unregister(requestId);
         }
     }
@@ -298,15 +305,60 @@ internal static class McpServerMode
     private static async Task WriteLockedAsync(
         Stream output, JsonObject response, McpProtocol.WireFormat format, SemaphoreSlim writeLock)
     {
-        await writeLock.WaitAsync().ConfigureAwait(false);
+        string responseId = FormatId(response["id"]);
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        McpServerLog.Write($"response write queued id={responseId} format={format}");
+
+        bool lockTaken = await writeLock.WaitAsync(StdoutWriteTimeout).ConfigureAwait(false);
+        if (!lockTaken)
+        {
+            McpServerLog.Write(
+                $"response write lock timed out id={responseId} after {StdoutWriteTimeout.TotalSeconds:F0}s; exiting stdio host");
+            Environment.Exit(StdoutWriteTimeoutExitCode);
+            return;
+        }
+
         try
         {
-            await McpProtocol.WriteAsync(output, response, format).ConfigureAwait(false);
+            McpServerLog.Write($"response write start id={responseId}");
+            Task writeTask = McpProtocol.WriteAsync(output, response, format);
+            Task timeoutTask = Task.Delay(StdoutWriteTimeout);
+            Task completedTask = await Task.WhenAny(writeTask, timeoutTask).ConfigureAwait(false);
+            if (!ReferenceEquals(completedTask, writeTask))
+            {
+                McpServerLog.Write(
+                    $"response write timed out id={responseId} after {StdoutWriteTimeout.TotalSeconds:F0}s; exiting stdio host because stdout did not drain");
+                Environment.Exit(StdoutWriteTimeoutExitCode);
+                return;
+            }
+
+            await writeTask.ConfigureAwait(false);
+            McpServerLog.Write($"response write complete id={responseId} ms={stopwatch.ElapsedMilliseconds}");
+        }
+        catch (IOException ex)
+        {
+            McpServerLog.WriteException($"response write failed id={responseId}; exiting stdio host", ex);
+            Environment.Exit(StdoutWriteTimeoutExitCode);
+        }
+        catch (ObjectDisposedException ex)
+        {
+            McpServerLog.WriteException($"response write failed id={responseId}; exiting stdio host", ex);
+            Environment.Exit(StdoutWriteTimeoutExitCode);
+        }
+        catch (InvalidOperationException ex)
+        {
+            McpServerLog.WriteException($"response write failed id={responseId}; exiting stdio host", ex);
+            Environment.Exit(StdoutWriteTimeoutExitCode);
         }
         finally
         {
             writeLock.Release();
         }
+    }
+
+    private static string FormatId(JsonNode? id)
+    {
+        return id is null ? "<null>" : id.ToJsonString();
     }
 
     public static async Task RunHttpAsync(string[] args, CancellationToken cancellationToken = default)

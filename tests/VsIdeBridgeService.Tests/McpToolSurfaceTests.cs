@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using VsIdeBridge.Shared;
 using Xunit;
 
 namespace VsIdeBridgeService.Tests;
@@ -29,6 +30,32 @@ public sealed class McpToolSurfaceTests
         Assert.Contains("read_file", names);
         Assert.Contains("apply_diff", names);
         Assert.True(names.Length > McpToolSurface.Lazy.VisibleToolNames!.Count);
+    }
+
+    [Fact]
+    public void DeveloperToolsCategoryContainsBridgeMaintenanceTools()
+    {
+        ToolExecutionRegistry registry = ToolCatalog.CreateRegistry();
+
+        Assert.True(registry.TryGet("bridge_log_summary", out ToolEntry? logTool));
+        Assert.Equal("developer_tools", logTool.Definition.Category);
+        Assert.True(logTool.Definition.ReadOnly);
+        Assert.False(logTool.Definition.Mutating);
+        Assert.Contains("parse_bridge_logs", logTool.Definition.Aliases);
+
+        Assert.True(registry.TryGet("set_version", out ToolEntry? versionTool));
+        Assert.Equal("developer_tools", versionTool.Definition.Category);
+        Assert.True(versionTool.Definition.Mutating);
+    }
+
+    [Fact]
+    public void DefaultCategoriesIncludeDeveloperTools()
+    {
+        ToolCategoryDefinition category = ToolRegistry.DefaultCategoryDefinitions.Single(category =>
+            category.Name == "developer_tools");
+
+        Assert.Equal("Bridge development", category.Summary);
+        Assert.Contains("Bridge-code-only", category.Description);
     }
 
     [Fact]

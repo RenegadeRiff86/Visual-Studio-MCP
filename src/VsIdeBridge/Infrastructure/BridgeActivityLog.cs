@@ -36,6 +36,7 @@ internal static class BridgeActivityLog
             {
                 _prunedOnce = true;
                 BridgeLogPaths.PruneExtensionLogs(logDir);
+                BridgeLogPaths.CleanupLegacyLogs(logDir);
             }
             string logPath = BridgeLogPaths.GetVisualStudioExtensionLogPath();
             string entry = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [{level}] [{source}] {context}{Environment.NewLine}{detail}{Environment.NewLine}";

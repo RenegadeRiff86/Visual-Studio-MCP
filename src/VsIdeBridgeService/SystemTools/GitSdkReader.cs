@@ -470,6 +470,106 @@ internal static class GitSdkReader
             successText: $"Restored {normalized.Count} path(s) from HEAD."));
     }
 
+    /// <summary>
+    /// Create a commit with the staged index (equivalent to <c>git commit -m message</c>).
+    /// Uses LibGit2Sharp in-process to avoid subprocess hang issues on Windows service accounts.
+    /// </summary>
+    public static Task<JsonNode> CommitAsync(JsonNode? id, string repoDirectory, string message)
+    {
+        using Repository repo = OpenRepository(id, repoDirectory);
+        Signature signature = ResolveSignature(id, repo);
+
+        Commit commit;
+        try
+        {
+            commit = repo.Commit(message, signature, signature);
+        }
+        catch (EmptyCommitException)
+        {
+            throw new McpRequestException(id, McpErrorCodes.BridgeError,
+                "Nothing to commit. Stage files with git_add first.");
+        }
+        catch (LibGit2SharpException ex)
+        {
+            throw new McpRequestException(id, McpErrorCodes.BridgeError,
+                $"git commit failed: {ex.Message}");
+        }
+
+        string shortSha = ShortSha(commit.Sha);
+        string branch = repo.Info.IsHeadDetached ? ShortSha(commit.Sha) : repo.Head.FriendlyName;
+        JsonObject payload = new()
+        {
+            ["success"] = true,
+            [ExitCodeProperty] = 0,
+            ["stdout"] = $"[{branch} {shortSha}] {commit.MessageShort}{Environment.NewLine}",
+            ["stderr"] = string.Empty,
+            ["sha"] = commit.Sha,
+            ["shortSha"] = shortSha,
+            ["branch"] = branch,
+            [RepositoryPathProperty] = repo.Info.WorkingDirectory,
+        };
+        return Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(
+            payload,
+            successText: $"Committed [{shortSha}] {commit.MessageShort}"));
+    }
+
+    /// <summary>
+    /// Amend the most recent commit (equivalent to <c>git commit --amend</c>).
+    /// Pass null for <paramref name="message"/> to keep the existing commit message.
+    /// </summary>
+    public static Task<JsonNode> AmendCommitAsync(JsonNode? id, string repoDirectory, string? message)
+    {
+        using Repository repo = OpenRepository(id, repoDirectory);
+        if (repo.Head.Tip is null)
+            throw new McpRequestException(id, McpErrorCodes.BridgeError,
+                "Cannot amend: repository has no commits yet.");
+
+        Signature signature = ResolveSignature(id, repo);
+        string finalMessage = string.IsNullOrWhiteSpace(message)
+            ? repo.Head.Tip.Message   // --no-edit: keep existing message verbatim
+            : message;
+
+        Commit commit;
+        try
+        {
+            commit = repo.Commit(finalMessage, signature, signature,
+                new CommitOptions { AmendPreviousCommit = true });
+        }
+        catch (LibGit2SharpException ex)
+        {
+            throw new McpRequestException(id, McpErrorCodes.BridgeError,
+                $"git commit --amend failed: {ex.Message}");
+        }
+
+        string shortSha = ShortSha(commit.Sha);
+        string branch = repo.Info.IsHeadDetached ? shortSha : repo.Head.FriendlyName;
+        JsonObject payload = new()
+        {
+            ["success"] = true,
+            [ExitCodeProperty] = 0,
+            ["stdout"] = $"[{branch} {shortSha}] {commit.MessageShort}{Environment.NewLine}",
+            ["stderr"] = string.Empty,
+            ["sha"] = commit.Sha,
+            ["shortSha"] = shortSha,
+            ["branch"] = branch,
+            [RepositoryPathProperty] = repo.Info.WorkingDirectory,
+        };
+        return Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(
+            payload,
+            successText: $"Amended commit to [{shortSha}] {commit.MessageShort}"));
+    }
+
+    private static Signature ResolveSignature(JsonNode? id, Repository repo)
+    {
+        string? name = repo.Config.Get<string>("user.name")?.Value;
+        string? email = repo.Config.Get<string>("user.email")?.Value;
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(email))
+            throw new McpRequestException(id, McpErrorCodes.BridgeError,
+                "Git user.name or user.email is not configured. " +
+                "Run 'git config user.name \"Your Name\"' and 'git config user.email \"you@example.com\"'.");
+        return new Signature(name, email, DateTimeOffset.Now);
+    }
+
     private static string NormalizeGitPath(string path)
         => path.Replace('\\', '/');
 

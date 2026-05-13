@@ -472,15 +472,6 @@ internal static partial class ToolCatalog
             searchHints: BuildSearchHints(
                 related: [("execute_command", "Run a VS command instead"), ("build", "Use the build tool for compilation"), ("git_status", "Use git tools for version control")]));
 
-        yield return new("set_version",
-            "Update the version string across all version files in the solution.",
-            ObjectSchema(
-                Req("version", "New version string (e.g. 2.1.0).")),
-            "system",
-            (id, args, bridge) => SetVersionTool.ExecuteAsync(id, args, bridge),
-            searchHints: BuildSearchHints(
-                workflow: [("build", "Rebuild after changing the version"), ("errors", "Check for version-related errors")],
-                related: [("shell_exec", "Run custom versioning scripts")]));
     }
 
     private static async Task<JsonNode> OpenSolutionAsync(JsonNode? id, JsonObject? args, BridgeConnection bridge)
