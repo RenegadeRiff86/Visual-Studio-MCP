@@ -11,7 +11,8 @@
 - Fixed explicit build/rebuild waits to use the Visual Studio build completion path and longer build timeout instead of falling back into courtesy polling loops.
 - Fixed post-filtered search results so path and project filters accept either forward slashes or backslashes, keeping `find_text` and `find_text_batch` counts aligned with returned rows.
 - Added an explicit VSCT `MenuText` for the Tools menu so Visual Studio displays `VS IDE Bridge` instead of a command/symbol name.
-- Moved bridge file logs to `C:\ProgramData\VsIdeBridge\logs` and documented the service and extension log files.
+- Moved bridge file logs to `C:\Program Files\VsIdeBridge\logs` (the install directory) via a registry key written by the installer, so both the service and the VSIX extension write to the same location regardless of process identity.
+- Fixed git tools routing to a parent mega-repo when the solution directory has no `.git` of its own. `ResolveRepoRootDirectory` now verifies that at least one tracked file exists under the solution directory before accepting an ancestor repo root, and `OpenRepository` adds a post-open mismatch guard that throws a clear error naming both the expected and found paths if `Repository.Discover` walked up to the wrong repository.
 
 ## 2.2.13
 
