@@ -58,6 +58,48 @@ internal static partial class BridgeLogSummaryTool
         "stdout write",
     ];
 
+    private const string KindExtension = "extension";
+    private const string KindMcp = "mcp";
+
+    // Ordinal values enable Level >= minLevel comparisons for severity filtering.
+    private enum BridgeLogLevel { Info = 0, Warning = 1, Error = 2 }
+
+    // Typed domain object for extension log lines: [timestamp] [LEVEL] [Source] message
+    private readonly record struct ExtensionLogEntry(
+        int LineIndex,
+        string? TimestampRaw,
+        BridgeLogLevel Level,
+        string? Source,
+        string Message,
+        string RawLine)
+    {
+        public bool MatchesSeverity(BridgeLogLevel minLevel) => Level >= minLevel;
+
+        public bool MatchesSource(string filter) =>
+            Source is not null && Source.Contains(filter, StringComparison.OrdinalIgnoreCase);
+
+        public bool ContainsText(string text) =>
+            RawLine.Contains(text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Typed domain object for MCP server log lines: ISO_TIMESTAMP [pid:NNN] message
+    // No explicit level tags — severity is inferred from message keywords.
+    private readonly record struct McpLogEntry(
+        int LineIndex,
+        string? TimestampRaw,
+        string? ProcessId,
+        string Message,
+        string RawLine)
+    {
+        public bool IsFailure => ContainsAny(Message, ErrorTerms);
+        public bool IsWarning => ContainsAny(Message, WarningTerms);
+        public bool IsLifecycle => ContainsAny(Message, LifecycleTerms);
+        public bool IsRequest => ContainsAny(Message, RequestTerms);
+
+        public bool ContainsText(string text) =>
+            RawLine.Contains(text, StringComparison.OrdinalIgnoreCase);
+    }
+
     public static Task<JsonNode> ExecuteAsync(JsonNode? id, JsonObject? args, BridgeConnection _)
     {
         string requestedLog = args?["log"]?.GetValue<string>() ?? "all";
@@ -66,6 +108,9 @@ internal static partial class BridgeLogSummaryTool
         int maxEvents = Clamp(args?["max_events"]?.GetValue<int?>() ?? DefaultMaxEvents, 1, MaxEvents);
         string? textFilter = NormalizeOptionalString(args?["text"]?.GetValue<string>());
         bool includeRaw = args?["include_raw"]?.GetValue<bool?>() == true;
+        string? severityArg = NormalizeOptionalString(args?["severity"]?.GetValue<string>());
+        string? sourceFilter = NormalizeOptionalString(args?["source"]?.GetValue<string>());
+        BridgeLogLevel minSeverity = ParseSeverityFilter(id, severityArg);
 
         string logDirectory = BridgeLogPaths.GetSharedLogDirectory();
         List<LogTarget> targets = ResolveTargets(logDirectory, selection);
@@ -75,7 +120,9 @@ internal static partial class BridgeLogSummaryTool
 
         foreach (LogTarget target in targets)
         {
-            files.Add(BuildFileSummary(target, tailLines, textFilter, includeRaw, ref remainingEvents, totals));
+            files.Add(BuildFileSummary(
+                target, tailLines, textFilter, sourceFilter, minSeverity,
+                includeRaw, ref remainingEvents, totals));
         }
 
         string summary = $"Parsed {totals.EventCount} notable event(s) from {files.Count} bridge log file(s) " +
@@ -90,6 +137,8 @@ internal static partial class BridgeLogSummaryTool
             ["tailLines"] = tailLines,
             ["maxEvents"] = maxEvents,
             ["textFilter"] = textFilter,
+            ["severityFilter"] = severityArg ?? "all",
+            ["sourceFilter"] = sourceFilter,
             ["includeRaw"] = includeRaw,
             ["eventCount"] = totals.EventCount,
             ["errorCount"] = totals.ErrorCount,
@@ -106,6 +155,8 @@ internal static partial class BridgeLogSummaryTool
         LogTarget target,
         int tailLines,
         string? textFilter,
+        string? sourceFilter,
+        BridgeLogLevel minSeverity,
         bool includeRaw,
         ref int remainingEvents,
         LogCounters totals)
@@ -132,23 +183,31 @@ internal static partial class BridgeLogSummaryTool
             result["sizeBytes"] = info.Length;
 
             IReadOnlyList<string> tail = ReadTailLines(target.Path, tailLines);
-            IReadOnlyList<string> filtered = textFilter is null
+
+            // Apply raw text pre-filter before structured parsing
+            IReadOnlyList<string> preFiltered = textFilter is null
                 ? tail
                 : [.. tail.Where(line => line.Contains(textFilter, StringComparison.OrdinalIgnoreCase))];
 
             result["tailLineCount"] = tail.Count;
-            result["filteredLineCount"] = filtered.Count;
-
-            List<LogEvent> events = ExtractEvents(filtered, remainingEvents, out bool eventLimitReached);
-            remainingEvents = Math.Max(0, remainingEvents - events.Count);
+            result["filteredLineCount"] = preFiltered.Count;
 
             JsonArray eventArray = [];
             LogCounters fileCounters = new();
-            foreach (LogEvent logEvent in events)
+
+            if (string.Equals(target.Kind, KindExtension, StringComparison.Ordinal))
             {
-                eventArray.Add(ToJson(logEvent));
-                fileCounters.Add(logEvent);
-                totals.Add(logEvent);
+                BuildExtensionFileSummary(
+                    preFiltered, sourceFilter, minSeverity, ref remainingEvents,
+                    eventArray, fileCounters, totals, out bool extLimitReached);
+                result["eventLimitReached"] = extLimitReached;
+            }
+            else
+            {
+                BuildMcpFileSummary(
+                    preFiltered, ref remainingEvents,
+                    eventArray, fileCounters, totals, out bool mcpLimitReached);
+                result["eventLimitReached"] = mcpLimitReached;
             }
 
             result["events"] = eventArray;
@@ -157,19 +216,18 @@ internal static partial class BridgeLogSummaryTool
             result["warningCount"] = fileCounters.WarningCount;
             result["lifecycleCount"] = fileCounters.LifecycleCount;
             result["requestCount"] = fileCounters.RequestCount;
-            result["eventLimitReached"] = eventLimitReached;
 
             if (includeRaw)
             {
                 JsonArray raw = [];
-                foreach (string line in filtered.Take(RawLineLimit))
+                foreach (string line in preFiltered.Take(RawLineLimit))
                 {
                     raw.Add(Truncate(line, MaxLineChars));
                 }
 
                 result["rawTail"] = raw;
                 result["rawLineLimit"] = RawLineLimit;
-                result["rawTailTruncated"] = filtered.Count > RawLineLimit;
+                result["rawTailTruncated"] = preFiltered.Count > RawLineLimit;
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -182,17 +240,175 @@ internal static partial class BridgeLogSummaryTool
         return result;
     }
 
+    private static void BuildExtensionFileSummary(
+        IReadOnlyList<string> lines,
+        string? sourceFilter,
+        BridgeLogLevel minSeverity,
+        ref int remainingEvents,
+        JsonArray eventArray,
+        LogCounters fileCounters,
+        LogCounters totals,
+        out bool truncated)
+    {
+        truncated = false;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            ExtensionLogEntry entry = ParseExtensionLine(i + 1, lines[i]);
+
+            // Severity comes from the parsed [LEVEL] bracket — no keyword guessing.
+            if (!entry.MatchesSeverity(minSeverity))
+            {
+                continue;
+            }
+
+            if (sourceFilter is not null && !entry.MatchesSource(sourceFilter))
+            {
+                continue;
+            }
+
+            // For info-level entries, only surface lines with lifecycle or request signals.
+            if (entry.Level == BridgeLogLevel.Info)
+            {
+                string lower = entry.Message.ToLowerInvariant();
+                if (!ContainsAny(lower, LifecycleTerms) && !ContainsAny(lower, RequestTerms))
+                {
+                    continue;
+                }
+            }
+
+            if (eventArray.Count >= remainingEvents)
+            {
+                truncated = true;
+                continue;
+            }
+
+            string severity = entry.Level switch
+            {
+                BridgeLogLevel.Error => "error",
+                BridgeLogLevel.Warning => "warning",
+                _ => "info",
+            };
+
+            string kind = entry.Level switch
+            {
+                BridgeLogLevel.Error => "failure",
+                BridgeLogLevel.Warning => "warning",
+                _ => ContainsAny(entry.Message.ToLowerInvariant(), LifecycleTerms) ? "lifecycle" : "request",
+            };
+
+            JsonObject json = new()
+            {
+                ["tailLine"] = entry.LineIndex,
+                ["severity"] = severity,
+                ["kind"] = kind,
+                ["message"] = Truncate(entry.Message, MaxMessageChars),
+                ["line"] = Truncate(entry.RawLine, MaxLineChars),
+            };
+
+            if (!string.IsNullOrWhiteSpace(entry.TimestampRaw))
+            {
+                json["timestamp"] = entry.TimestampRaw;
+            }
+
+            if (!string.IsNullOrWhiteSpace(entry.Source))
+            {
+                json["source"] = entry.Source;
+            }
+
+            eventArray.Add(json);
+            fileCounters.AddExtension(entry.Level);
+            totals.AddExtension(entry.Level);
+        }
+
+        remainingEvents = Math.Max(0, remainingEvents - eventArray.Count);
+    }
+
+    private static void BuildMcpFileSummary(
+        IReadOnlyList<string> lines,
+        ref int remainingEvents,
+        JsonArray eventArray,
+        LogCounters fileCounters,
+        LogCounters totals,
+        out bool truncated)
+    {
+        truncated = false;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            McpLogEntry entry = ParseMcpLine(i + 1, lines[i]);
+
+            // Severity is keyword-inferred since MCP log has no explicit level tags.
+            string severity;
+            string kind;
+
+            if (entry.IsFailure)
+            {
+                severity = "error";
+                kind = "failure";
+            }
+            else if (entry.IsWarning)
+            {
+                severity = "warning";
+                kind = "warning";
+            }
+            else if (entry.IsLifecycle)
+            {
+                severity = "info";
+                kind = "lifecycle";
+            }
+            else if (entry.IsRequest)
+            {
+                severity = "info";
+                kind = "request";
+            }
+            else
+            {
+                continue;
+            }
+
+            if (eventArray.Count >= remainingEvents)
+            {
+                truncated = true;
+                continue;
+            }
+
+            JsonObject json = new()
+            {
+                ["tailLine"] = entry.LineIndex,
+                ["severity"] = severity,
+                ["kind"] = kind,
+                ["message"] = Truncate(entry.Message, MaxMessageChars),
+                ["line"] = Truncate(entry.RawLine, MaxLineChars),
+            };
+
+            if (!string.IsNullOrWhiteSpace(entry.TimestampRaw))
+            {
+                json["timestamp"] = entry.TimestampRaw;
+            }
+
+            if (!string.IsNullOrWhiteSpace(entry.ProcessId))
+            {
+                json["processId"] = entry.ProcessId;
+            }
+
+            eventArray.Add(json);
+            fileCounters.AddMcp(severity, kind);
+            totals.AddMcp(severity, kind);
+        }
+
+        remainingEvents = Math.Max(0, remainingEvents - eventArray.Count);
+    }
+
     private static List<LogTarget> ResolveTargets(string logDirectory, string selection)
     {
         List<LogTarget> targets = [];
-        if (selection is "all" or "mcp")
+        if (selection is "all" or KindMcp)
         {
-            targets.Add(new("mcp", BridgeLogPaths.GetMcpServerLogPath()));
+            targets.Add(new(KindMcp, BridgeLogPaths.GetMcpServerLogPath()));
         }
 
-        if (selection is "all" or "extension")
+        if (selection is "all" or KindExtension)
         {
-            targets.Add(new("extension", ResolveLatestExtensionLog(logDirectory)));
+            targets.Add(new(KindExtension, ResolveLatestExtensionLog(logDirectory)));
         }
 
         return targets;
@@ -220,12 +436,37 @@ internal static partial class BridgeLogSummaryTool
         return normalized switch
         {
             "" or "all" => "all",
-            "mcp" or "mcp_server" => "mcp",
-            "extension" or "vsix" or "visual_studio" or "visualstudio" => "extension",
+            "mcp" or "mcp_server" => KindMcp,
+            "extension" or "vsix" or "visual_studio" or "visualstudio" => KindExtension,
             _ => throw new McpRequestException(id, McpErrorCodes.InvalidParams,
                 "Argument 'log' must be one of: all, mcp, extension, or vsix."),
         };
     }
+
+    private static BridgeLogLevel ParseSeverityFilter(JsonNode? id, string? value)
+    {
+        if (value is null)
+        {
+            return BridgeLogLevel.Info;
+        }
+
+        return value.ToLowerInvariant() switch
+        {
+            "all" or "info" => BridgeLogLevel.Info,
+            "warning" or "warn" => BridgeLogLevel.Warning,
+            "error" => BridgeLogLevel.Error,
+            _ => throw new McpRequestException(id, McpErrorCodes.InvalidParams,
+                "Argument 'severity' must be one of: all, warning, or error."),
+        };
+    }
+
+    private static BridgeLogLevel ParseBracketLevel(string levelText) =>
+        levelText.ToUpperInvariant() switch
+        {
+            "ERROR" or "FATAL" or "CRITICAL" => BridgeLogLevel.Error,
+            "WARNING" or "WARN" => BridgeLogLevel.Warning,
+            _ => BridgeLogLevel.Info,
+        };
 
     private static IReadOnlyList<string> ReadTailLines(string path, int lineCount)
     {
@@ -246,42 +487,24 @@ internal static partial class BridgeLogSummaryTool
         return [.. queue];
     }
 
-    private static List<LogEvent> ExtractEvents(IReadOnlyList<string> lines, int maxEvents, out bool truncated)
+    private static ExtensionLogEntry ParseExtensionLine(int lineIndex, string line)
     {
-        List<LogEvent> events = [];
-        truncated = false;
-
-        for (int i = 0; i < lines.Count; i++)
+        Match match = ExtensionLogLineRegex().Match(line);
+        if (!match.Success)
         {
-            LogLine parsed = ParseLine(i + 1, lines[i]);
-            LogClassification? classification = Classify(parsed.Message);
-            if (classification is null)
-            {
-                continue;
-            }
-
-            if (events.Count >= maxEvents)
-            {
-                truncated = true;
-                continue;
-            }
-
-            events.Add(new LogEvent(
-                parsed.LineIndex,
-                parsed.Timestamp,
-                parsed.ProcessId,
-                classification.Value.Severity,
-                classification.Value.Kind,
-                parsed.Message,
-                parsed.Line));
+            return new(lineIndex, null, BridgeLogLevel.Info, null, line.Trim(), Truncate(line, MaxLineChars));
         }
 
-        return events;
+        string? timestamp = NormalizeOptionalString(match.Groups["timestamp"].Value);
+        BridgeLogLevel level = ParseBracketLevel(match.Groups["level"].Value);
+        string? source = NormalizeOptionalString(match.Groups["source"].Value);
+        string message = NormalizeOptionalString(match.Groups["message"].Value) ?? line.Trim();
+        return new(lineIndex, timestamp, level, source, message, Truncate(line, MaxLineChars));
     }
 
-    private static LogLine ParseLine(int lineIndex, string line)
+    private static McpLogEntry ParseMcpLine(int lineIndex, string line)
     {
-        Match match = LogLineRegex().Match(line);
+        Match match = McpLogLineRegex().Match(line);
         if (!match.Success)
         {
             return new(lineIndex, null, null, line.Trim(), Truncate(line, MaxLineChars));
@@ -293,58 +516,8 @@ internal static partial class BridgeLogSummaryTool
         return new(lineIndex, timestamp, processId, message, Truncate(line, MaxLineChars));
     }
 
-    private static LogClassification? Classify(string message)
-    {
-        string lower = message.ToLowerInvariant();
-        if (ContainsAny(lower, ErrorTerms))
-        {
-            return new("error", "failure");
-        }
-
-        if (ContainsAny(lower, WarningTerms))
-        {
-            return new("warning", "warning");
-        }
-
-        if (ContainsAny(lower, LifecycleTerms))
-        {
-            return new("info", "lifecycle");
-        }
-
-        if (ContainsAny(lower, RequestTerms))
-        {
-            return new("info", "request");
-        }
-
-        return null;
-    }
-
     private static bool ContainsAny(string value, IEnumerable<string> terms)
         => terms.Any(term => value.Contains(term, StringComparison.Ordinal));
-
-    private static JsonObject ToJson(LogEvent logEvent)
-    {
-        JsonObject json = new()
-        {
-            ["tailLine"] = logEvent.TailLine,
-            ["severity"] = logEvent.Severity,
-            ["kind"] = logEvent.Kind,
-            ["message"] = Truncate(logEvent.Message, MaxMessageChars),
-            ["line"] = logEvent.Line,
-        };
-
-        if (!string.IsNullOrWhiteSpace(logEvent.Timestamp))
-        {
-            json["timestamp"] = logEvent.Timestamp;
-        }
-
-        if (!string.IsNullOrWhiteSpace(logEvent.ProcessId))
-        {
-            json["processId"] = logEvent.ProcessId;
-        }
-
-        return json;
-    }
 
     private static string? NormalizeOptionalString(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
@@ -355,8 +528,13 @@ internal static partial class BridgeLogSummaryTool
     private static string Truncate(string value, int maxLength)
         => value.Length <= maxLength ? value : value[..maxLength] + "...";
 
+    // Extension log format: [yyyy-MM-dd HH:mm:ss] [LEVEL] [Source] message
+    [GeneratedRegex(@"^\[(?<timestamp>[^\]]+)\]\s+\[(?<level>[^\]]+)\]\s+\[(?<source>[^\]]+)\]\s+(?<message>.*)$", RegexOptions.CultureInvariant)]
+    private static partial Regex ExtensionLogLineRegex();
+
+    // MCP server log format: ISO_TIMESTAMP [pid:NNN] message
     [GeneratedRegex(@"^(?<timestamp>\d{4}-\d{2}-\d{2}T\S+)\s*(?:\[pid:(?<pid>\d+)\])?\s*(?<message>.*)$", RegexOptions.CultureInvariant)]
-    private static partial Regex LogLineRegex();
+    private static partial Regex McpLogLineRegex();
 
     private sealed class LogCounters
     {
@@ -370,23 +548,36 @@ internal static partial class BridgeLogSummaryTool
 
         public int RequestCount { get; private set; }
 
-        public void Add(LogEvent logEvent)
+        public void AddExtension(BridgeLogLevel level)
         {
             EventCount++;
-            if (string.Equals(logEvent.Severity, "error", StringComparison.Ordinal))
+            if (level == BridgeLogLevel.Error)
             {
                 ErrorCount++;
             }
-            else if (string.Equals(logEvent.Severity, "warning", StringComparison.Ordinal))
+            else if (level == BridgeLogLevel.Warning)
+            {
+                WarningCount++;
+            }
+        }
+
+        public void AddMcp(string severity, string kind)
+        {
+            EventCount++;
+            if (string.Equals(severity, "error", StringComparison.Ordinal))
+            {
+                ErrorCount++;
+            }
+            else if (string.Equals(severity, "warning", StringComparison.Ordinal))
             {
                 WarningCount++;
             }
 
-            if (string.Equals(logEvent.Kind, "lifecycle", StringComparison.Ordinal))
+            if (string.Equals(kind, "lifecycle", StringComparison.Ordinal))
             {
                 LifecycleCount++;
             }
-            else if (string.Equals(logEvent.Kind, "request", StringComparison.Ordinal))
+            else if (string.Equals(kind, "request", StringComparison.Ordinal))
             {
                 RequestCount++;
             }
@@ -394,17 +585,4 @@ internal static partial class BridgeLogSummaryTool
     }
 
     private readonly record struct LogTarget(string Kind, string Path);
-
-    private readonly record struct LogLine(int LineIndex, string? Timestamp, string? ProcessId, string Message, string Line);
-
-    private readonly record struct LogClassification(string Severity, string Kind);
-
-    private readonly record struct LogEvent(
-        int TailLine,
-        string? Timestamp,
-        string? ProcessId,
-        string Severity,
-        string Kind,
-        string Message,
-        string Line);
 }

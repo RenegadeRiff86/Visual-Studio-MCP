@@ -17,6 +17,8 @@ internal static partial class ToolCatalog
                 OptInt("tail_lines", "Number of tail lines to read per log file (default 300, max 2000)."),
                 OptInt("max_events", "Maximum parsed notable events to return across logs (default 80, max 300)."),
                 Opt("text", "Optional case-insensitive text filter applied before event extraction."),
+                Opt("severity", "Minimum severity for extension log events: all, warning, or error (default all)."),
+                Opt("source", "Optional source component name filter for extension log (e.g. DocumentService)."),
                 OptBool("include_raw", "Include raw filtered tail lines, capped per file (default false).")),
             DeveloperToolsCategory,
             (id, args, bridge) => BridgeLogSummaryTool.ExecuteAsync(id, args, bridge),
