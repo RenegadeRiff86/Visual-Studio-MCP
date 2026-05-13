@@ -375,18 +375,38 @@ internal static class GitSdkReader
         if (string.IsNullOrWhiteSpace(repoPath))
         {
             throw new McpRequestException(id, McpErrorCodes.BridgeError,
-                $"No Git repository was found under '{repoDirectory}'.");
+                $"No Git repository was found at '{repoDirectory}'. Ensure the solution directory is committed to a Git repository.");
         }
 
+        Repository repo;
         try
         {
-            return new Repository(repoPath);
+            repo = new Repository(repoPath);
         }
         catch (Exception ex) when (ex is not null) // re-throw as MCP error; LibGit2Sharp throws various types
         {
             throw new McpRequestException(id, McpErrorCodes.BridgeError,
                 $"Failed to open repository at '{repoPath}': {ex.Message}");
         }
+
+        // Safety check: Repository.Discover walks up the directory tree and may return an
+        // ancestor repo (a parent mega-repo).  If the working directory doesn't match what
+        // the caller expected, dispose and throw a clear error rather than silently operating
+        // on the wrong repository.
+        string foundRoot = repo.Info.WorkingDirectory
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string expectedRoot = repoDirectory
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (!string.Equals(foundRoot, expectedRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            repo.Dispose();
+            throw new McpRequestException(id, McpErrorCodes.BridgeError,
+                $"No Git repository found at '{expectedRoot}'. " +
+                $"The nearest repository is at '{foundRoot}', but the solution directory does not appear to have any committed files there. " +
+                $"Ensure the solution files are committed to a Git repository.");
+        }
+
+        return repo;
     }
 
     private static string ShortSha(string? sha)

@@ -102,7 +102,10 @@ internal static class ServiceToolPaths
     /// <summary>
     /// Returns the root directory of the git repository that contains the current or discoverable solution.
     /// Walks up from the solution directory looking for a <c>.git</c> directory or file.
-    /// Falls back to the solution directory when no git root is found.
+    /// If the nearest git root is an ancestor directory and the solution has no committed files
+    /// tracked under it (i.e. it lives inside a parent mega-repo as an untracked subdirectory),
+    /// the solution directory itself is returned so that git tools are scoped correctly.
+    /// Falls back to the solution directory when no git root is found at all.
     /// </summary>
     public static string ResolveRepoRootDirectory(BridgeConnection bridge)
     {
@@ -115,7 +118,53 @@ internal static class ServiceToolPaths
                 "Call list_instances and bind_solution or bind_instance before running this tool.");
         }
 
-        return FindGitRoot(solutionDirectory) ?? solutionDirectory;
+        string? repoRoot = FindGitRoot(solutionDirectory);
+        if (repoRoot is null)
+            return solutionDirectory;
+
+        // If the found repo root IS the solution directory, use it directly.
+        if (string.Equals(
+                repoRoot.TrimEnd(Path.DirectorySeparatorChar),
+                solutionDirectory.TrimEnd(Path.DirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return repoRoot;
+        }
+
+        // The repo root is an ancestor — only accept it when the solution directory has at
+        // least one file tracked in that repo.  If nothing is tracked there, the solution is
+        // an untracked subdirectory of a parent mega-repo; return the solution directory so
+        // that git operations are scoped to the right place.
+        return HasTrackedFilesUnder(repoRoot, solutionDirectory) ? repoRoot : solutionDirectory;
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when at least one file under <paramref name="directory"/>
+    /// is present in the index of the repository rooted at <paramref name="repoRoot"/>.
+    /// Swallows exceptions and returns <see langword="true"/> on failure so that callers
+    /// default to using the found repo root rather than silently discarding it.
+    /// </summary>
+    private static bool HasTrackedFilesUnder(string repoRoot, string directory)
+    {
+        try
+        {
+            string relativePath = Path.GetRelativePath(repoRoot, directory).Replace('\\', '/');
+
+            // GetRelativePath returns "." when the paths are equal — already handled above.
+            // A ".." prefix means directory is outside repoRoot, which should not happen;
+            // treat it as tracked to avoid a confusing fallback.
+            if (relativePath == "." || relativePath.StartsWith("..", StringComparison.Ordinal))
+                return true;
+
+            string prefix = relativePath.TrimEnd('/') + "/";
+            using Repository repo = new(repoRoot);
+            return repo.Index.Any(e =>
+                e.Path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        }
+        catch
+        {
+            return true; // fail-open: use the repo root if we can't inspect the index
+        }
     }
 
     /// <summary>
