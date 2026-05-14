@@ -10,7 +10,8 @@ public static partial class ToolDefinitionCatalog
             "documents",
             "Edit a file through VS — call via call_tool with file + old_content + new_content.",
             "Bridge catalog tool — must be called through call_tool: " +
-            "call_tool({\"name\":\"apply_diff\",\"arguments\":{\"file\":\"C:/path/File.cs\",\"old_content\":\"exact old text\",\"new_content\":\"replacement\"}}). " +
+            "call_tool({\"name\":\"apply_diff\",\"arguments\":{\"file\":\"h:1\",\"old_content\":\"exact old text\",\"new_content\":\"replacement\"}}) " +
+            "where h:1 is the handle returned by a prior find_text or find_files result — pass handles directly, do not type the full path. " +
             "For a single file change always pass file + old_content + new_content — do NOT use the diff argument for single files. " +
             "Read the target section with read_file first, then supply that exact text as old_content and your replacement as new_content. " +
             "Open files reload automatically before matching — no stale-buffer problem. " +

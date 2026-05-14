@@ -93,7 +93,7 @@ internal static partial class ToolCatalog
         yield return new(
             ToolDefinitionCatalog.ApplyDiff(
                 ObjectSchema(
-                    Opt(FileArg, "Target file path. Use with old_content + new_content for the preferred targeted form."),
+                    Opt(FileArg, FileDesc),
                     Opt("old_content",
                         "Exact text block to replace. Copy verbatim from read_file output — whitespace-exact. " +
                         "Any mismatch causes a content-not-found error. " +

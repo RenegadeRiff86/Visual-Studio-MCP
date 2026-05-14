@@ -240,8 +240,8 @@ internal static class McpServerMode
             surfaceText +
             "In lazy mode, ALL bridge tools must be called through call_tool — including apply_diff, read_file, write_file, find_text, errors, and git_status. " +
             "Examples: " +
-            "call_tool({\"name\":\"apply_diff\",\"arguments\":{\"file\":\"C:/path/File.cs\",\"old_content\":\"exact old text\",\"new_content\":\"replacement\"}}) " +
-            "or call_tool({\"name\":\"read_file\",\"arguments\":{\"file\":\"C:/path/File.cs\",\"start_line\":1}}) " +
+            "call_tool({\"name\":\"apply_diff\",\"arguments\":{\"file\":\"h:1\",\"old_content\":\"exact old text\",\"new_content\":\"replacement\"}}) " +
+            "or call_tool({\"name\":\"read_file\",\"arguments\":{\"file\":\"h:1\",\"start_line\":10}}) " +
             "or call_tool({\"name\":\"errors\",\"arguments\":{}}) " +
             "or call_tool({\"name\":\"git_status\",\"arguments\":{}}). " +
             "Use recommend_tools for task-based discovery and tool_help with name=<tool> for the full schema. " +
