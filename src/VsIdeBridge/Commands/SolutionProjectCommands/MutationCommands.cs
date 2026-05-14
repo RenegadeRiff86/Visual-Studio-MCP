@@ -299,8 +299,13 @@ internal static partial class SolutionProjectCommands
         {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             EnsureSolutionOpen(context.Dte);
-
             string solutionPath = context.Dte.Solution.FullName;
+            await TaskScheduler.Default;
+            return BuildProfileList(solutionPath);
+        }
+
+        private static CommandExecutionResult BuildProfileList(string solutionPath)
+        {
             string slnLaunchPath = Path.ChangeExtension(solutionPath, ".slnLaunch");
 
             if (!File.Exists(slnLaunchPath))
@@ -360,8 +365,15 @@ internal static partial class SolutionProjectCommands
             string profileQuery = args.GetRequiredString("name");
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             EnsureSolutionOpen(context.Dte);
-
             string solutionPath = context.Dte.Solution.FullName;
+            DTE2 dte = context.Dte;
+            await TaskScheduler.Default;
+            return await ApplyProfileAsync(solutionPath, profileQuery, dte);
+        }
+
+        private static async Task<CommandExecutionResult> ApplyProfileAsync(
+            string solutionPath, string profileQuery, DTE2 dte)
+        {
             string slnLaunchPath = Path.ChangeExtension(solutionPath, ".slnLaunch");
 
             if (!File.Exists(slnLaunchPath))
@@ -376,7 +388,8 @@ internal static partial class SolutionProjectCommands
             JArray profileProjects = matched["Projects"] as JArray ?? new JArray();
             (List<string> startupPaths, JArray appliedProjects) = CollectStartupPaths(profileProjects);
 
-            ApplyStartupProjects(context.Dte, startupPaths);
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            ApplyStartupProjects(dte, startupPaths);
 
             return new CommandExecutionResult(
                 $"Activated launch profile '{profileName}' with {startupPaths.Count} startup project(s).",

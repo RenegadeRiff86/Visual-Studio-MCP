@@ -131,6 +131,11 @@ internal static partial class ToolCatalog
         };
 
     private static IEnumerable<ToolEntry> ProjectManagementTools()
+        => ProjectSolutionTools()
+            .Concat(LaunchProfileTools())
+            .Concat(ProjectFileTools());
+
+    private static IEnumerable<ToolEntry> ProjectSolutionTools()
     {
         yield return BridgeTool("add_project",
             "Add an existing or new project to the solution.",
@@ -197,7 +202,10 @@ internal static partial class ToolCatalog
             searchHints: BuildSearchHints(
                 workflow: [("debug_start", "Start debugging the startup project"), ("build", "Build the startup project")],
                 related: [(ListProjectsTool, "List projects to find the right name"), ("list_launch_profiles", "List solution launch profiles")]));
+    }
 
+    private static IEnumerable<ToolEntry> LaunchProfileTools()
+    {
         yield return BridgeTool("list_launch_profiles",
             "List all solution-level launch profiles from the .slnLaunch file. These are the named profiles shown in the startup project dropdown in the VS toolbar.",
             EmptySchema(), "list-launch-profiles", _ => Empty(), Project,
@@ -214,7 +222,10 @@ internal static partial class ToolCatalog
             searchHints: BuildSearchHints(
                 workflow: [("debug_start", "Start debugging with the activated profile"), ("build", "Build the startup projects")],
                 related: [("list_launch_profiles", "List available profiles first"), ("set_startup_project", "Set a single startup project instead")]));
+    }
 
+    private static IEnumerable<ToolEntry> ProjectFileTools()
+    {
         yield return BridgeTool("add_file_to_project",
             "Add an existing FileArg to a project.",
             ObjectSchema(

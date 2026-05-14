@@ -1,7 +1,10 @@
-# VSIX path — relative to this script (repo root)
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+# VSIX path ï¿½ relative to this script (repo root)
 $vsix = Join-Path $PSScriptRoot "src\VsIdeBridge\bin\Release\net472\VsIdeBridge.vsix"
 if (-not (Test-Path $vsix)) {
-    Write-Error "VSIX not found at $vsix — build the Release configuration first."
+    Write-Error "VSIX not found at $vsix ï¿½ build the Release configuration first."
     exit 1
 }
 
@@ -34,17 +37,17 @@ if (-not $installer) {
     exit 1
 }
 
-Write-Host "Installing: $vsix"
-Write-Host "Using:      $installer"
+Write-Output "Installing: $vsix"
+Write-Output "Using:      $installer"
 
 $proc = Start-Process -FilePath $installer -ArgumentList "/quiet", $vsix -Wait -PassThru
-Write-Host "Exit code: $($proc.ExitCode)"
+Write-Output "Exit code: $($proc.ExitCode)"
 
-# Verify — search the current user's VS extension directories
+# Verify ï¿½ search the current user's VS extension directories
 $vsRoot = Join-Path $env:LOCALAPPDATA "Microsoft\VisualStudio"
 $found = Get-ChildItem $vsRoot -Recurse -Filter "VsIdeBridge.dll" -Depth 6 -ErrorAction SilentlyContinue
 if ($found) {
-    foreach ($f in $found) { Write-Host "FOUND: $($f.FullName)" }
+    foreach ($f in $found) { Write-Output "FOUND: $($f.FullName)" }
 } else {
-    Write-Host "NOT FOUND in $vsRoot — install may have failed or VS needs a restart."
+    Write-Output "NOT FOUND in $vsRoot ï¿½ install may have failed or VS needs a restart."
 }
