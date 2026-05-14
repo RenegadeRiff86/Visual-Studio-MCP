@@ -300,22 +300,31 @@ internal sealed partial class PatchService
         // Re-run Pass 3 to find the best partial match for a useful error message.
         (int errorBestCandidate, int errorBestScore) = FindBestAnchorMatch(existingLines, sourceIndex, maxStart, matchLines);
 
-        string descriptor = string.IsNullOrWhiteSpace(block.Header)
-            ? "editor patch block"
-            : $"editor patch block '{block.Header}'";
+        // Detect the simple-replace form (file + old_content + new_content).
+        // FromSimpleReplace produces a block with only '-' and '+' lines — no context lines.
+        bool isSimpleReplace = block.Lines.All(l => l.Kind != ' ');
+
         string firstMatchLine = matchLines.Length > 0 ? Truncate(matchLines[0], 60) : "(empty)";
+        string lineNoun = isSimpleReplace ? "old_content" : "context";
         string bestMatchHint = errorBestCandidate >= 0
-            ? $" The closest match was at line {errorBestCandidate + 1} but only {errorBestScore} of {matchLines.Length} context lines agreed."
-            : " No candidate position matched any context line.";
+            ? $" The closest match was at line {errorBestCandidate + 1} but only {errorBestScore} of {matchLines.Length} {lineNoun} lines matched."
+            : $" No candidate position matched any {lineNoun} line.";
+        string fixInstructions = isSimpleReplace
+            ? "To fix: (1) Call read_file to see the current file content. " +
+              "(2) Copy the exact text you want to replace into old_content — do not retype, paraphrase, or truncate any lines. " +
+              "(3) Resubmit apply_diff with the corrected old_content."
+            : "To fix this: (1) Call read_file on this file to see the current content. " +
+              "(2) Copy the exact lines you want to change from the read_file output — do not retype or paraphrase them. " +
+              "(3) Build a new @@ block using those exact lines as context, with - for deletions and + for additions. " +
+              "(4) Resubmit apply_diff with the corrected patch." +
+              BuildBackwardSearchHint(existingLines, sourceIndex, maxStart, matchLines);
+        string subject = isSimpleReplace ? "old_content" : "patch";
+        string problem = isSimpleReplace ? "old_content was not found" : "the @@ context block was not found";
         throw new CommandErrorException(
             InvalidArgumentsCode,
-            $"apply_diff failed: the @@ context block was not found in {path}. " +
-            $"The patch was looking for a block starting with \"{firstMatchLine}\".{bestMatchHint} " +
-            "To fix this: (1) Call read_file on this file to see the current content. " +
-            "(2) Copy the exact lines you want to change from the read_file output — do not retype or paraphrase them. " +
-            "(3) Build a new @@ block using those exact lines as context, with - for deletions and + for additions. " +
-            "(4) Resubmit apply_diff with the corrected patch." +
-            BuildBackwardSearchHint(existingLines, sourceIndex, maxStart, matchLines),
+            $"apply_diff failed: {problem} in {path}. " +
+            $"The {subject} started with \"{firstMatchLine}\".{bestMatchHint} " +
+            fixInstructions,
             new
             {
                 block = block.Header,
