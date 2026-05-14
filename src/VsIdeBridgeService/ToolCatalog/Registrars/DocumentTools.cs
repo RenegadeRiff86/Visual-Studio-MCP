@@ -99,7 +99,7 @@ internal static partial class ToolCatalog
                         "Any mismatch causes a content-not-found error. " +
                         "Open files reload automatically before matching, so content is always current."),
                     Opt("new_content", "Replacement text to write in place of old_content."),
-                    Opt("diff", "Patch format for multi-file or structural changes (add/move/delete files). Format:\n" +
+                    Opt("diff", "ONLY for multi-file or structural changes (add/move/delete files). For a single targeted edit omit this and use file + old_content + new_content instead. Format:\n" +
                         "*** Begin Patch\\n" +
                         "*** Update File: path/to/file.cs\\n" +
                         "@@\\n" +
@@ -110,7 +110,6 @@ internal static partial class ToolCatalog
                         "*** End Patch\n" +
                         "Supports: *** Add File, *** Delete File, *** Update File.\n" +
                         "Multi-file: repeat file blocks before *** End Patch (all changes are atomic).\n" +
-                        "For a single targeted edit, omit diff and use file + old_content + new_content instead.\n" +
                         "Do not send unified diff headers like --- / +++."),
                     OptBool(PostCheck,
                         "Queue a quick diagnostics refresh after applying (default false).")))

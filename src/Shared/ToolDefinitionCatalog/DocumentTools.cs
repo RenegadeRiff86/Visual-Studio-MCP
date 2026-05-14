@@ -8,13 +8,14 @@ public static partial class ToolDefinitionCatalog
         => CreateMutatingTool(
             "apply_diff",
             "documents",
-            "Edit file(s) through VS — file + old_content + new_content for a targeted change, or diff for multi-file patches.",
-            "Edit a file through the live VS editor. Preferred form: pass file + old_content + new_content. " +
+            "Edit a file through VS — call via call_tool with file + old_content + new_content.",
+            "Bridge catalog tool — must be called through call_tool: " +
+            "call_tool({\"name\":\"apply_diff\",\"arguments\":{\"file\":\"C:/path/File.cs\",\"old_content\":\"exact old text\",\"new_content\":\"replacement\"}}). " +
+            "For a single file change always pass file + old_content + new_content — do NOT use the diff argument for single files. " +
             "Read the target section with read_file first, then supply that exact text as old_content and your replacement as new_content. " +
-            "Open files reload automatically before matching, so content is always current — no stale-buffer problem. " +
+            "Open files reload automatically before matching — no stale-buffer problem. " +
             "NEVER use Claude's built-in Edit or Write tools for files open in VS; always use this bridge tool instead. " +
-            "For multi-file or structural changes (add/move/delete files), use the diff patch form: *** Begin Patch / *** Update File / @@ / -old / +new / *** End Patch. " +
-            "Supports *** Add File, *** Delete File, and *** Update File blocks. Multiple files apply atomically.",
+            "For multi-file or structural changes only, use the diff argument with the *** Begin Patch patch format.",
             parameterSchema,
             bridgeCommand: "apply-diff",
             title: "Apply Diff",

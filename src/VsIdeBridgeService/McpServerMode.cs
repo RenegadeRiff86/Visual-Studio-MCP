@@ -238,8 +238,10 @@ internal static class McpServerMode
             "and do not wait for user approval before calling a tool. " +
             "Interpret tool results and respond to the user in plain language. " +
             surfaceText +
-            "In lazy mode, most bridge tools are not top-level MCP tools — call them through call_tool. " +
-            "Example: call_tool({\"name\":\"read_file\",\"arguments\":{\"file\":\"C:/path/File.cs\",\"start_line\":1}}) " +
+            "In lazy mode, ALL bridge tools must be called through call_tool — including apply_diff, read_file, write_file, find_text, errors, and git_status. " +
+            "Examples: " +
+            "call_tool({\"name\":\"apply_diff\",\"arguments\":{\"file\":\"C:/path/File.cs\",\"old_content\":\"exact old text\",\"new_content\":\"replacement\"}}) " +
+            "or call_tool({\"name\":\"read_file\",\"arguments\":{\"file\":\"C:/path/File.cs\",\"start_line\":1}}) " +
             "or call_tool({\"name\":\"errors\",\"arguments\":{}}) " +
             "or call_tool({\"name\":\"git_status\",\"arguments\":{}}). " +
             "Use recommend_tools for task-based discovery and tool_help with name=<tool> for the full schema. " +
