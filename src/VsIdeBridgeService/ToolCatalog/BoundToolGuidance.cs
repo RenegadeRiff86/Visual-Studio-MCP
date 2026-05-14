@@ -11,8 +11,8 @@ internal static partial class ToolCatalog
     {
         return new JsonObject
         {
-            ["hint"] = "Use recommend_tools for task-based discovery, list_tools_by_category to load a focused group, list_tool_categories to enumerate all groups, or list_tools as a last resort to see every tool at once.",
-            ["tools"] = new JsonArray { "recommend_tools", "list_tool_categories", "list_tools_by_category", "tool_help", "list_tools" },
+            ["hint"] = "Use recommend_tools for task-based discovery, list_tools_by_category to load a focused group, list_tool_categories to enumerate all groups, or call_tool({\"name\":\"list_tools\",...}) as a last resort to see every tool at once.",
+            ["tools"] = new JsonArray { "recommend_tools", "list_tool_categories", "list_tools_by_category", "tool_help" },
             ["recommendedTools"] = BuildBoundRecommendedTools(),
         };
     }
@@ -23,7 +23,6 @@ internal static partial class ToolCatalog
         [
             RecommendedTool("recommend_tools", "Ask the bridge which tools fit the current task — narrower and faster than list_tools."),
             RecommendedTool("list_tools_by_category", "Load a focused group of tools (search, git, project, debug, etc.) instead of the full catalog."),
-            RecommendedTool("list_tools", "Last resort: dump every bridge tool name when narrower discovery has not found what you need."),
             RecommendedTool("bridge_health", "Confirm the bound instance and rediscover bridge guidance."),
             RecommendedTool("vs_state", "Inspect the active solution, document, build state, and debugger state."),
             RecommendedTool("find_files", "Locate files through the bound solution instead of shell directory crawling."),

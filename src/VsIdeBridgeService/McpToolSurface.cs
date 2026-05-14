@@ -11,7 +11,6 @@ internal sealed class McpToolSurface
         "call_tool",
         "recommend_tools",
         "tool_help",
-        "list_tools",
         "list_tool_categories",
         "bridge_health",
         "vs_state",

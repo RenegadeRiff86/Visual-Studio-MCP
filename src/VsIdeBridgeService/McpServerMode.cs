@@ -229,7 +229,7 @@ internal static class McpServerMode
     {
         string surfaceText = toolSurface.IsFull
             ? "The full tool surface is exposed in tools/list. "
-            : "A compact lazy tool surface is exposed in tools/list. Use recommend_tools for task-based discovery, list_tools_by_category to browse a specific category, or list_tools as a last resort to see every available tool name. ";
+            : "A compact lazy tool surface is exposed in tools/list. Use recommend_tools for task-based discovery, list_tools_by_category to browse a specific category, or call_tool({\"name\":\"list_tools\",...}) as a last resort to see every available tool name. ";
 
         return
             "VS IDE Bridge MCP server. " +
