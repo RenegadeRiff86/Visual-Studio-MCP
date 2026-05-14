@@ -15,4 +15,7 @@ internal sealed class IdeCommandContext(VsIdeBridgePackage package, DTE2 dte, Ou
     public IdeBridgeRuntime Runtime { get; } = runtime;
 
     public CancellationToken CancellationToken { get; } = cancellationToken;
+
+    /// <summary>Session-scoped handle registry; delegates to Runtime.HandleService.</summary>
+    public HandleService Handles => Runtime.HandleService;
 }

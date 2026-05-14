@@ -17,7 +17,10 @@ internal static partial class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            int? requestedLine = args.GetNullableInt32("line");
+            // If the file argument is a handle, use its embedded line as the default anchor.
+            string? fileArg = args.GetString("file");
+            (int? embeddedLine, _) = context.Handles.GetEmbeddedPosition(fileArg);
+            int? requestedLine = args.GetNullableInt32("line") ?? embeddedLine;
             int baseLine = requestedLine ?? 1;
             int contextBefore = args.GetInt32("context-before", 0);
             int? contextAfter = args.GetNullableInt32("context-after");

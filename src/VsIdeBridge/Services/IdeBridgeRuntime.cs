@@ -87,6 +87,9 @@ internal sealed class IdeBridgeRuntime
 
     public ErrorListService ErrorListService { get; }
 
+    /// <summary>Session-scoped handle registry shared across all bridge commands.</summary>
+    public HandleService HandleService { get; } = new();
+
     private readonly Dictionary<string, IdeCommandBase> _dispatcher = CreateDispatcher();
 
     private static Dictionary<string, IdeCommandBase> CreateDispatcher()
@@ -129,6 +132,8 @@ internal sealed class IdeBridgeRuntime
         VsCommandService vsCommandService = new();
         SolutionExplorerSyncService solutionExplorerSyncService = new();
 
+        PatchService patchService = new();
+
         IdeBridgeRuntime runtime = new(
             logger,
             bridgeInstanceService,
@@ -144,11 +149,17 @@ internal sealed class IdeBridgeRuntime
             vsCommandService,
             solutionExplorerSyncService,
             bridgeApprovalService,
-            new PatchService(),
+            patchService,
             new BreakpointService(),
             new DebuggerService(),
             buildService,
             errorListService);
+
+        // Wire the handle service into path-resolving services so handle IDs are
+        // resolved transparently without any individual consuming command changes.
+        patchService.HandleService = runtime.HandleService;
+        documentService.HandleService = runtime.HandleService;
+
         return Task.FromResult(runtime);
     }
 }

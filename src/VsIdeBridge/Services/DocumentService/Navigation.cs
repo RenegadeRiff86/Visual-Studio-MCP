@@ -231,7 +231,7 @@ internal sealed partial class DocumentService
         };
     }
 
-    private static async Task<(string NormalizedPath, bool Navigated, string WindowCaption)> OpenDocumentOnMainThreadAsync(
+    private async Task<(string NormalizedPath, bool Navigated, string WindowCaption)> OpenDocumentOnMainThreadAsync(
         DTE2 dte,
         string filePath,
         int line,

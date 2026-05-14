@@ -364,6 +364,12 @@ internal sealed partial class PatchService
     public string ResolveFilePath(DTE2 dte, string filePathOrRelative)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
+
+        // Handle-ID short-circuit: resolve before any filesystem logic.
+        // ResolveFilePath returns the path unchanged when it is not a handle.
+        if (HandleService is { } hs)
+            filePathOrRelative = hs.ResolveFilePath(filePathOrRelative);
+
         string baseDir = ResolveBaseDirectory(dte, null);
         return ResolvePatchPath(dte, baseDir, filePathOrRelative, allowCreate: true);
     }

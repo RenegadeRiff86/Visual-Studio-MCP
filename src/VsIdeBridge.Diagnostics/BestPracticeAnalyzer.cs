@@ -500,7 +500,7 @@ internal static partial class BestPracticeAnalyzer
             foreach (Match match in SingleLetterVarPattern().Matches(content))
             {
                 string name = match.Groups["name"].Value;
-                if (name is "i" or "j" or "k" or "x" or "y" or "z" or "e" or "s" or "_")
+                if (name is "i" or "j" or "k" or "m" or "n" or "x" or "y" or "z" or "e" or "s" or "_")
                 {
                     continue;
                 }
@@ -534,7 +534,7 @@ internal static partial class BestPracticeAnalyzer
             foreach (Match match in PythonSingleLetterAssignPattern().Matches(content))
             {
                 string name = match.Groups["name"].Value;
-                if (name is "i" or "j" or "k" or "x" or "y" or "z" or "e" or "s" or "_")
+                if (name is "i" or "j" or "k" or "m" or "n" or "x" or "y" or "z" or "e" or "s" or "_")
                 {
                     continue;
                 }

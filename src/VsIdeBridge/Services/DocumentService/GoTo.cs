@@ -15,6 +15,19 @@ namespace VsIdeBridge.Services;
 
 internal sealed partial class DocumentService
 {
+    /// <summary>A single numbered line from a document slice.</summary>
+    internal readonly struct DocumentLine(int lineNumber, string text)
+    {
+        public int LineNumber { get; } = lineNumber;
+        public string Text { get; } = text;
+
+        public JObject ToJson() => new()
+        {
+            ["line"] = LineNumber,
+            ["text"] = Text,
+        };
+    }
+
     public async Task<JObject> GetDocumentSliceAsync(
         DTE2 dte,
         string? filePath,
@@ -485,7 +498,7 @@ internal sealed partial class DocumentService
         return (fallbackSlice, "Returned surrounding definition context because the full definition extent could not be determined safely.");
     }
 
-    private static async Task<(int startLine, int endLine)?> TryResolveDefinitionExtentAsync(DTE2 dte, string definitionPath, int definitionLine)
+    private async Task<(int startLine, int endLine)?> TryResolveDefinitionExtentAsync(DTE2 dte, string definitionPath, int definitionLine)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
@@ -610,11 +623,7 @@ internal sealed partial class DocumentService
         for (int lineNumber = actualStart; lineNumber <= actualEnd && lineNumber <= lines.Count; lineNumber++)
         {
             string lineText = lines[lineNumber - 1];
-            sliceLines.Add(new JObject
-            {
-                ["line"] = lineNumber,
-                ["text"] = lineText,
-            });
+            sliceLines.Add(new DocumentLine(lineNumber, lineText).ToJson());
 
             if (builder.Length > 0) builder.Append('\n');
             if (includeLineNumbers)

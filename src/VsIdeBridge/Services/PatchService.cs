@@ -20,6 +20,9 @@ internal sealed partial class PatchService
     private const int PatchedContentVerificationAttemptCount = 3;
     private const int PatchedContentVerificationDelayMilliseconds = 50;
 
+    /// <summary>Injected after construction; resolves handle IDs in path arguments.</summary>
+    internal HandleService? HandleService { get; set; }
+
     public async Task<JObject> ApplyEditorPatchAsync(
         DTE2 dte,
         DocumentService documentService,

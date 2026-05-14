@@ -8,8 +8,8 @@ public static partial class ToolDefinitionCatalog
         => CreateReadOnlyTool(
             "search_symbols",
             "search",
-            "Find class/method/field definitions — use instead of Grep for symbol names.",
-            "Find class, method, field, property, or interface definitions by name across the solution. Use this instead of Grep when you know the name of what you are looking for — returns navigation-ready locations with kind and file. Use find_text for arbitrary string patterns.",
+            "Locate a class/method/field definition — use this FIRST when you know a symbol name, not find_text.",
+            "Use this as the first step whenever you know the name of a type, method, property, or field you need to find. Returns the exact file and line of every definition without scanning text — faster and more precise than find_text or Grep for named symbols. Only fall back to find_text for non-symbol string patterns. Each match includes a \"handle\" field — pass it directly as the file argument to read_file or apply_diff instead of copying the full path.",
             parameterSchema,
             bridgeCommand: "search-symbols",
             aliases: ["find_symbol", "find_symbols", "symbol_search", "find_class", "find_method", "find_definition"],
@@ -19,8 +19,8 @@ public static partial class ToolDefinitionCatalog
         => CreateReadOnlyTool(
             "file_outline",
             "search",
-            "List file symbols.",
-            "Get the symbol outline of a file. Use this after find_files or before read_file when you want the shape of a file without scanning the whole body.",
+            "Map a file's members before reading — call this BEFORE read_file on any unfamiliar file.",
+            "ALWAYS call this before reading a file you have not already inspected in this session. Returns every class, method, property, and field with their line numbers so you can target read_file with a precise range instead of scanning the whole file. Use search_symbols when you need to locate a symbol across the solution rather than inspecting one specific file.",
             parameterSchema,
             bridgeCommand: "file-outline",
             aliases: ["document_outline", "outline_file", "list_file_symbols"],

@@ -84,7 +84,7 @@ internal sealed partial class DocumentService
         return outlineResult;
     }
 
-    private static async Task<(string ResolvedPath, JArray Symbols, int Count, string? Note)> GetOutlineDataOnMainThreadAsync(
+    private async Task<(string ResolvedPath, JArray Symbols, int Count, string? Note)> GetOutlineDataOnMainThreadAsync(
         DTE2 dte,
         string? filePath,
         int maxDepth,

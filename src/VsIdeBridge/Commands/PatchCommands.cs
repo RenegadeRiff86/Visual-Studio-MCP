@@ -22,6 +22,7 @@ internal static class PatchCommands
             if (!string.IsNullOrWhiteSpace(patchTextBase64))
             {
                 patchText = DecodePatchTextBase64(patchTextBase64!);
+                patchText = context.Handles.RewritePatch(patchText);
                 ValidatePatchText(patchText);
             }
 

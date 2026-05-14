@@ -317,6 +317,7 @@ internal static partial class SearchNavigationCommands
                 args.GetString("path"),
                 args.GetInt32("max", 50)).ConfigureAwait(true);
 
+            context.Handles.RegisterSearchHits((JArray)symbolSearchResult["matches"]!);
             return CreateFoundResult("symbol match(es)", symbolSearchResult);
         }
     }

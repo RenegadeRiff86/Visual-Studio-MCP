@@ -18,9 +18,14 @@ internal sealed partial class DocumentService
         public string Source { get; } = source;
     }
 
-    private static string ResolveDocumentPath(DTE2 dte, string? filePath, bool allowDiskFallback = true)
+    private string ResolveDocumentPath(DTE2 dte, string? filePath, bool allowDiskFallback = true)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
+
+        // Handle-ID short-circuit: resolve before any filesystem logic.
+        // ResolveFilePath returns the path unchanged when it is not a handle.
+        if (HandleService is { } hs && filePath is not null)
+            filePath = hs.ResolveFilePath(filePath);
 
         if (!string.IsNullOrWhiteSpace(filePath))
         {

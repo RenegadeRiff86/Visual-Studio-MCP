@@ -139,6 +139,7 @@ internal static partial class DebugBuildCommands
                 CreateErrorListQuery(args),
                 forceRefresh).ConfigureAwait(true);
 
+            context.Handles.RegisterDiagnosticRows(HandleKind.Error, (JArray)errorListResult["rows"]!);
             return new CommandExecutionResult(
                 BuildDiagnosticsCountSummary(errorListResult),
                 errorListResult,
@@ -162,6 +163,7 @@ internal static partial class DebugBuildCommands
                 CreateErrorListQuery(args, "warning"),
                 forceRefresh).ConfigureAwait(true);
 
+            context.Handles.RegisterDiagnosticRows(HandleKind.Warning, (JArray)warningListResult["rows"]!);
             return new CommandExecutionResult(
                 BuildDiagnosticsCountSummary(warningListResult),
                 warningListResult,
@@ -185,6 +187,7 @@ internal static partial class DebugBuildCommands
                 CreateErrorListQuery(args, "message"),
                 forceRefresh).ConfigureAwait(true);
 
+            context.Handles.RegisterDiagnosticRows(HandleKind.Message, (JArray)messageListResult["rows"]!);
             return new CommandExecutionResult(
                 BuildDiagnosticsCountSummary(messageListResult),
                 messageListResult,

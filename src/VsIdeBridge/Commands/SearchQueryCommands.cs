@@ -31,6 +31,7 @@ internal static partial class SearchNavigationCommands
                 project,
                 args.GetString("path")).ConfigureAwait(true);
 
+            context.Handles.RegisterSearchHits((JArray)commandData["matches"]!);
             return CreateFoundResult("match(es)", commandData);
         }
     }
@@ -102,6 +103,8 @@ internal static partial class SearchNavigationCommands
                 extensions,
                 args.GetInt32("max-results", 200),
                 args.GetBoolean("include-non-project", true)).ConfigureAwait(true);
+
+            context.Handles.RegisterFileMatches((JArray)commandData["matches"]!);
             return CreateFoundResult("file(s)", commandData);
         }
     }

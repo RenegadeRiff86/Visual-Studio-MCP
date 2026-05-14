@@ -2,6 +2,11 @@
 
 ## 2.3.0
 
+- Added `HandleService` — a session-scoped handle registry that stamps short IDs (`e:N`, `w:N`, `m:N`, `f:N`, `h:N`) on every result row returned by `errors`, `warnings`, `diagnostics_snapshot`, `find_text`, `find_files`, and `search_symbols`. Pass a handle ID (e.g. `"h:3"`, `"e:1"`) as the `file` argument to any consuming tool instead of copying the full absolute path — resolution is transparent via `PathResolver` and `DocumentService` with no changes required in individual consuming commands. All handle logic lives in one class (`HandleService`) per the single-container design rule.
+- Added `read_file` handle auto-anchoring: when the `file` argument is a handle that carries an embedded line number, `read_file` opens at that line without requiring an explicit `start_line` argument.
+- Added `HandleService.RewritePatch` so `apply_diff` can accept handle IDs in `*** Update File: h:N` patch headers — handles are resolved to absolute paths before `PatchService` processes the text.
+- Fixed BP1014 best-practice analyzer incorrectly flagging single-letter variables `m` and `n` as unclear names. Both are universally conventional in loop and sequence contexts and are added to the exemption list alongside `i`, `j`, `k`, `x`, `y`, `z`, `e`, `s`, and `_` for both C# and Python.
+- Improved `file_outline`, `search_symbols`, and `call_hierarchy` tool descriptions to open with explicit behavioral guidance — when to call each tool and what it replaces (`file_outline` now directs calling it before `read_file` on any unfamiliar file; `call_hierarchy` now directs using it instead of looping `find_text` → `read_file` to trace call chains; `search_symbols` now directs using it first when the target is a named symbol, not `find_text`).
 - Changed the default local MCP HTTP ports away from the common `8080` default: shared HTTP now uses `http://localhost:43117/`, and Streamable HTTP now uses `http://localhost:43118/mcp`.
 - Centralized HTTP port defaults in `HttpServerDefaults` so the VSIX, Windows service, foreground HTTP hosts, tool descriptions, and setup docs do not drift apart.
 - Fixed `apply_diff` verification for project and MSBuild files (`.csproj`, `.vcxproj`, `.props`, `.targets`, and `.sln`) by treating disk-backed patch files as disk source-of-truth instead of reading stale open Visual Studio project-file buffers.
