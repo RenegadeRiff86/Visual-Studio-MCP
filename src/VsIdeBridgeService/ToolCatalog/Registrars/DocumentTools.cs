@@ -93,7 +93,13 @@ internal static partial class ToolCatalog
         yield return new(
             ToolDefinitionCatalog.ApplyDiff(
                 ObjectSchema(
-                    Opt("diff", "Editor patch text. Format:\n" +
+                    Opt(FileArg, "Target file path. Use with old_content + new_content for the preferred targeted form."),
+                    Opt("old_content",
+                        "Exact text block to replace. Copy verbatim from read_file output — whitespace-exact. " +
+                        "Any mismatch causes a content-not-found error. " +
+                        "Open files reload automatically before matching, so content is always current."),
+                    Opt("new_content", "Replacement text to write in place of old_content."),
+                    Opt("diff", "Patch format for multi-file or structural changes (add/move/delete files). Format:\n" +
                         "*** Begin Patch\\n" +
                         "*** Update File: path/to/file.cs\\n" +
                         "@@\\n" +
@@ -104,11 +110,8 @@ internal static partial class ToolCatalog
                         "*** End Patch\n" +
                         "Supports: *** Add File, *** Delete File, *** Update File.\n" +
                         "Multi-file: repeat file blocks before *** End Patch (all changes are atomic).\n" +
-                        "Alternatively pass file + old_content + new_content for a targeted simple replacement.\n" +
-                        "Use editor patch format only; do not send unified diff headers like --- / +++."),
-                    Opt(FileArg, "File path for targeted simple replacement. Use with old_content and new_content."),
-                    Opt("old_content", "Exact text to replace for targeted simple replacement."),
-                    Opt("new_content", "Replacement text for targeted simple replacement."),
+                        "For a single targeted edit, omit diff and use file + old_content + new_content instead.\n" +
+                        "Do not send unified diff headers like --- / +++."),
                     OptBool(PostCheck,
                         "Queue a quick diagnostics refresh after applying (default false).")))
                 .WithSearchHints(BuildSearchHints(

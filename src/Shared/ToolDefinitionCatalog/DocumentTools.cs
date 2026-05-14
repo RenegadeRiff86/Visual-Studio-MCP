@@ -8,12 +8,13 @@ public static partial class ToolDefinitionCatalog
         => CreateMutatingTool(
             "apply_diff",
             "documents",
-            "Apply the default targeted edit patch for one or multiple files.",
-            "Apply an editor patch to code files through the live editor. Use *** Begin Patch / *** Update File: path / @@ / -old / +new / *** End Patch. " +
-            "ALWAYS call read_file on the target section first — copy context lines verbatim from its output, whitespace-exact. Never retype or paraphrase them; any difference will cause a match failure. " +
-            "Use this as the default in-solution edit tool after inspecting with read_file, search_symbols, find_text, or file_outline. " +
-            "Supports *** Add File, *** Delete File, and *** Update File blocks. Multiple files apply atomically, and changed files open automatically. " +
-            "Do not send unified diff headers like --- or +++.",
+            "Edit file(s) through VS — file + old_content + new_content for a targeted change, or diff for multi-file patches.",
+            "Edit a file through the live VS editor. Preferred form: pass file + old_content + new_content. " +
+            "Read the target section with read_file first, then supply that exact text as old_content and your replacement as new_content. " +
+            "Open files reload automatically before matching, so content is always current — no stale-buffer problem. " +
+            "NEVER use Claude's built-in Edit or Write tools for files open in VS; always use this bridge tool instead. " +
+            "For multi-file or structural changes (add/move/delete files), use the diff patch form: *** Begin Patch / *** Update File / @@ / -old / +new / *** End Patch. " +
+            "Supports *** Add File, *** Delete File, and *** Update File blocks. Multiple files apply atomically.",
             parameterSchema,
             bridgeCommand: "apply-diff",
             title: "Apply Diff",
