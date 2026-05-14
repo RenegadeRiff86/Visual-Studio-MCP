@@ -39,8 +39,13 @@ public static partial class ToolDefinitionCatalog
         => CreateReadOnlyTool(
             "read_file",
             "search",
-            "Read one file slice.",
-            "Take one code slice from a file. Use search_symbols, find_text, file_outline, or peek_definition first to narrow what you need. For in-solution edits, use this before apply_diff so the patch targets the current code. Use start_line/end_line for a range, or line with context_before/context_after for an anchor. For multiple slices use read_file_batch.",
+            "Read one slice from one file — always a windowed range, never the full file.",
+            "Read ONE slice from ONE file. There is no full-file mode — the response is always a windowed range. " +
+            "Always provide start_line+end_line; omitting them starts at line 1 with a short default window, not the whole file. " +
+            "To continue past what you have seen: call again with start_line = (last line shown + 1). " +
+            "For multiple slices or multiple files in one round-trip use read_file_batch. " +
+            "Use file_outline first to identify the line range you need. " +
+            "For in-solution edits use this before apply_diff so the patch targets current content.",
             parameterSchema,
             bridgeCommand: "document-slice",
             title: "Read File Slice",
@@ -51,8 +56,10 @@ public static partial class ToolDefinitionCatalog
         => CreateReadOnlyTool(
             "read_file_batch",
             "search",
-            "Read several file slices.",
-            "Take multiple code slices in one bridge request. Each range item must include file plus one of: (a) start_line + end_line for a fixed range, or (b) line + context_before + context_after for an anchor-based slice. Use search_symbols, find_text, file_outline, or peek_definition first to get line numbers, then call this instead of repeated read_file calls when you need several slices before apply_diff or a larger refactor.",
+            "Read multiple slices across one or more files.",
+            "Read multiple slices in one call — each range item specifies its own file, so you can pull slices from different files simultaneously. " +
+            "Each item must include file plus one of: (a) start_line + end_line for a fixed range, or (b) line + context_before + context_after for an anchor-based slice. " +
+            "Use this whenever you need more than one slice, whether from the same file or different files — do not loop read_file.",
             parameterSchema,
             bridgeCommand: "document-slices",
             title: "Read File Slices",

@@ -46,8 +46,8 @@ internal static partial class ToolCatalog
             ToolDefinitionCatalog.ReadFile(
                 ObjectSchema(
                     Req("file", FileDesc),
-                    OptInt("start_line", "First 1-based line to read. Use with end_line."),
-                    OptInt("end_line", "Last 1-based line to read (inclusive). Use with start_line."),
+                    OptInt("start_line", "First 1-based line to read. Omit to start at line 1. To continue past a previous slice: set to (last line shown + 1)."),
+                    OptInt("end_line", "Last 1-based line (inclusive). Always a windowed range — there is no full-file mode."),
                     OptInt("line", "Anchor 1-based line. Use with context_before/context_after."),
                     OptInt("context_before", "Lines before anchor (default 10)."),
                     OptInt("context_after", "Lines after anchor (default 30)."),
