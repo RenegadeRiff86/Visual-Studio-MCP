@@ -4,7 +4,9 @@ using Microsoft.VisualStudio.Shell;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
@@ -282,6 +284,195 @@ internal static partial class SolutionProjectCommands
                     ["name"] = project.Name,
                     [UniqueNamePropertyName] = project.UniqueName,
                 });
+        }
+    }
+
+    /// <summary>
+    /// Lists all solution-level launch profiles from the .slnLaunch file.
+    /// </summary>
+    internal sealed class IdeListLaunchProfilesCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+        : IdeCommandBase(package, runtime, commandService, 0x0267)
+    {
+        protected override string CanonicalName => "Tools.IdeListLaunchProfiles";
+
+        protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            EnsureSolutionOpen(context.Dte);
+
+            string solutionPath = context.Dte.Solution.FullName;
+            string slnLaunchPath = Path.ChangeExtension(solutionPath, ".slnLaunch");
+
+            if (!File.Exists(slnLaunchPath))
+                throw new CommandErrorException("file_not_found",
+                    $"No .slnLaunch file found at {slnLaunchPath}. Solution launch profiles are not configured.");
+
+            string json = File.ReadAllText(slnLaunchPath);
+            JArray rawProfiles = JArray.Parse(json);
+
+            JArray profiles = new JArray();
+            List<string> names = new List<string>();
+            foreach (JObject raw in rawProfiles)
+            {
+                string name = raw["Name"]?.ToString() ?? "(unnamed)";
+                names.Add(name);
+
+                JArray projects = new JArray();
+                foreach (JObject proj in raw["Projects"] ?? new JArray())
+                {
+                    projects.Add(new JObject
+                    {
+                        ["path"] = proj["Path"]?.ToString(),
+                        ["action"] = proj["Action"]?.ToString(),
+                        ["debugTarget"] = proj["DebugTarget"]?.ToString(),
+                    });
+                }
+
+                profiles.Add(new JObject
+                {
+                    ["name"] = name,
+                    ["projectCount"] = projects.Count,
+                    ["projects"] = projects,
+                });
+            }
+
+            return new CommandExecutionResult(
+                $"Found {profiles.Count} launch profile(s): {string.Join(", ", names)}.",
+                new JObject
+                {
+                    ["count"] = profiles.Count,
+                    ["slnLaunchPath"] = slnLaunchPath,
+                    ["profiles"] = profiles,
+                });
+        }
+    }
+
+    /// <summary>
+    /// Activates a named launch profile from the .slnLaunch file by name (or partial match).
+    /// </summary>
+    internal sealed class IdeSetLaunchProfileCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+        : IdeCommandBase(package, runtime, commandService, 0x0268)
+    {
+        protected override string CanonicalName => "Tools.IdeSetLaunchProfile";
+
+        protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            string profileQuery = args.GetRequiredString("name");
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            EnsureSolutionOpen(context.Dte);
+
+            string solutionPath = context.Dte.Solution.FullName;
+            string slnLaunchPath = Path.ChangeExtension(solutionPath, ".slnLaunch");
+
+            if (!File.Exists(slnLaunchPath))
+                throw new CommandErrorException("file_not_found",
+                    $"No .slnLaunch file found at {slnLaunchPath}.");
+
+            string json = File.ReadAllText(slnLaunchPath);
+            JArray rawProfiles = JArray.Parse(json);
+            JObject matched = FindMatchingProfile(rawProfiles, profileQuery);
+
+            string profileName = matched["Name"]?.ToString() ?? "(unnamed)";
+            JArray profileProjects = matched["Projects"] as JArray ?? new JArray();
+            (List<string> startupPaths, JArray appliedProjects) = CollectStartupPaths(profileProjects);
+
+            ApplyStartupProjects(context.Dte, startupPaths);
+
+            return new CommandExecutionResult(
+                $"Activated launch profile '{profileName}' with {startupPaths.Count} startup project(s).",
+                new JObject
+                {
+                    ["profile"] = profileName,
+                    ["startupProjectCount"] = startupPaths.Count,
+                    ["projects"] = appliedProjects,
+                });
+        }
+
+        private static JObject FindMatchingProfile(JArray rawProfiles, string profileQuery)
+        {
+            foreach (JObject raw in rawProfiles)
+            {
+                string name = raw["Name"]?.ToString() ?? "";
+                if (string.Equals(name, profileQuery, StringComparison.OrdinalIgnoreCase))
+                    return raw;
+            }
+
+            List<JObject> candidates = new List<JObject>();
+            foreach (JObject raw in rawProfiles)
+            {
+                string name = raw["Name"]?.ToString() ?? "";
+                if (name.IndexOf(profileQuery, StringComparison.OrdinalIgnoreCase) >= 0)
+                    candidates.Add(raw);
+            }
+
+            if (candidates.Count == 1)
+                return candidates[0];
+
+            if (candidates.Count > 1)
+                throw new CommandErrorException("ambiguous_profile",
+                    $"Multiple profiles match '{profileQuery}': {string.Join(", ", candidates.Select(c => c["Name"]?.ToString()))}. Be more specific.");
+
+            IEnumerable<string?> allNames = rawProfiles.Select(p => p["Name"]?.ToString()).Where(n => n != null);
+            throw new CommandErrorException("profile_not_found",
+                $"No launch profile matches '{profileQuery}'. Available: {string.Join(", ", allNames)}.");
+        }
+
+        private static (List<string> startupPaths, JArray appliedProjects) CollectStartupPaths(JArray profileProjects)
+        {
+            List<string> startupPaths = new List<string>();
+            JArray appliedProjects = new JArray();
+
+            foreach (JObject proj in profileProjects)
+            {
+                string path = proj["Path"]?.ToString() ?? "";
+                string action = proj["Action"]?.ToString() ?? "None";
+                string debugTarget = proj["DebugTarget"]?.ToString() ?? "";
+
+                if (action.Equals("Start", StringComparison.OrdinalIgnoreCase) ||
+                    action.Equals("StartWithoutDebugging", StringComparison.OrdinalIgnoreCase))
+                {
+                    startupPaths.Add(path);
+                }
+
+                appliedProjects.Add(new JObject
+                {
+                    ["path"] = path,
+                    ["action"] = action,
+                    ["debugTarget"] = debugTarget,
+                });
+            }
+
+            return (startupPaths, appliedProjects);
+        }
+
+        private static void ApplyStartupProjects(DTE2 dte, List<string> startupPaths)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (startupPaths.Count > 0)
+                dte.Solution.SolutionBuild.StartupProjects = startupPaths.ToArray();
+
+            try
+            {
+                Microsoft.VisualStudio.Shell.Interop.IVsUIShell uiShell =
+                    (Microsoft.VisualStudio.Shell.Interop.IVsUIShell)
+                    Microsoft.VisualStudio.Shell.Package.GetGlobalService(typeof(Microsoft.VisualStudio.Shell.Interop.SVsUIShell));
+                uiShell?.UpdateCommandUI(1 /* fImmediateUpdate */);
+            }
+            catch (Exception ex) when (ex is not null)
+            {
+                Debug.WriteLine($"UpdateCommandUI failed: {ex.Message}");
+            }
+
+            try
+            {
+                dte.Solution.Properties.Item("StartupProject").Value =
+                    dte.Solution.Properties.Item("StartupProject").Value;
+            }
+            catch (Exception ex) when (ex is not null)
+            {
+                Debug.WriteLine($"StartupProject property refresh failed: {ex.Message}");
+            }
         }
     }
 

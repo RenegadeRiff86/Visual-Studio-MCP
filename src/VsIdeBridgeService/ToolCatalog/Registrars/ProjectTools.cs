@@ -196,7 +196,24 @@ internal static partial class ToolCatalog
             Project,
             searchHints: BuildSearchHints(
                 workflow: [("debug_start", "Start debugging the startup project"), ("build", "Build the startup project")],
-                related: [(ListProjectsTool, "List projects to find the right name")]));
+                related: [(ListProjectsTool, "List projects to find the right name"), ("list_launch_profiles", "List solution launch profiles")]));
+
+        yield return BridgeTool("list_launch_profiles",
+            "List all solution-level launch profiles from the .slnLaunch file. These are the named profiles shown in the startup project dropdown in the VS toolbar.",
+            EmptySchema(), "list-launch-profiles", _ => Empty(), Project,
+            searchHints: BuildSearchHints(
+                workflow: [("set_launch_profile", "Activate one of the listed profiles")],
+                related: [("set_startup_project", "Set a single startup project instead"), (ListProjectsTool, "List projects in the solution")]));
+
+        yield return BridgeTool("set_launch_profile",
+            "Activate a named launch profile from the .slnLaunch file. Sets the startup projects and their debug targets. Supports exact or partial name matching (case-insensitive).",
+            ObjectSchema(Req("name", "Launch profile name (or partial match).")),
+            "set-launch-profile",
+            a => Build(("name", OptionalString(a, "name"))),
+            Project,
+            searchHints: BuildSearchHints(
+                workflow: [("debug_start", "Start debugging with the activated profile"), ("build", "Build the startup projects")],
+                related: [("list_launch_profiles", "List available profiles first"), ("set_startup_project", "Set a single startup project instead")]));
 
         yield return BridgeTool("add_file_to_project",
             "Add an existing FileArg to a project.",
