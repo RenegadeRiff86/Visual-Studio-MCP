@@ -207,15 +207,24 @@ internal static partial class ToolCatalog
     private static IEnumerable<ToolEntry> LaunchProfileTools()
     {
         yield return BridgeTool("list_launch_profiles",
-            "List all solution-level launch profiles from the .slnLaunch file. These are the named profiles shown in the startup project dropdown in the VS toolbar.",
+            "List all solution-level launch profiles from the .slnLaunch file. " +
+            "A .slnLaunch file is a JSON array that lives next to the .sln file and defines named multi-project startup configurations — " +
+            "the same profiles that appear in the startup dropdown in the VS toolbar. " +
+            "Each profile has a Name and a Projects array; each project entry has a Path (relative to the solution), " +
+            "an Action (Start, StartWithoutDebugging, or None), and an optional DebugTarget. " +
+            "Returns profile names, project counts, and per-project path/action/debugTarget. " +
+            "Call this first to discover available profile names before calling set_launch_profile.",
             EmptySchema(), "list-launch-profiles", _ => Empty(), Project,
             searchHints: BuildSearchHints(
                 workflow: [("set_launch_profile", "Activate one of the listed profiles")],
                 related: [("set_startup_project", "Set a single startup project instead"), (ListProjectsTool, "List projects in the solution")]));
 
         yield return BridgeTool("set_launch_profile",
-            "Activate a named launch profile from the .slnLaunch file. Sets the startup projects and their debug targets. Supports exact or partial name matching (case-insensitive).",
-            ObjectSchema(Req("name", "Launch profile name (or partial match).")),
+            "Activate a named launch profile from the .slnLaunch file, switching VS's startup project selection immediately. " +
+            "Supports exact or partial name matching (case-insensitive); partial match must be unambiguous — if multiple profiles match the query an error lists them so you can be more specific. " +
+            "Only projects with Action 'Start' or 'StartWithoutDebugging' become startup projects; projects with Action 'None' are listed in the result but not activated. " +
+            "Call list_launch_profiles first to see available profile names.",
+            ObjectSchema(Req("name", "Launch profile name (or partial match, case-insensitive). Use the exact name from list_launch_profiles to avoid ambiguity.")),
             "set-launch-profile",
             a => Build(("name", OptionalString(a, "name"))),
             Project,

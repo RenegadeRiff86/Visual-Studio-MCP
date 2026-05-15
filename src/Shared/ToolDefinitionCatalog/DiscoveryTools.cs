@@ -20,7 +20,10 @@ public static partial class ToolDefinitionCatalog
             "call_tool",
             "system",
             "Call a discovered bridge tool.",
-            "Invoke a bridge catalog tool by name after discovering it with recommend_tools, list_tools, or tool_help. Use this wrapper for tools such as read_file, find_text, apply_diff, and git_status when they are not directly exposed in the MCP protocol tools/list response. The target tool may be read-only or mutating, so inspect the target schema before destructive operations.",
+            "Invoke a bridge catalog tool by name after discovering it with recommend_tools, list_tools, or tool_help. Use this " +
+            "wrapper for tools such as read_file, find_text, apply_diff, and git_status when they are not directly exposed in the MCP " +
+            "protocol tools/list response. The target tool may be read-only or mutating, so inspect the target schema before " +
+            "destructive operations.",
             parameterSchema,
             tags: [DiscoveryTag, "dispatch", "lazy"]);
 

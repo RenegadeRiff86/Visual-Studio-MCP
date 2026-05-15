@@ -28,7 +28,7 @@ Use these bridge tools together instead of treating `apply_diff` in isolation.
   - `symbol_info`
   - `peek_definition`
 - Editing:
-  - `apply_diff` as the default targeted edit tool
+  - `apply_diff` as the default targeted edit tool — use `file + old_content + new_content` for a single targeted change; use the `edits` array to batch multiple changes in one call
   - `write_file` only for true full-file replacement
   - `reload_document` after non-patch editor writes when needed
   - `save_document` if the workflow needs an explicit save
@@ -46,6 +46,8 @@ Use these bridge tools together instead of treating `apply_diff` in isolation.
   - `query_project_references`
   - `query_project_outputs`
   - `set_startup_project`
+  - `list_launch_profiles`
+  - `set_launch_profile`
 - Debugging:
   - `debug_start`
   - `debug_break`
@@ -99,8 +101,9 @@ Use these bridge tools together instead of treating `apply_diff` in isolation.
 Use this checklist:
 
 - Identify the smallest editable region.
-- Build a minimal `*** Begin Patch` block.
-- Apply through bridge `apply_diff`.
+- Use `apply_diff` with `file + old_content + new_content` for a single targeted change.
+- Use the `edits` array to apply multiple changes in one call.
+- For multi-file or structural changes only, use the `*** Begin Patch` patch format.
 - Reload or re-read the file if needed.
 - Run `errors` and `warnings` after meaningful edits.
 - Use debug tools when behavior is unclear instead of guessing from static reads.

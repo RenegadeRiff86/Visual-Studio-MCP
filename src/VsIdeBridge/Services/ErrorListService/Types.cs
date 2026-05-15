@@ -24,30 +24,36 @@ namespace VsIdeBridge.Services;
 // that this type is intentionally a data carrier, not a behavioural class.
 internal sealed record ErrorListQuery
 {
-    public string? Severity { get; set; }
-    public string? Code { get; set; }
-    public string? Project { get; set; }
-    public string? Path { get; set; }
-    public string? Text { get; set; }
-    public string? GroupBy { get; set; }
-    public int? Max { get; set; }
+    public string? Severity      { get; set; }
+    public string? Code          { get; set; }
+    public string? Project       { get; set; }
+    public string? Path          { get; set; }
+    public string? Text          { get; set; }
+    public string? GroupBy       { get; set; }
+    public int?    Max           { get; set; }  // legacy: limit without pagination
+    public string? SortBy        { get; set; }  // severity | file | line | code | message | project
+    public string? SortDirection { get; set; }  // asc (default) | desc
+    public int?    ChunkSize     { get; set; }  // page size; paired with ChunkIndex
+    public int?    ChunkIndex    { get; set; }  // 0-based page number
 
     public string? File { get; set; }
-
-    public ErrorListQuery WithoutMax() => this with { Max = null };
 
     public JObject ToJson()
     {
         return new JObject
         {
-            ["severity"] = Severity ?? string.Empty,
-            ["code"] = Code ?? string.Empty,
-            ["project"] = Project ?? string.Empty,
-            ["path"] = Path ?? string.Empty,
-            ["file"] = File ?? string.Empty,
-            ["text"] = Text ?? string.Empty,
-            ["groupBy"] = GroupBy ?? string.Empty,
-            ["max"] = (JToken?)Max ?? JValue.CreateNull(),
+            ["severity"]      = Severity      ?? string.Empty,
+            ["code"]          = Code          ?? string.Empty,
+            ["project"]       = Project       ?? string.Empty,
+            ["path"]          = Path          ?? string.Empty,
+            ["file"]          = File          ?? string.Empty,
+            ["text"]          = Text          ?? string.Empty,
+            ["groupBy"]       = GroupBy       ?? string.Empty,
+            ["max"]           = (JToken?)Max           ?? JValue.CreateNull(),
+            ["sortBy"]        = SortBy        ?? string.Empty,
+            ["sortDirection"] = SortDirection ?? string.Empty,
+            ["chunkSize"]     = (JToken?)ChunkSize     ?? JValue.CreateNull(),
+            ["chunkIndex"]    = (JToken?)ChunkIndex    ?? JValue.CreateNull(),
         };
     }
 }

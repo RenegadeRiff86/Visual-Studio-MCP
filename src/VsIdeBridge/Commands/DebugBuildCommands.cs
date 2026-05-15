@@ -19,8 +19,15 @@ internal static partial class DebugBuildCommands
     private const string RequireCleanDiagnosticsArgument = "require-clean-diagnostics";
     private const string MaxArgument = "max";
     private const string FileArgument = "file";
-    private const string ChunkSizeArgument = "chunk-size";
-    private const string ChunkSizeJsonArgument = "chunk_size";
+    private const string ChunkSizeArgument        = "chunk-size";
+    private const string ChunkSizeJsonArgument    = "chunk_size";
+    private const string ChunkIndexArgument       = "chunk-index";
+    private const string ChunkIndexJsonArgument   = "chunk_index";
+    private const string SortByArgument           = "sort-by";
+    private const string SortByJsonArgument       = "sort_by";
+    private const string SortDirectionArgument    = "sort-direction";
+    private const string SortDirectionJsonArgument = "sort_direction";
+    private const string GroupByJsonArgument      = "group_by";
     private const int DefaultDebuggerTimeoutMilliseconds = 120000;
     private const int MinimumBuildErrorsTimeoutMilliseconds = 5000;
     private const int DefaultBuildTimeoutMilliseconds = 600000;

@@ -91,12 +91,33 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
             }
         }
 
-        JObject[] matchingRows = [.. ApplyQuery(rows, query?.WithoutMax())];
+        // Filter first (no Max applied inside ApplyQuery).
+        JObject[] matchingRows = [.. ApplyQuery(rows, query)];
 
-        // Respect chunk_size / Max
-        JObject[] filteredRows = (query?.Max > 0)
-            ? [.. matchingRows.Take(query.Max.Value)]
-            : matchingRows;
+        // Sort the filtered set.
+        IEnumerable<JObject> sortedRows = ApplySort(matchingRows, query?.SortBy, query?.SortDirection);
+
+        // Chunk-based pagination: chunk_size + chunk_index take priority; Max is a legacy fallback.
+        int chunkSize  = query?.ChunkSize ?? query?.Max ?? 0;
+        int chunkIndex = Math.Max(0, query?.ChunkIndex ?? 0);
+
+        JObject[] filteredRows;
+        int       chunkCount;
+        bool      hasMoreChunks;
+
+        if (chunkSize > 0)
+        {
+            int skip      = chunkSize * chunkIndex;
+            filteredRows  = [.. sortedRows.Skip(skip).Take(chunkSize)];
+            chunkCount    = (int)Math.Ceiling((double)matchingRows.Length / chunkSize);
+            hasMoreChunks = (chunkIndex + 1) < chunkCount;
+        }
+        else
+        {
+            filteredRows  = [.. sortedRows];
+            chunkCount    = 1;
+            hasMoreChunks = false;
+        }
 
         Dictionary<string, int> severityCounts = CreateSeverityCounts();
         foreach (JObject row in filteredRows)
@@ -112,15 +133,19 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
 
         return new JObject
         {
-            ["count"] = filteredRows.Length,
-            ["totalCount"] = matchingRows.Length,
-            ["severityCounts"] = JObject.FromObject(severityCounts),
+            ["count"]              = filteredRows.Length,
+            ["totalCount"]         = matchingRows.Length,
+            ["severityCounts"]     = JObject.FromObject(severityCounts),
             ["totalSeverityCounts"] = JObject.FromObject(totalSeverityCounts),
-            ["hasErrors"] = severityCounts["Error"] > 0,
-            ["hasWarnings"] = severityCounts["Warning"] > 0,
-            ["filter"] = query?.ToJson() ?? [],
-            ["rows"] = new JArray(filteredRows),
-            ["groups"] = BuildGroups(matchingRows, query?.GroupBy),
+            ["hasErrors"]          = severityCounts["Error"] > 0,
+            ["hasWarnings"]        = severityCounts["Warning"] > 0,
+            ["filter"]             = query?.ToJson() ?? [],
+            ["chunkIndex"]         = chunkIndex,
+            ["chunkSize"]          = chunkSize > 0 ? chunkSize : matchingRows.Length,
+            ["chunkCount"]         = chunkCount,
+            ["hasMoreChunks"]      = hasMoreChunks,
+            ["rows"]               = new JArray(filteredRows),
+            ["groups"]             = BuildGroups(matchingRows, query?.GroupBy),
         };
     }
 
@@ -289,6 +314,8 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
         string? contentOverride = null)
     {
         List<JObject> findings = [];
+        if (!BestPracticeStateManager.IsEnabled)
+            return findings;
 
         foreach (string file in files)
         {

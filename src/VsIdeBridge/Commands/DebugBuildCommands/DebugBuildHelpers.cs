@@ -14,19 +14,25 @@ internal static partial class DebugBuildCommands
     {
         return new ErrorListQuery
         {
-            Severity = args.GetString("severity") ?? defaultSeverity,
-            Code = args.GetString("code"),
-            Project = args.GetString("project"),
-            Path = args.GetString("path"),
-            File = args.GetString(FileArgument),
-            Text = args.GetString("text"),
-            GroupBy = args.GetString("group-by"),
-            Max = GetDiagnosticsMax(args),
+            Severity      = args.GetString("severity") ?? defaultSeverity,
+            Code          = args.GetString("code"),
+            Project       = args.GetString("project"),
+            Path          = args.GetString("path"),
+            File          = args.GetString(FileArgument),
+            Text          = args.GetString("text"),
+            // Try CLI form (group-by) first, then MCP JSON form (group_by).
+            GroupBy       = args.GetString("group-by") ?? args.GetString(GroupByJsonArgument),
+            Max           = GetDiagnosticsMax(args),
+            ChunkSize     = GetNullableInt32(args, ChunkSizeArgument, ChunkSizeJsonArgument),
+            ChunkIndex    = GetNullableInt32(args, ChunkIndexArgument, ChunkIndexJsonArgument),
+            SortBy        = args.GetString(SortByArgument)        ?? args.GetString(SortByJsonArgument),
+            SortDirection = args.GetString(SortDirectionArgument) ?? args.GetString(SortDirectionJsonArgument),
         };
     }
 
+    // Max is the legacy per-request limit (--max); ChunkSize is now separate.
     private static int? GetDiagnosticsMax(CommandArguments args)
-        => GetNullableInt32(args, ChunkSizeArgument, ChunkSizeJsonArgument, MaxArgument);
+        => args.GetNullableInt32(MaxArgument);
 
     private static int? GetNullableInt32(CommandArguments args, params string[] names)
     {
@@ -85,7 +91,7 @@ internal static partial class DebugBuildCommands
     /// levels regardless of which severity was filtered. Models read Summary first, so
     /// embedding the full picture here prevents them from declaring victory on 0 errors
     /// while warnings or messages remain.
-    /// Example: "0 errors · 1 warning · 2 messages — fix all before building."
+    /// Example: "0 errors ï¿½ 1 warning ï¿½ 2 messages ï¿½ fix all before building."
     /// </summary>
     internal static string BuildDiagnosticsCountSummary(JObject result)
     {
@@ -93,10 +99,10 @@ internal static partial class DebugBuildCommands
         int errors   = total?["Error"]?.Value<int>()   ?? 0;
         int warnings = total?["Warning"]?.Value<int>() ?? 0;
         int messages = total?["Message"]?.Value<int>() ?? 0;
-        string counts = $"{errors} error(s) · {warnings} warning(s) · {messages} message(s)";
+        string counts = $"{errors} error(s) ï¿½ {warnings} warning(s) ï¿½ {messages} message(s)";
         return errors == 0 && warnings == 0 && messages == 0
-            ? $"{counts} — clean."
-            : $"{counts} — fix all before building.";
+            ? $"{counts} ï¿½ clean."
+            : $"{counts} ï¿½ fix all before building.";
     }
 
     /// <summary>
@@ -122,7 +128,7 @@ internal static partial class DebugBuildCommands
                     "Message" => "run warnings with severity=Message",
                     _ => $"run {severity.ToLowerInvariant()}",
                 };
-                advisories.Add($"Also found {count} {severity.ToLowerInvariant()}(s) — {callHint}.");
+                advisories.Add($"Also found {count} {severity.ToLowerInvariant()}(s) ï¿½ {callHint}.");
             }
         }
         return advisories;

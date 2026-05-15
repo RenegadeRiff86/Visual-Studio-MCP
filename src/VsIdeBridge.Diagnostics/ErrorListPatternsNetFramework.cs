@@ -59,7 +59,9 @@ internal static partial class ErrorListPatterns
     public static Regex CSharpCommentPattern() { return _cSharpCommentPattern; }
 
     private static readonly Regex _cSharpMethodSignaturePattern = new(
-        @"^[ \t]*(?:(?:public|private|protected|internal|static|virtual|override|abstract|sealed|async|new|partial|readonly)\s+)*(?!return\b|if\b|else\b|while\b|for\b|foreach\b|switch\b|catch\b|using\b|lock\b|yield\b|class\b|struct\b|interface\b|enum\b|record\b|namespace\b|delegate\b)[\w<>\[\],\?]+\s+(\w+)\s*(?:<[^>]+>)?\s*\(",
+        @"^[ \t]*(?:(?:public|private|protected|internal|static|virtual|override|abstract|sealed|async|new|partial|readonly)\s+)*(?" +
+        @"!return\b|if\b|else\b|while\b|for\b|foreach\b|switch\b|catch\b|using\b|lock\b|yield\b|class\b|struct\b|interface\b|enum\b" +
+        @"|record\b|namespace\b|delegate\b)[\w<>\[\],\?]+\s+(\w+)\s*(?:<[^>]+>)?\s*\(",
         RegexOptions.Compiled | RegexOptions.Multiline);
     public static Regex CSharpMethodSignaturePattern() { return _cSharpMethodSignaturePattern; }
 
@@ -138,7 +140,10 @@ internal static partial class ErrorListPatterns
     private static readonly Regex _pythonSingleLetterAssignPattern = new(@"^[ \t]*(?<name>[a-zA-Z])\s*=\s*(?!.*\bfor\b)", RegexOptions.Compiled | RegexOptions.Multiline);
     public static Regex PythonSingleLetterAssignPattern() { return _pythonSingleLetterAssignPattern; }
 
-    private static readonly Regex _cSharpCommentedCodePattern = new(@"^\s*//\s*(?:(?:public|private|protected|internal|static|var|if|else|for|foreach|while|return|throw|try|catch|class|using|namespace|void|int|string|bool)\b|\w+\s*\(.*\)\s*[;{]|\w+\s*=\s*)", RegexOptions.Compiled);
+    private static readonly Regex _cSharpCommentedCodePattern = new(
+        @"^\s*//\s*(?:(?:public|private|protected|internal|static|var|if|else|for|foreach|while|return|throw|try|catch|class|using|" +
+        @"namespace|void|int|string|bool)\b|\w+\s*\(.*\)\s*[;{]|\w+\s*=\s*)",
+        RegexOptions.Compiled);
     public static Regex CSharpCommentedCodePattern() { return _cSharpCommentedCodePattern; }
 
     private static readonly Regex _pythonCommentedCodePattern = new(@"^\s*#\s*(?:(?:def|class|if|else|elif|for|while|return|import|from|try|except|raise|with|yield)\b|\w+\s*\(.*\)\s*$|\w+\s*=\s*)", RegexOptions.Compiled);
@@ -158,11 +163,6 @@ internal static partial class ErrorListPatterns
 
     private static readonly Regex _cSharpFieldDeclPattern = new(@"^[ \t]*(?:(?:public|private|protected|internal|static|readonly|volatile|const)\s+)+[\w<>\[\],\?\s]+\s+_?\w+\s*[=;]", RegexOptions.Compiled | RegexOptions.Multiline);
     public static Regex CSharpFieldDeclPattern() { return _cSharpFieldDeclPattern; }
-
-    private static readonly Regex _newDisposablePattern = new(
-        @"(?<!using\s*\([^)]*)\b(?:var|[\w<>\[\]]+)\s+(\w+)\s*=\s*new\s+(?:Stream(?:Reader|Writer)|FileStream|Http(?:Client|ResponseMessage)|SqlConnection|SqlCommand|Process|Timer|MemoryStream|BinaryReader|BinaryWriter|WebClient|TcpClient|UdpClient|NetworkStream|CryptoStream)\s*\(",
-        RegexOptions.Compiled);
-    public static Regex NewDisposablePattern() { return _newDisposablePattern; }
 
     private static readonly Regex _dateTimeInLoopPattern = new(@"(?:for\s*\(|foreach\s*\(|while\s*\()[^{]*\{[^}]*DateTime\s*\.\s*(?:Now|UtcNow)", RegexOptions.Compiled | RegexOptions.Singleline);
     public static Regex DateTimeInLoopPattern() { return _dateTimeInLoopPattern; }

@@ -108,7 +108,16 @@ internal static class BuildServiceHelpers
         return null;
     }
 
-    internal static JObject CreateBuildResult(DTE2 dte, SolutionBuild solutionBuild, DateTimeOffset startedAt, string solutionPathKey, string activeConfigurationKey, string activePlatformKey, string operation, string? projectName = null, string? uniqueName = null)
+    internal static JObject CreateBuildResult(
+        DTE2 dte,
+        SolutionBuild solutionBuild,
+        DateTimeOffset startedAt,
+        string solutionPathKey,
+        string activeConfigurationKey,
+        string activePlatformKey,
+        string operation,
+        string? projectName = null,
+        string? uniqueName = null)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 

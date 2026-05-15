@@ -160,12 +160,47 @@ internal sealed partial class ErrorListService
                 .IndexOf(query.Text, StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
-        if (query.Max > 0)
+        return [.. filtered];
+    }
+
+    /// <summary>
+    /// Sorts <paramref name="rows"/> by the field named in <paramref name="sortBy"/>.
+    /// Returns the original sequence unchanged when <paramref name="sortBy"/> is null/empty/none.
+    /// </summary>
+    private static IEnumerable<JObject> ApplySort(IEnumerable<JObject> rows, string? sortBy, string? sortDirection)
+    {
+        if (string.IsNullOrWhiteSpace(sortBy) ||
+            string.Equals(sortBy, "none", StringComparison.OrdinalIgnoreCase))
         {
-            filtered = filtered.Take(query.Max.Value);
+            return rows;
         }
 
-        return [.. filtered];
+        bool descending = string.Equals(sortDirection, "desc",       StringComparison.OrdinalIgnoreCase)
+                       || string.Equals(sortDirection, "descending", StringComparison.OrdinalIgnoreCase);
+
+        string field = sortBy!.Trim().ToLowerInvariant();
+
+        // Line sorts numerically; everything else sorts as a case-insensitive string.
+        if (field == "line")
+        {
+            return descending
+                ? rows.OrderByDescending(row => GetNullableRowInt(row, LineKey) ?? 0)
+                : rows.OrderBy(row => GetNullableRowInt(row, LineKey) ?? 0);
+        }
+
+        string key = field switch
+        {
+            "severity"       => SeverityKey,
+            "file" or "path" => FileKey,
+            "code"           => CodeKey,
+            "message"        => MessageKey,
+            "project"        => ProjectKey,
+            _                => SeverityKey,   // graceful fallback
+        };
+
+        return descending
+            ? rows.OrderByDescending(row => GetRowString(row, key), StringComparer.OrdinalIgnoreCase)
+            : rows.OrderBy(row => GetRowString(row, key), StringComparer.OrdinalIgnoreCase);
     }
 
     private static bool MatchesFileFilter(JObject row, string file)

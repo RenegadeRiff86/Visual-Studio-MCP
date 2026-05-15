@@ -4,6 +4,7 @@ using System.ComponentModel.Design;
 using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 using VsIdeBridge.Services;
+using VsIdeBridge.Tooling.Handles;
 
 namespace VsIdeBridge.Commands;
 
@@ -28,7 +29,11 @@ internal static partial class DebugBuildCommands
             {
                 if (!waitForCompletion)
                 {
-                    throw new CommandErrorException("invalid_arguments", $"wait_for_completion: false is not supported when a project is specified. To build a specific project, set wait_for_completion: true. To fire-and-forget a build, remove the project parameter to build the entire solution.");
+                    throw new CommandErrorException(
+                        "invalid_arguments",
+                        "wait_for_completion: false is not supported when a project is specified. " +
+                        "To build a specific project, set wait_for_completion: true. " +
+                        "To fire-and-forget a build, remove the project parameter to build the entire solution.");
                 }
 
                 await context.Runtime.BridgeApprovalService.RequestApprovalAsync(

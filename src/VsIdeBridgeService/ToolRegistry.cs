@@ -97,6 +97,26 @@ internal sealed class ToolExecutionRegistry
             return;
 
         JsonObject actual = args ?? [];
+        JsonObject? schemaProps = schema["properties"] as JsonObject;
+
+        // Detect the common mistake of passing the call_tool wrapper {name, arguments}
+        // directly to the inner tool instead of to call_tool itself.
+        if (actual.ContainsKey("name") || actual.ContainsKey("arguments"))
+        {
+            bool nameUnexpected = schemaProps is null || !schemaProps.ContainsKey("name");
+            bool argsUnexpected = schemaProps is null || !schemaProps.ContainsKey("arguments");
+            string? wrapperKey = (actual.ContainsKey("name") && nameUnexpected) ? "name"
+                : (actual.ContainsKey("arguments") && argsUnexpected) ? "arguments"
+                : null;
+            if (wrapperKey is not null)
+                throw new McpRequestException(
+                    id,
+                    McpErrorCodes.InvalidParams,
+                    $"Unexpected argument '{wrapperKey}'. You likely passed the call_tool wrapper structure directly to '{entry.Name}'. " +
+                    $"The 'name' and 'arguments' fields belong on call_tool, not inside the inner tool's own arguments. " +
+                    $"Correct form: call_tool({{\"name\":\"{entry.Name}\",\"arguments\":{{<actual arguments here>}}}})");
+        }
+
         if (!TryValidateObject(actual, schema, out string? error))
             throw new McpRequestException(
                 id,

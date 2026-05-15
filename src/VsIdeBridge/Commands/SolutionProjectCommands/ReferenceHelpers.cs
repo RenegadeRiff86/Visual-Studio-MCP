@@ -263,7 +263,11 @@ internal static partial class SolutionProjectCommands
         ThreadHelper.ThrowIfNotOnUIThread();
         if (string.IsNullOrWhiteSpace(project.FullName))
         {
-            throw new CommandErrorException(UnsupportedProjectTypeCode, $"Project '{project.Name}' does not have a project file on disk (e.g. it may be a solution folder). Call list_projects to see all projects and choose one with a .csproj or .vbproj file.");
+            throw new CommandErrorException(
+                UnsupportedProjectTypeCode,
+                $"Project '{project.Name}' does not have a project file on disk " +
+                "(e.g. it may be a solution folder). Call list_projects to see all projects " +
+                "and choose one with a .csproj or .vbproj file.");
         }
 
         string projectPath = PathNormalization.NormalizeFilePath(project.FullName);

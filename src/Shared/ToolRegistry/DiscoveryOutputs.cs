@@ -28,6 +28,7 @@ public sealed partial class ToolRegistry
             ["Summary"] = $"{categories.Count} categories.",
             ["count"] = categories.Count,
             ["categories"] = categories,
+            ["handleGuide"] = BuildHandleGuide(),
             ["featuredTools"] = featuredTools,
         };
     }
@@ -52,7 +53,10 @@ public sealed partial class ToolRegistry
         return new JsonObject
         {
             ["Summary"] = $"{tools.Count} catalog tools. Use list_tools_by_category for a focused list. Invoke catalog tools through call_tool unless the tool appears in the MCP protocol tools/list response.",
-            ["invocationHint"] = "This is a bridge catalog, not the MCP protocol tools/list. In lazy mode, most names listed here are not top-level MCP tools. Invoke them as { \"name\": \"call_tool\", \"arguments\": { \"name\": \"read_file\", \"arguments\": { ... } } }.",
+            ["invocationHint"] =
+                "This is a bridge catalog, not the MCP protocol tools/list. In lazy mode, most names listed here are not top-level MCP " +
+                "tools. Invoke them as { \"name\": \"call_tool\", \"arguments\": { \"name\": \"read_file\", \"arguments\": { ... } } }.",
+            ["handleGuide"] = BuildHandleGuide(),
             ["navigationToolsFirst"] = true,
             ["count"] = tools.Count,
             ["tools"] = tools,
@@ -84,6 +88,7 @@ public sealed partial class ToolRegistry
             ["category"] = categoryDefinition.Name,
             ["summary"] = categoryDefinition.Summary,
             ["description"] = categoryDefinition.Description,
+            ["handleGuide"] = BuildHandleGuide(),
             ["count"] = tools.Count,
             ["tools"] = tools,
         };

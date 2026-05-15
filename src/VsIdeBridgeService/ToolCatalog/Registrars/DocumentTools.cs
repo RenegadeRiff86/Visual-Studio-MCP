@@ -6,6 +6,7 @@ using static VsIdeBridgeService.ArgBuilder;
 using static VsIdeBridgeService.SchemaHelpers;
 using VsIdeBridge.Diagnostics;
 using VsIdeBridge.Shared;
+using VsIdeBridge.Tooling.Handles;
 using VsIdeBridge.Tooling.Patches;
 using VsIdeBridgeService.SystemTools;
 
@@ -89,27 +90,127 @@ internal static partial class ToolCatalog
             .Concat(SolutionSystemTools());
 
     private static IEnumerable<ToolEntry> DocumentEditTools()
+        =>
+        ApplyDiffTools()
+            .Concat(WriteFileTools());
+
+    private static async Task<JsonObject> ApplyMultipleEditsAsync(
+        JsonNode? id, JsonObject? args, JsonArray editsArray, BridgeConnection bridge)
+    {
+        JsonArray editResults = [];
+        int applied = 0;
+        int failed = 0;
+        foreach (JsonNode? editNode in editsArray)
+        {
+            if (editNode is not JsonObject edit) continue;
+            string? editFileArg = edit["file"]?.GetValue<string>();
+            if (editFileArg is not null && !HandleRegistry.IsHandle(editFileArg))
+            {
+                editResults.Add(new JsonObject
+                {
+                    ["file"] = editFileArg,
+                    ["success"] = false,
+                    ["error"] = "'file' must be a handle (e.g. h:3 or f:1) — not a full path.",
+                });
+                failed++;
+                continue;
+            }
+
+            ApplyDiffRequest editRequest;
+            try
+            {
+                editRequest = ApplyDiffRequest.FromJsonObject(edit);
+            }
+            catch (ApplyDiffValidationException ex)
+            {
+                editResults.Add(new JsonObject
+                {
+                    ["file"] = editFileArg,
+                    ["success"] = false,
+                    ["error"] = ex.Message,
+                });
+                failed++;
+                continue;
+            }
+
+            JsonObject editResult = await bridge.SendAsync(id, "apply-diff", BuildApplyDiffArgs(editRequest))
+                .ConfigureAwait(false);
+            bool success = editResult["Success"]?.GetValue<bool>() ?? false;
+            if (success) applied++; else failed++;
+            JsonObject entry = new()
+            {
+                ["file"] = editFileArg,
+                ["success"] = success,
+            };
+            if (!success)
+                entry["error"] = editResult["Summary"]?.GetValue<string>();
+            editResults.Add(entry);
+        }
+
+        JsonObject combined = new()
+        {
+            ["Success"]  = failed == 0,
+            ["Summary"]  = $"Applied {applied}/{applied + failed} edit(s)." +
+                (failed > 0 ? $" {failed} failed — see edits array for details." : ""),
+            ["Warnings"] = new JsonArray(),
+            ["Data"]     = new JsonObject
+            {
+                ["count"]   = applied + failed,
+                ["applied"] = applied,
+                ["failed"]  = failed,
+                ["edits"]   = editResults,
+            },
+        };
+        if (ArgBuilder.OptionalBool(args, PostCheck, false))
+            combined["postCheck"] = RunDocumentPostCheck(bridge, ApplyDiffTool);
+        return combined;
+    }
+
+    private static IEnumerable<ToolEntry> ApplyDiffTools()
     {
         yield return new(
             ToolDefinitionCatalog.ApplyDiff(
                 ObjectSchema(
-                    Opt(FileArg, FileDesc),
+                    Opt(FileArg, ApplyDiffFileDesc),
                     Opt("old_content",
-                        "Exact text block to replace. Copy verbatim from read_file output — whitespace-exact. " +
+                        "Exact source text block to replace. Copy the slice text from read_file without display line-number prefixes — whitespace-exact. " +
                         "Any mismatch causes a content-not-found error. " +
                         "Open files reload automatically before matching, so content is always current."),
                     Opt("new_content", "Replacement text to write in place of old_content."),
-                    Opt("diff", "ONLY for multi-file or structural changes (add/move/delete files). For a single targeted edit omit this and use file + old_content + new_content instead. Format:\n" +
+                    ("edits", new JsonObject
+                    {
+                        ["type"] = "array",
+                        ["description"] =
+                            "Apply multiple targeted edits in one call. Each element is an independent edit object with its own " +
+                            "file (handle), old_content, and new_content. Each edit is dispatched as a separate command instance — " +
+                            "use this instead of calling apply_diff repeatedly. Edits are applied in order; failures are reported " +
+                            "per-entry without aborting the rest.",
+                        ["items"] = ObjectSchema(
+                            Req(FileArg, "Handle (h:N or f:N) for the file to edit."),
+                            Req("old_content", "Exact text block to replace — copy verbatim from read_file."),
+                            Req("new_content", "Replacement text.")),
+                        ["minItems"] = 1,
+                    }, false),
+                    Opt("diff",
+                        "ONLY for multi-file or structural changes (add/move/delete files). " +
+                        "For a single targeted edit omit this and use file + old_content + new_content instead. " +
+                        "Single-file no-context replacement patches are rejected. " +
+                        "Format for a multi-file content patch:\n" +
                         "*** Begin Patch\\n" +
-                        "*** Update File: path/to/file.cs\\n" +
+                        "*** Update File: h:2\\n" +
+                        "@@\\n" +
+                        " context\\n" +
+                        "-old line\\n" +
+                        "+new line\\n" +
+                        " context\\n" +
+                        "*** Update File: f:3\\n" +
                         "@@\\n" +
                         " context\\n" +
                         "-old line\\n" +
                         "+new line\\n" +
                         " context\\n" +
                         "*** End Patch\n" +
-                        "Supports: *** Add File, *** Delete File, *** Update File.\n" +
-                        "Multi-file: repeat file blocks before *** End Patch (all changes are atomic).\n" +
+                        "Structural patches may use *** Add File, *** Delete File, or *** Move to.\n" +
                         "Do not send unified diff headers like --- / +++."),
                     OptBool(PostCheck,
                         "Queue a quick diagnostics refresh after applying (default false).")))
@@ -118,6 +219,20 @@ internal static partial class ToolCatalog
                     related: [("write_file", "Overwrite the full file instead"), (ReadFileTool, "Read the file first to understand its current state")])),
             async (id, args, bridge) =>
             {
+                // Multi-edit form: edits array — each element is its own command instance.
+                if (args?["edits"] is JsonArray editsArray)
+                    return BridgeResult(await ApplyMultipleEditsAsync(id, args, editsArray, bridge).ConfigureAwait(false));
+
+                // Single-edit form.
+                string? fileArg = args?["file"]?.GetValue<string>();
+                if (fileArg is not null && !HandleRegistry.IsHandle(fileArg))
+                    throw new McpRequestException(
+                        id,
+                        McpErrorCodes.InvalidParams,
+                        $"apply_diff requires a handle (e.g. h:3 or f:1) as the 'file' argument — not a full path. " +
+                        $"Run find_text, find_files, errors, or warnings first to get a handle for '{System.IO.Path.GetFileName(fileArg)}', " +
+                        $"or call read_file with the full path once to register a new f: handle, then retry apply_diff with that handle.");
+
                 ApplyDiffRequest request;
                 try
                 {
@@ -146,7 +261,10 @@ internal static partial class ToolCatalog
 
                 return BridgeResult(result);
             });
+    }
 
+    private static IEnumerable<ToolEntry> WriteFileTools()
+    {
         yield return new(
             ToolDefinitionCatalog.WriteFile(
                 ObjectSchema(
@@ -225,7 +343,9 @@ internal static partial class ToolCatalog
                 related: [("reload_document", "Reload after external changes"), (ApplyDiffTool, "Apply changes before saving")]));
 
         yield return BridgeTool("reload_document",
-            "Reload a document from disk — required after native Edit/Write tool changes. VS does not auto-detect external writes. The file must already be open in an editor tab; call open_file first if it is not open, or check list_documents. Call after every external edit, then check errors.",
+            "Reload a document from disk — required after native Edit/Write tool changes. VS does not auto-detect external writes. " +
+            "The file must already be open in an editor tab; call open_file first if it is not open, or check list_documents. Call " +
+            "after every external edit, then check errors.",
             ObjectSchema(Req(FileArg, FileDesc)),
             "reload-document",
             a => Build((FileArg, OptionalString(a, FileArg))),

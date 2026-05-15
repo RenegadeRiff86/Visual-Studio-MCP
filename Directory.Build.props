@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <Version>2.3.0</Version>
+    <Version>3.0.0</Version>
     <ManagedPythonPackageId>python</ManagedPythonPackageId>
     <ManagedPythonPackageVersion>3.13.12</ManagedPythonPackageVersion>
     <Authors>RenegadeRiff86</Authors>

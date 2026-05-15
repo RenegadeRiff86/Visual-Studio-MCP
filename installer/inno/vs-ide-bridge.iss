@@ -2,7 +2,7 @@
 #define MyAppFolderName "VsIdeBridge"
 #define MyAppPublisher "RenegadeRiff86"
 #define MyAppURL "https://github.com/RenegadeRiff86/Visual-Studio-MCP"
-#define MyAppVersion "2.3.0"
+#define MyAppVersion "3.0.0"
 #define ServiceName "VsIdeBridgeService"
 #define VsixId "RenegadeRiff86.VsIdeBridge"
 #define LegacyVsixId "StanElston.VsIdeBridge"
@@ -39,7 +39,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "service"; Description: "Install Windows service (automatic start)"
 Name: "startservice"; Description: "Start service after install"; Check: WizardIsTaskSelected('service')
-Name: "enablehttp"; Description: "Enable local HTTP MCP endpoint on localhost (recommended)"
+Name: "enablehttp"; Description: "Enable local MCP HTTP endpoints on localhost (recommended)"
 
 [Dirs]
 Name: "{commonappdata}\VsIdeBridge\state"; Permissions: users-modify; Flags: uninsneveruninstall
@@ -126,6 +126,11 @@ begin
   Result := ExpandConstant('{commonappdata}\VsIdeBridge\state\http-enabled.flag');
 end;
 
+function GetStreamableHttpEnabledFlagPath(): string;
+begin
+  Result := ExpandConstant('{commonappdata}\VsIdeBridge\state\streamable-http-enabled.flag');
+end;
+
 procedure RemoveManagedPythonRuntimeIfPresent();
 begin
   DelTree(ExpandConstant('{app}\python\managed-runtime'), True, True, True);
@@ -168,20 +173,27 @@ begin
   SaveStringToFile(ConfigPath, JsonText, False);
 end;
 
-procedure WriteHttpServerConfig();
+procedure SetHttpFlagFile(FlagPath: string; Enabled: Boolean);
 var
-  HttpFlagPath: string;
   StateDirectory: string;
 begin
-  HttpFlagPath := GetHttpEnabledFlagPath();
-  StateDirectory := ExtractFileDir(HttpFlagPath);
+  StateDirectory := ExtractFileDir(FlagPath);
   if StateDirectory <> '' then
     ForceDirectories(StateDirectory);
 
-  if WizardIsTaskSelected('enablehttp') then
-    SaveStringToFile(HttpFlagPath, '', False)
-  else if FileExists(HttpFlagPath) then
-    DeleteFile(HttpFlagPath);
+  if Enabled then
+    SaveStringToFile(FlagPath, '', False)
+  else if FileExists(FlagPath) then
+    DeleteFile(FlagPath);
+end;
+
+procedure WriteHttpServerConfig();
+var
+  Enabled: Boolean;
+begin
+  Enabled := WizardIsTaskSelected('enablehttp');
+  SetHttpFlagFile(GetHttpEnabledFlagPath(), Enabled);
+  SetHttpFlagFile(GetStreamableHttpEnabledFlagPath(), Enabled);
 end;
 
 procedure InitializePythonSupportPage();
@@ -802,14 +814,14 @@ begin
   UpdatePostInstallProgress(
     StepIndex,
     TotalSteps,
-    'Configuring HTTP MCP endpoint...',
+    'Configuring MCP HTTP endpoints...',
     HttpMode);
   WriteHttpServerConfig();
   StepIndex := StepIndex + 1;
   UpdatePostInstallProgress(
     StepIndex,
     TotalSteps,
-    'Configuring HTTP MCP endpoint...',
+    'Configuring MCP HTTP endpoints...',
     HttpMode);
 end;
 

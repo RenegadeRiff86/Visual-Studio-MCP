@@ -3,7 +3,6 @@ using System.Text;
 using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 using VsIdeBridge.Services;
-using VsIdeBridge.Tooling.Patches;
 
 namespace VsIdeBridge.Commands;
 
@@ -23,7 +22,10 @@ internal static class PatchCommands
             {
                 patchText = DecodePatchTextBase64(patchTextBase64!);
                 patchText = context.Handles.RewritePatch(patchText);
-                ValidatePatchText(patchText);
+                // Note: ValidatePatchText intentionally omitted. FromPatchText fires
+                // LooksLikeSingleFileSimpleReplacementPatch which rejects the context-free
+                // patches produced by FromSimpleReplace. The MCP layer already validates;
+                // PatchService.ApplyEditorPatchAsync re-parses for structural correctness.
             }
 
             string? patchFile = args.GetString("patch-file");
@@ -61,18 +63,6 @@ internal static class PatchCommands
         }
     }
 
-    private static void ValidatePatchText(string patchText)
-    {
-        try
-        {
-            _ = ApplyDiffRequest.FromPatchText(patchText);
-        }
-        catch (ApplyDiffValidationException ex)
-        {
-            throw new CommandErrorException(InvalidArguments, ex.Message);
-        }
-    }
-
     internal sealed class IdeWriteFileCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x024D)
     {
         protected override string CanonicalName => "Tools.IdeWriteFile";
@@ -80,10 +70,17 @@ internal static class PatchCommands
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
             string file = args.GetString("file")
-                ?? throw new CommandErrorException(InvalidArguments, "Missing required file parameter. Call tool_help with write_file to see all required parameters and an example call.");
+                ?? throw new CommandErrorException(
+                    InvalidArguments,
+                    "Missing required file parameter. " +
+                    "Call tool_help with write_file to see all required parameters and an example call.");
 
             string contentBase64 = args.GetString("content-base64")
-                ?? throw new CommandErrorException(InvalidArguments, "Missing required content-base64 parameter. Pass the full file content as a base64-encoded UTF-8 string. Call tool_help with write_file to see all required parameters and an example.");
+                ?? throw new CommandErrorException(
+                    InvalidArguments,
+                    "Missing required content-base64 parameter. " +
+                    "Pass the full file content as a base64-encoded UTF-8 string. " +
+                    "Call tool_help with write_file to see all required parameters and an example.");
 
             string content;
             try
@@ -92,7 +89,12 @@ internal static class PatchCommands
             }
             catch (System.FormatException ex)
             {
-                throw new CommandErrorException(InvalidArguments, "The content-base64 value is not valid base64. Base64-encode the full file content as UTF-8 before passing it — e.g., Convert.ToBase64String(Encoding.UTF8.GetBytes(content)).", new { exception = ex.Message });
+                throw new CommandErrorException(
+                    InvalidArguments,
+                    "The content-base64 value is not valid base64. " +
+                    "Base64-encode the full file content as UTF-8 before passing it — " +
+                    "e.g., Convert.ToBase64String(Encoding.UTF8.GetBytes(content)).",
+                    new { exception = ex.Message });
             }
 
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();

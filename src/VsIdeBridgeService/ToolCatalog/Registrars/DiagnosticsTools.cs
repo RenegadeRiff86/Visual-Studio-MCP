@@ -21,6 +21,10 @@ internal static partial class ToolCatalog
     private const string ChunkSize = "chunk_size";
     private const string SortBy = "sort_by";
     private const string SortDirection = "sort_direction";
+    private const string GroupSortBy = "group_sort_by";
+    private const string GroupSortDirection = "group_sort_direction";
+    private const string GroupMinCount = "group_min_count";
+    private const string GroupMaxCount = "group_max_count";
     private const string WaitForCompletion = "wait_for_completion";
     private const string WaitForIntellisenseHyphen = "wait-for-intellisense";
     private const string WaitForCompletionHyphen = "wait-for-completion";
@@ -124,7 +128,11 @@ internal static partial class ToolCatalog
             Opt(Path, "Optional path filter."),
             Opt(FileArg, "Optional file filter. Accepts a full path, path fragment, or file name."),
             Opt(Text, "Optional message text filter."),
-            Opt(GroupBy, groupByDescription));
+            Opt(GroupBy, groupByDescription),
+            Opt(GroupSortBy, "Optional group sort field when using group_by: 'count' (default, most warnings first) or 'key' (alphabetical by group key)."),
+            Opt(GroupSortDirection, "Optional group sort direction: asc or desc. Default is desc for count, asc for key."),
+            OptInt(GroupMinCount, "Optional minimum group member count. Only return groups with this many or more items."),
+            OptInt(GroupMaxCount, "Optional maximum group member count. Only return groups with this many or fewer items."));
 
     private sealed class DiagnosticRowsToolView(
         string commandName,
@@ -161,7 +169,15 @@ internal static partial class ToolCatalog
                 (Path, OptionalString(args, Path)),
                 (FileArg, OptionalString(args, FileArg)),
                 (Text, OptionalString(args, Text)),
-                ("group-by", OptionalString(args, GroupBy)));
+                ("group-by",       OptionalString(args, GroupBy)),
+                ("sort-by",        OptionalString(args, SortBy)),
+                ("sort-direction",      OptionalString(args, SortDirection)),
+                ("group-sort-by",       OptionalString(args, GroupSortBy)),
+                ("group-sort-direction", OptionalString(args, GroupSortDirection)),
+                ("group-min-count",      OptionalText(args, GroupMinCount)),
+                ("group-max-count",      OptionalText(args, GroupMaxCount)),
+                ("chunk-size",           OptionalText(args, ChunkSize)),
+                ("chunk-index",    OptionalText(args, ChunkIndex)));
             JsonObject response = await SendDiagnosticsCommandWithSnapshotFallbackAsync(
                     bridge,
                     id,
@@ -272,7 +288,9 @@ internal static partial class ToolCatalog
             : $"Model action: fix {suppressionWarningCount} in-source warning suppression(s) ({SuppressedWarningCode}) now instead of editing around them.";
 
         string detailPrompt = suppressionWarningCount > SuppressionPromptUserThreshold
-            ? $"Detected {suppressionWarningCount} in-source warning suppressions ({SuppressedWarningCode}). Ask the user before making a broad suppression cleanup pass, then remove them in focused batches and fix the underlying warnings instead of keeping the suppressions."
+            ? $"Detected {suppressionWarningCount} in-source warning suppressions ({SuppressedWarningCode}). Ask the user before making " +
+              $"a broad suppression cleanup pass, then remove them in focused batches and fix the underlying warnings instead of keeping " +
+              $"the suppressions."
             : $"Detected {suppressionWarningCount} in-source warning suppression(s) ({SuppressedWarningCode}). Fix them now by removing the suppressions and addressing the underlying warnings instead of editing around them.";
 
         AppendResponseWarning(response, detailPrompt);
@@ -671,7 +689,9 @@ internal static partial class ToolCatalog
 
         yield return CreateBuildTool(
             "rebuild",
-            "Rebuild the active solution inside Visual Studio. This performs a clean step before building and is heavier than build. By default it starts in the background and returns immediately. Set wait_for_completion=true to wait for completion. Set errors_only=true only when waiting.",
+            "Rebuild the active solution inside Visual Studio. This performs a clean step before building and is heavier than build. " +
+            "By default it starts in the background and returns immediately. Set wait_for_completion=true to wait for completion. Set " +
+            "errors_only=true only when waiting.",
             "rebuild",
             includeProject: false,
             defaultWaitForCompletion: false,
@@ -681,7 +701,9 @@ internal static partial class ToolCatalog
 
         yield return CreateBuildTool(
              BuildSolutionTool,
-            "Build the active solution explicitly. Use this when you want the solution-wide build command rather than the generic build entry. By default it starts in the background and returns immediately so large solution builds do not block the bridge. Set wait_for_completion=true to wait for completion. Set errors_only=true only when waiting.",
+            "Build the active solution explicitly. Use this when you want the solution-wide build command rather than the generic " +
+            "build entry. By default it starts in the background and returns immediately so large solution builds do not block the " +
+            "bridge. Set wait_for_completion=true to wait for completion. Set errors_only=true only when waiting.",
             "build",
             includeProject: false,
             defaultWaitForCompletion: false,
@@ -691,7 +713,9 @@ internal static partial class ToolCatalog
 
         yield return CreateBuildTool(
             "rebuild_solution",
-            "Rebuild the active solution explicitly. Use this when you want the solution-wide rebuild command by name. By default it starts in the background and returns immediately. Set wait_for_completion=true to wait for completion. Set errors_only=true only when waiting.",
+            "Rebuild the active solution explicitly. Use this when you want the solution-wide rebuild command by name. By default it " +
+            "starts in the background and returns immediately. Set wait_for_completion=true to wait for completion. Set " +
+            "errors_only=true only when waiting.",
             "rebuild-solution",
             includeProject: false,
             defaultWaitForCompletion: false,

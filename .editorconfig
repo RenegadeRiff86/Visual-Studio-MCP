@@ -1,0 +1,6 @@
+root = true
+
+[*.cs]
+# CA2000 replaces the removed BP1019 text-based IDisposable check.
+# NetAnalyzers surfaces this correctly via Roslyn type resolution.
+dotnet_diagnostic.CA2000.severity = warning

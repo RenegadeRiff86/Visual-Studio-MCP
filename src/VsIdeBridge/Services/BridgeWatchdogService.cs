@@ -7,7 +7,10 @@ using System.Threading.Tasks;
 
 namespace VsIdeBridge.Services;
 
-internal sealed class BridgeWatchdogService(AsyncPackage package, int probeIntervalMilliseconds = BridgeWatchdogService.DefaultProbeIntervalMilliseconds, int probeTimeoutMilliseconds = BridgeWatchdogService.DefaultProbeTimeoutMilliseconds) : IDisposable
+internal sealed class BridgeWatchdogService(
+    AsyncPackage package,
+    int probeIntervalMilliseconds = BridgeWatchdogService.DefaultProbeIntervalMilliseconds,
+    int probeTimeoutMilliseconds = BridgeWatchdogService.DefaultProbeTimeoutMilliseconds) : IDisposable
 {
     private const int DefaultProbeIntervalMilliseconds = 1_000;
     private const int DefaultProbeTimeoutMilliseconds = 2_000;

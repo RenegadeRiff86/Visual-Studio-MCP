@@ -119,8 +119,8 @@ namespace VsIdeBridgeLauncher
         private static void HandleBrokerConnection(NamedPipeServerStream server)
         {
             // leaveOpen=true on both: the caller owns the server stream lifetime.
-            StreamReader reader = new(server, Encoding.UTF8, false, 1024, true);
-            StreamWriter writer = new(server, new UTF8Encoding(false), 1024, true) { AutoFlush = true };
+            using StreamReader reader = new(server, Encoding.UTF8, false, 1024, true);
+            using StreamWriter writer = new(server, new UTF8Encoding(false), 1024, true) { AutoFlush = true };
 
             BrokerRequest request = ParseBrokerRequest(reader.ReadLine());
             if (!request.IsValid)

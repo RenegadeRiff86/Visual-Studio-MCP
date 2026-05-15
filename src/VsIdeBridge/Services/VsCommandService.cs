@@ -176,7 +176,9 @@ internal sealed class VsCommandService
             return command;
         }
 
-        throw new CommandErrorException("unsupported_operation", $"Visual Studio command not found: '{commandName}'. Call tool_help execute_command to see usage and examples, or look up the command name in VS under Tools > Options > Environment > Keyboard.");
+        throw new CommandErrorException(
+            "unsupported_operation",
+            $"Visual Studio command not found: '{commandName}'. Call tool_help execute_command to see usage and examples, or look up the command name in VS under Tools > Options > Environment > Keyboard.");
     }
 
     private static Command? TryResolveCommand(DTE2 dte, string commandName)

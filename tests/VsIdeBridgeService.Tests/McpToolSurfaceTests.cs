@@ -89,8 +89,29 @@ public sealed class McpToolSurfaceTests
         JsonObject help = ToolCatalog.CreateRegistry().Definitions.BuildToolHelp("read_file");
 
         Assert.Contains("call_tool", help["invocationHint"]!.GetValue<string>());
+        JsonObject handleGuide = Assert.IsType<JsonObject>(help["handleGuide"]);
+        Assert.Contains("HandleService", handleGuide["runtime"]!.GetValue<string>());
+        Assert.Contains("canonical file reference", handleGuide["summary"]!.GetValue<string>());
+        JsonArray examples = Assert.IsType<JsonArray>(handleGuide["callToolExamples"]);
+        Assert.Contains(examples, example => example?.GetValue<string>().Contains("\"file\":\"h:2\"") == true);
         JsonObject invocation = Assert.IsType<JsonObject>(help["invocation"]);
         Assert.Equal("read_file", invocation["name"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void DiscoveryHelpIncludesHandleGuide()
+    {
+        JsonObject list = ToolCatalog.CreateRegistry().Definitions.BuildCompactToolsList();
+
+        JsonObject handleGuide = Assert.IsType<JsonObject>(list["handleGuide"]);
+        JsonArray prefixes = Assert.IsType<JsonArray>(handleGuide["prefixes"]);
+
+        Assert.Contains(prefixes, prefix =>
+            prefix is JsonObject item
+            && item["prefix"]?.GetValue<string>() == "h"
+            && item["kind"]?.GetValue<string>() == "SearchHit");
+        Assert.Contains("handle directly", handleGuide["policy"]!.GetValue<string>());
+        Assert.Contains("file + old_content + new_content", handleGuide["applyDiffPolicy"]!.GetValue<string>());
     }
 
     [Fact]

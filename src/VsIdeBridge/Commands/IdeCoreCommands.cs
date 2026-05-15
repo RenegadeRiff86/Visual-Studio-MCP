@@ -89,6 +89,8 @@ internal static partial class IdeCoreCommands
             ["bestPracticeDiagnostics"] = context.Runtime.UiSettings.BestPracticeDiagnosticsEnabled,
             ["goToEditedParts"] = context.Runtime.UiSettings.GoToEditedParts,
             ["allowBridgeBuild"] = context.Runtime.UiSettings.AllowBridgeBuild,
+            ["httpServerEnabled"] = HttpServerStateManager.IsEnabled,
+            ["streamableHttpServerEnabled"] = StreamableHttpServerStateManager.IsEnabled,
         };
     }
 
@@ -186,7 +188,7 @@ internal static partial class IdeCoreCommands
     internal sealed class IdeToggleStreamableHttpServerMenuCommand : IdeCommandBase
     {
         public IdeToggleStreamableHttpServerMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
-            : base(package, runtime, commandService, 0x0267, acceptsParameters: false)
+            : base(package, runtime, commandService, 0x0269, acceptsParameters: false)
         {
             MenuCommand.BeforeQueryStatus += (_, _) => MenuCommand.Checked = StreamableHttpServerStateManager.IsEnabled;
         }
@@ -199,6 +201,54 @@ internal static partial class IdeCoreCommands
         {
             return ToggleStreamableHttpServerAsync(context);
         }
+    }
+
+    private static async Task<CommandExecutionResult> ToggleBestPracticeAsync(IdeCommandContext context)
+    {
+        // Read from _uiSettings (the authoritative flag read by RefreshBestPracticeDiagnosticsAsync).
+        // Default is true when the setting has never been written.
+        bool enabling = !context.Runtime.UiSettings.BestPracticeDiagnosticsEnabled;
+        try
+        {
+            // Keep both state stores in sync: _uiSettings gates RefreshBestPracticeDiagnosticsAsync;
+            // BestPracticeStateManager gates AnalyzeBestPracticeFindings (static path used by pre-write checks).
+            context.Runtime.UiSettings.BestPracticeDiagnosticsEnabled = enabling;
+            if (enabling)
+                BestPracticeStateManager.Enable();
+            else
+                BestPracticeStateManager.Disable();
+
+            await context.Runtime.ErrorListService
+                .RefreshBestPracticeDiagnosticsAsync(context)
+                .ConfigureAwait(true);
+
+            string msg = enabling
+                ? "Best-practice analysis enabled."
+                : "Best-practice analysis disabled.";
+            return new CommandExecutionResult(msg, new JObject { ["enabled"] = enabling });
+        }
+        catch (Exception ex) when (ex is not null)
+        {
+            throw new CommandErrorException("best_practice_toggle_failed",
+                $"Failed to toggle best-practice analysis: {ex.Message}.");
+        }
+    }
+
+    internal sealed class IdeToggleBestPracticeMenuCommand : IdeCommandBase
+    {
+        public IdeToggleBestPracticeMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x026A, acceptsParameters: false)
+        {
+            // Read from _uiSettings to match the toggle's authoritative state store.
+            MenuCommand.BeforeQueryStatus += (_, _) => MenuCommand.Checked = runtime.UiSettings.BestPracticeDiagnosticsEnabled;
+        }
+
+        protected override string CanonicalName => "Tools.VsIdeBridgeToggleBestPractice";
+
+        internal override bool AllowAutomationInvocation => false;
+
+        protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+            => ToggleBestPracticeAsync(context);
     }
 
     internal sealed class IdeRequestApprovalCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)

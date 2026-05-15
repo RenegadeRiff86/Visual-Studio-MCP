@@ -23,7 +23,12 @@ internal static partial class ToolCatalog
             Opt(Configuration, "Optional build configuration (e.g. Release)."),
             Opt(Platform, "Optional build platform (e.g. x64)."),
             OptBool(WaitForIntellisense, "Wait for IntelliSense readiness before building (default true)."),
-            OptBool(WaitForCompletion, $"When false, start the operation and return immediately (default {(defaultWaitForCompletion ? "true" : "false")}). When explicitly set to true, solution-wide builds wait up to {BuildExplicitWaitMilliseconds / 60_000} minutes for completion. When using the default value, they stop waiting after {BuildCourtesyWaitMilliseconds / 1_000} seconds and prompt the model to ask the user before waiting longer."),
+            OptBool(
+                WaitForCompletion,
+                $"When false, start the operation and return immediately (default {(defaultWaitForCompletion ? "true" : "false")}). When " +
+                $"explicitly set to true, solution-wide builds wait up to {BuildExplicitWaitMilliseconds / 60_000} minutes for completion. " +
+                $"When using the default value, they stop waiting after {BuildCourtesyWaitMilliseconds / 1_000} seconds and prompt the " +
+                "model to ask the user before waiting longer."),
             OptBool(RequireCleanDiagnostics, "When false, bypasses the pre-build dirty-diagnostics guard (default true)."),
             OptBool(ErrorsOnly, "When true, return the build summary plus only error rows so warnings and messages do not flood the response."),
             OptInt(Max, "Max error rows to return when errors_only is true (default 50)."),

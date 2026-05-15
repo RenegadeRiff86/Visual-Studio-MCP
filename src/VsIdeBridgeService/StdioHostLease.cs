@@ -53,7 +53,7 @@ internal sealed class StdioHostLease : IDisposable
         }
 
         string leaseDirectory = GetLeaseDirectory();
-        string leasePath = Path.Combine(leaseDirectory, $"mcp-parent-{parentPid}.lease");
+        string leasePath = Path.Combine(leaseDirectory, GetLeaseFileName(parentPid, currentPid));
         DateTime leaseCreatedUtc = DateTime.UtcNow;
         string leaseToken = $"{currentPid}|{leaseCreatedUtc:O}";
 
@@ -271,6 +271,11 @@ internal sealed class StdioHostLease : IDisposable
     private static string GetLeaseDirectory()
     {
         return Path.Combine(Path.GetTempPath(), "VsIdeBridge", LeaseDirectoryName);
+    }
+
+    internal static string GetLeaseFileName(int parentPid, int currentPid)
+    {
+        return $"mcp-parent-{parentPid}-host-{currentPid}.lease";
     }
 
     private static bool IsProcessAlive(int pid)

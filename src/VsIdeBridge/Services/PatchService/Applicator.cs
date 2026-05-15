@@ -310,11 +310,13 @@ internal sealed partial class PatchService
             ? $" The closest match was at line {errorBestCandidate + 1} but only {errorBestScore} of {matchLines.Length} {lineNoun} lines matched."
             : $" No candidate position matched any {lineNoun} line.";
         string fixInstructions = isSimpleReplace
-            ? "To fix: (1) Call read_file to see the current file content. " +
-              "(2) Copy the exact text you want to replace into old_content — do not retype, paraphrase, or truncate any lines. " +
+            ? "NEVER fall back to write_file after this error — that overwrites the entire file and destroys unrelated content. " +
+              "To fix: (1) Call read_file on this file — use the h: or f: handle if you have one from a prior find_text, find_files, or search result. " +
+              "(2) Copy the exact text you want to replace verbatim from the read_file output into old_content — do not retype, paraphrase, or truncate any lines. " +
               "(3) Resubmit apply_diff with the corrected old_content."
-            : "To fix this: (1) Call read_file on this file to see the current content. " +
-              "(2) Copy the exact lines you want to change from the read_file output — do not retype or paraphrase them. " +
+            : "NEVER fall back to write_file after this error — that overwrites the entire file and destroys unrelated content. " +
+              "To fix: (1) Call read_file on this file — use the h: or f: handle if you have one. " +
+              "(2) Copy the exact lines you want to change verbatim from the read_file output — do not retype or paraphrase them. " +
               "(3) Build a new @@ block using those exact lines as context, with - for deletions and + for additions. " +
               "(4) Resubmit apply_diff with the corrected patch." +
               BuildBackwardSearchHint(existingLines, sourceIndex, maxStart, matchLines);

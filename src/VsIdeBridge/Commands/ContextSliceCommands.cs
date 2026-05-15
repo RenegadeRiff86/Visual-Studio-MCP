@@ -100,7 +100,12 @@ internal static partial class SearchNavigationCommands
             }
             catch (JsonException ex)
             {
-                throw new CommandErrorException("invalid_json", $"The ranges parameter could not be parsed as JSON: {ex.Message}. Pass a JSON array of range objects, e.g. [{{\"file\": \"path.cs\", \"startLine\": 10, \"endLine\": 30}}]. Check for trailing commas or unescaped characters.");
+                throw new CommandErrorException(
+                    "invalid_json",
+                    $"The ranges parameter could not be parsed as JSON: {ex.Message}. " +
+                    "Pass a JSON array of range objects, e.g. " +
+                    "[{\"file\": \"path.cs\", \"startLine\": 10, \"endLine\": 30}]. " +
+                    "Check for trailing commas or unescaped characters.");
             }
         }
 

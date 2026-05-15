@@ -19,13 +19,13 @@ internal static class McpServerMode
 
     public static async Task RunAsync(string[] args)
     {
-        Stream input = Console.OpenStandardInput();
-        Stream output = Console.OpenStandardOutput();
+        using Stream input = Console.OpenStandardInput();
+        using Stream output = Console.OpenStandardOutput();
         BridgeConnection bridge = new(args);
         McpToolSurface toolSurface = McpToolSurface.FromArgs(args);
         using StdioHostLease? hostLease = StdioHostLease.TryCreate();
         ServiceControlClient? controlClient = null;
-        SemaphoreSlim writeLock = new(1, 1);
+        using SemaphoreSlim writeLock = new(1, 1);
 
         controlClient = await TryConnectControlPipeAsync().ConfigureAwait(false);
 
@@ -227,9 +227,13 @@ internal static class McpServerMode
 
     private static string BuildInstructions(McpToolSurface toolSurface)
     {
+        const string CallToolPrefix = "call_tool({";
+
         string surfaceText = toolSurface.IsFull
             ? "The full tool surface is exposed in tools/list. "
-            : "A compact lazy tool surface is exposed in tools/list. Use recommend_tools for task-based discovery, list_tools_by_category to browse a specific category, or call_tool({\"name\":\"list_tools\",...}) as a last resort to see every available tool name. ";
+            : "A compact lazy tool surface is exposed in tools/list. " +
+              "Use recommend_tools for task-based discovery, list_tools_by_category to browse a specific category, " +
+              "or " + CallToolPrefix + "\"name\":\"list_tools\",...}) as a last resort to see every available tool name. ";
 
         return
             "VS IDE Bridge MCP server. " +
@@ -237,15 +241,60 @@ internal static class McpServerMode
             "Do not ask the user which tools to use, do not present tool names or tool lists to the user, " +
             "and do not wait for user approval before calling a tool. " +
             "Interpret tool results and respond to the user in plain language. " +
+            "When the user tells you to call a tool (e.g. 'call list_tools', 'use glob to find X', 'run errors') " +
+            "they are directing your investigation — not asking you to display raw tool output. " +
+            "Call the tool, use the results internally, then respond in plain language describing what you found or did. " +
+            "Never dump raw JSON, tool lists, file paths, or unformatted output at the user. " +
+            "Never output JSON in your response to the user unless the task itself is about writing or editing JSON — " +
+            "tool results arrive as JSON internally but must always be translated into plain language before replying. " +
             surfaceText +
-            "In lazy mode, ALL bridge tools must be called through call_tool — including apply_diff, read_file, write_file, find_text, errors, and git_status. " +
+            "In lazy mode, ALL bridge tools must be called through call_tool with an arguments object — " +
+            "including apply_diff, read_file, read_file_batch, write_file, find_text, find_text_batch, search_symbols, file_outline, errors, build, build_solution, rebuild_solution, build_errors, and git_status. " +
+            "Use the wrapper shape " + CallToolPrefix + "\"name\":\"read_file\",\"arguments\":{\"file\":\"h:2\",\"start_line\":260,\"end_line\":360}}); " +
+            "never pass raw strings as arguments. " +
+            "When results include handle fields such as h:2, f:1, e:1, w:1, or m:1, " +
+            "use the handle as the next file/path value instead of copying full paths. " +
+            "For single-file edits, call apply_diff with file + old_content + new_content after read_file; " +
+            "reserve diff for multi-file or structural patches. " +
             "Examples: " +
-            "call_tool({\"name\":\"apply_diff\",\"arguments\":{\"file\":\"h:1\",\"old_content\":\"exact old text\",\"new_content\":\"replacement\"}}) " +
-            "or call_tool({\"name\":\"read_file\",\"arguments\":{\"file\":\"h:1\",\"start_line\":10}}) " +
-            "or call_tool({\"name\":\"errors\",\"arguments\":{}}) " +
-            "or call_tool({\"name\":\"git_status\",\"arguments\":{}}). " +
+            CallToolPrefix + "\"name\":\"apply_diff\",\"arguments\":{\"file\":\"h:2\",\"old_content\":\"exact old text\",\"new_content\":\"replacement\"}}) " +
+            "or " + CallToolPrefix + "\"name\":\"read_file\",\"arguments\":{\"file\":\"h:2\",\"start_line\":260,\"end_line\":360}}) " +
+            "or " + CallToolPrefix + "\"name\":\"rebuild_solution\",\"arguments\":{}}) " +
+            "or " + CallToolPrefix + "\"name\":\"errors\",\"arguments\":{}}) " +
+            "or " + CallToolPrefix + "\"name\":\"git_status\",\"arguments\":{}}). " +
+            "CRITICAL: For any file that belongs to the open VS solution, ALWAYS use bridge tools " +
+            "(read_file, find_text, file_outline, search_symbols, find_references, goto_definition, apply_diff, write_file) — " +
+            "NEVER use the host environment's own file-reading, grep, glob, shell, Edit, or Write tools on solution files. " +
+            "The bridge has the live editor buffer, IntelliSense state, and semantic navigation that host tools cannot provide. " +
+            "Search tool priority: " +
+            "(1) When you know a symbol name, use search_symbols — not find_text — it returns h: handles and uses IntelliSense. " +
+            "(2) Before reading an unfamiliar file, call file_outline first to get member line numbers, then read_file with start_line+end_line for just the relevant slice. " +
+            "(3) Use glob (bridge) not the host Glob tool to find files by pattern. " +
+            "(4) Use read_file_batch to read multiple slices across files in one call instead of repeated read_file calls. " +
+            "(5) Use find_text_batch to search multiple patterns at once instead of repeated find_text calls. " +
+            "Handle prefixes — always pass the handle as the file: value, never copy the full path: " +
+            "h: is produced by find_text, search_symbols, find_references, call_hierarchy; " +
+            "f: is produced by find_files, glob; " +
+            "e:/w:/m: are produced by errors, warnings, messages, diagnostics_snapshot. " +
             "Use recommend_tools for task-based discovery and tool_help with name=<tool> for the full schema. " +
-            "If you get an unknown-tool error, use recommend_tools or list_tools_by_category to find the right tool — do not guess tool names.";
+            "If you get an unknown-tool error, use recommend_tools or list_tools_by_category to find the right tool — do not guess tool names. " +
+            "apply_diff failure rule: If apply_diff returns a content-mismatch error, NEVER fall back to write_file — that overwrites the entire file and destroys unrelated content. " +
+            "Instead: call read_file on the same file handle, copy the exact current text verbatim into old_content, and retry apply_diff. " +
+            "Multi-instance: If more than one Visual Studio window is open and you get a binding error or are asked which solution to use, " +
+            "call list_instances to see all running VS instances, then call bind_instance with the chosen instance_id (or bind_solution with a solution name hint). " +
+            "You can switch to a different VS instance at any point mid-session by calling bind_instance again — " +
+            "all tool calls apply only to the currently bound instance. " +
+            "Save rule: before switching solutions, always ask the user if they want to save any unsaved work in the current solution first. " +
+            "If the target solution is not in list_instances at all, it is not open in VS yet — " +
+            "use glob with pattern **/*.sln and set the path to one level above the current solution root (the repos root) to search sibling repositories on disk. " +
+            "Tell the user which .sln you found and offer two options: " +
+            "(a) open it in a new VS window — both solutions stay open and you can switch between them at any time using bind_instance, or " +
+            "(b) swap it into the current VS window using open_solution — this closes the current solution in that window. " +
+            "Once the target solution is open in VS, call list_instances to confirm it appeared, then bind_instance with the new instance_id. " +
+            "Math rule: NEVER compute non-trivial arithmetic mentally or guess at a numeric result. " +
+            "Always call python_eval with the expression — it runs real Python and returns the exact answer. " +
+            "Pre-imported in both python_eval and python_exec (no import statement needed): math, statistics, decimal, fractions. " +
+            "Example: " + CallToolPrefix + "\"name\":\"python_eval\",\"arguments\":{\"expression\":\"math.sqrt(2)\"}}).";
     }
 
     private static JsonObject EmptyResourcesList()

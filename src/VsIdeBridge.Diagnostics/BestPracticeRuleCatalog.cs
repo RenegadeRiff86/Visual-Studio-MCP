@@ -114,12 +114,6 @@ internal static class BestPracticeRuleCatalog
         public static readonly int ThresholdFields = ErrorListConstants.GodClassFieldThreshold;
     }
 
-    public static class BP1019
-    {
-        public const string Code = "BP1019";
-        public const string HelpUri = ErrorListConstants.BP1019HelpUri;
-    }
-
     public static class BP1020
     {
         public const string Code = "BP1020";
@@ -318,7 +312,6 @@ internal static class BestPracticeRuleCatalog
             "BP1016" => ErrorListConstants.BP1016HelpUri,
             "BP1017" => ErrorListConstants.BP1017HelpUri,
             "BP1018" => ErrorListConstants.BP1018HelpUri,
-            "BP1019" => ErrorListConstants.BP1019HelpUri,
             "BP1020" => ErrorListConstants.BP1020HelpUri,
             "BP1021" => ErrorListConstants.BP1021HelpUri,
             "BP1022" => ErrorListConstants.BP1022HelpUri,

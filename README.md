@@ -106,9 +106,50 @@ Once connected, describe what you want in plain language. The assistant figures 
 ## Tips
 
 - **Open Visual Studio first.** The bridge connects to a running VS instance. If VS is not open, the assistant cannot see your code.
-- **Multiple VS windows?** Tell your assistant which solution to work with: *"Bind to MySolution.sln."*
+- **Multiple VS windows?** The bridge handles this — see [Working with Multiple VS Instances](#working-with-multiple-vs-instances) below.
 - **After a build error?** Ask *"what errors came up?"* instead of reading the Output window yourself — the assistant gets a structured list it can act on immediately.
 - **Slow start?** IntelliSense takes a moment to load after VS opens. If the assistant reports incomplete symbol results, wait a few seconds and try again.
+
+## Working with Multiple VS Instances
+
+You can have any number of Visual Studio windows open at the same time. The bridge discovers all of them automatically — each VS instance runs its own copy of the extension.
+
+**When only one instance is open** the assistant binds to it automatically at the start of a session. No extra steps needed.
+
+**When more than one instance is open** the assistant will ask you which solution to work with, or you can tell it directly:
+
+- *"Bind to MySolution.sln."*
+- *"Switch to the CodeMaid project."*
+- *"Connect to the VS instance with OrderService open."*
+
+The assistant stays bound to that instance for the rest of the session. All tool calls — reads, edits, builds, errors — apply to the currently bound instance only.
+
+**Switching mid-session** is supported. Ask the assistant to bind to a different solution at any point and it will switch immediately. This is useful when a change in one project requires a follow-up in another.
+
+**Typical setup** — two VS windows side by side:
+
+| Window | Purpose |
+|---|---|
+| `MySolution.sln` | The project you are working on |
+| `VsIdeBridge.sln` | Bridge source — open only if you are developing the bridge itself |
+
+The assistant works against whichever one it is bound to. Binding is session-scoped and has no effect on the other open instances.
+
+## Seeing What the Model Is Doing
+
+The bridge streams a trace of every tool call into the Visual Studio **Output** window in real time. To watch it:
+
+1. In Visual Studio, open **View → Output** (or press **Ctrl+Alt+O**).
+2. Click the **Show output from** dropdown at the top of the Output pane.
+3. Select **IDE Bridge**.
+
+Each line shows the command name, key arguments, and result status as the model works — useful for understanding what the assistant is doing or for diagnosing unexpected behaviour.
+
+## Best-Practice Warnings
+
+VS IDE Bridge runs a lightweight best-practice analyzer on your code and reports issues (prefixed `BP`) in the Visual Studio Error List alongside normal compiler diagnostics. This is on by default.
+
+To turn it off (or back on), use **Tools → VS IDE Bridge → Toggle Best-Practice Warnings**. The setting persists across Visual Studio restarts — no configuration file to edit.
 
 ## Logs
 
@@ -155,8 +196,8 @@ The bridge can run arbitrary shell commands on your machine when asked. This is 
 Prerequisites: Visual Studio 2022 or later with the Visual Studio extension development workload.
 
 ```bash
-git clone https://github.com/<owner>/vs-ide-bridge
-cd vs-ide-bridge
+git clone https://github.com/RenegadeRiff86/Visual-Studio-MCP
+cd Visual-Studio-MCP
 dotnet build
 ```
 
@@ -167,6 +208,10 @@ installer\output\vs-ide-bridge-setup-<version>.exe
 ```
 
 When developing without the installer, logs are written to `C:\ProgramData\VsIdeBridge\logs\` instead of the default install directory. See [Logs](#logs) for the full path resolution and retention details.
+
+## Contributors
+
+See [CONTRIBUTORS.md](CONTRIBUTORS.md) for a list of people who have contributed code to this project.
 
 ## Third-Party Notices
 

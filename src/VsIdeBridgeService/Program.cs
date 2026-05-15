@@ -73,7 +73,8 @@ internal static class Program
 
         try
         {
-            ServiceBase.Run(new BridgeService(args));
+            using BridgeService service = new(args);
+            ServiceBase.Run(service);
         }
         catch (Exception ex) when (ex is not null) // top-level Windows service startup boundary
         {

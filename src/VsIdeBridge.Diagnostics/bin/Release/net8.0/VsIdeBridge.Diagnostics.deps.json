@@ -6,7 +6,7 @@
   "compilationOptions": {},
   "targets": {
     ".NETCoreApp,Version=v8.0": {
-      "VsIdeBridge.Diagnostics/2.3.0": {
+      "VsIdeBridge.Diagnostics/3.0.0": {
         "dependencies": {
           "Newtonsoft.Json": "13.0.4",
           "System.Text.Json": "9.0.0"
@@ -62,7 +62,7 @@
     }
   },
   "libraries": {
-    "VsIdeBridge.Diagnostics/2.3.0": {
+    "VsIdeBridge.Diagnostics/3.0.0": {
       "type": "project",
       "serviceable": false,
       "sha512": ""

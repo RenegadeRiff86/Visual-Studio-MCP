@@ -47,6 +47,7 @@ internal static partial class BestPracticeAnalyzer
             .Concat(FindMixedIndentation(file, content))
             .Concat(FindMojibake(file, content))
             .Concat(FindDiagnosticSuppressions(file, content))
+            .Concat(FindLongLines(file, content))
             .Concat(FindTodoComments(file, content));
 
         // Language-specific rules
@@ -62,7 +63,6 @@ internal static partial class BestPracticeAnalyzer
                 .Concat(FindAsyncVoid(file, content))
                 .Concat(FindGodClass(file, content))
                 .Concat(FindPropertyBagClass(file, content))
-                .Concat(FindMissingUsing(file, content))
                 .Concat(FindDateTimeInLoop(file, content))
                 .Concat(FindDynamicObjectOveruse(file, content))
                 .Concat(FindUnnecessaryComments(file, content))
@@ -986,5 +986,6 @@ internal static partial class BestPracticeAnalyzer
             }
         }
     }
+
 
 }

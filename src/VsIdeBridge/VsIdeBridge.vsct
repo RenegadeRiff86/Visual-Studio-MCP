@@ -100,6 +100,7 @@
       <IDSymbol name="cmdidIdeListLaunchProfiles" value="0x0267" />
       <IDSymbol name="cmdidIdeSetLaunchProfile" value="0x0268" />
       <IDSymbol name="cmdidIdeToggleStreamableHttpServerMenu" value="0x0269" />
+      <IDSymbol name="cmdidIdeToggleBestPracticeMenu" value="0x026A" />
     </GuidSymbol>
   </Symbols>
 
@@ -118,7 +119,6 @@
         <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeMenuGroup" />
         <Strings>
           <ButtonText>VS IDE Bridge</ButtonText>
-          <MenuText>VS IDE Bridge</MenuText>
           <CommandName>VS IDE Bridge</CommandName>
         </Strings>
       </Menu>
@@ -150,6 +150,15 @@
           <CommandName>IdeToggleStreamableHttpServerMenu</CommandName>
           <CanonicalName>Tools.VsIdeBridgeToggleStreamableHttpServer</CanonicalName>
           <LocCanonicalName>.Tools.VsIdeBridgeToggleStreamableHttpServer</LocCanonicalName>
+        </Strings>
+      </Button>
+      <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeToggleBestPracticeMenu" priority="0x0160" type="Button">
+        <Parent guid="guidVsIdeBridgeCommandSet" id="BridgeCommandGroup" />
+        <Strings>
+          <ButtonText>Toggle Best-Practice Warnings</ButtonText>
+          <CommandName>IdeToggleBestPracticeMenu</CommandName>
+          <CanonicalName>Tools.VsIdeBridgeToggleBestPractice</CanonicalName>
+          <LocCanonicalName>.Tools.VsIdeBridgeToggleBestPractice</LocCanonicalName>
         </Strings>
       </Button>
       <Button guid="guidVsIdeBridgeCommandSet" id="cmdidIdeHelp" priority="0x01F0" type="Button">

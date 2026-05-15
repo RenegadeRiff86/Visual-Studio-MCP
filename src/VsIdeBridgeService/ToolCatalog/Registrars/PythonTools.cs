@@ -23,9 +23,12 @@ internal static partial class ToolCatalog
     private static IEnumerable<ToolEntry> PythonDiscoveryTools()
     {
         yield return new("python_eval",
-            "Evaluate a single Python expression in a stateless scratchpad for math and quick checks.",
+            "NEVER guess at arithmetic — call this instead. Evaluates a Python expression and returns the exact result. " +
+            "Pre-imported as globals (no import statement needed): math, statistics, decimal, fractions. " +
+            "Examples: \"math.sqrt(2)\", \"round(math.pi, 10)\", \"statistics.mean([1.5, 2.3, 4.8])\", " +
+            "\"fractions.Fraction(1,3) + fractions.Fraction(1,6)\", \"math.factorial(20)\".",
             ObjectSchema(
-                Req("expression", "Python expression to evaluate, for example \"math.sqrt(2)\"."),
+                Req("expression", "Python expression to evaluate. Do not use import statements — math, statistics, decimal, and fractions are already available as globals."),
                 Opt(Path, "Optional interpreter path. Defaults to the active interpreter, managed runtime, or first discovered Python.")),
             Python,
             async (id, args, bridge) =>
@@ -39,9 +42,11 @@ internal static partial class ToolCatalog
                 related: [("python_exec", "Execute a multi-line snippet instead"), (PythonListEnvsTool, "Discover available interpreters")]));
 
         yield return new("python_exec",
-            "Execute a short stateless Python snippet for calculations and quick data transforms.",
+            "Execute a multi-line Python snippet for calculations and data transforms. " +
+            "Do NOT use import statements — math, statistics, decimal, and fractions are pre-imported as globals. " +
+            "Assign to a variable named result to get it back as structured JSON alongside any print output.",
             ObjectSchema(
-                Req("code", "Short Python snippet. If you assign to a variable named result, it will be returned separately."),
+                Req("code", "Multi-line Python snippet. Do not use import statements — math, statistics, decimal, and fractions are already in scope. Assign to \"result\" to return a value as structured JSON."),
                 Opt(Path, "Optional interpreter path. Defaults to the active interpreter, managed runtime, or first discovered Python.")),
             Python,
             async (id, args, bridge) =>

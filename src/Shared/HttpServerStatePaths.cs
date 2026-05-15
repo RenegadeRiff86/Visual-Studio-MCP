@@ -31,4 +31,11 @@ public static class HttpServerStatePaths
     {
         return Path.Combine(GetSharedStateDirectory(), StreamableHttpEnabledFlagFileName);
     }
+
+    private const string BestPracticeDisabledFlagFileName = "best-practice-disabled.flag";
+
+    public static string GetBestPracticeDisabledFlagPath()
+    {
+        return Path.Combine(GetSharedStateDirectory(), BestPracticeDisabledFlagFileName);
+    }
 }

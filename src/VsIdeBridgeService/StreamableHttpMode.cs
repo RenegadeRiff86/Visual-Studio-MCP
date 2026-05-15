@@ -2,19 +2,22 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Threading.Channels;
 using VsIdeBridge.Shared;
 
 namespace VsIdeBridgeService;
 
-// MCP Streamable HTTP Transport (spec: 2025-03-26).
-// Listens on http://localhost:{port}/ and serves the /mcp endpoint.
+// MCP HTTP transports. The /mcp endpoint implements Streamable HTTP (2025-03-26),
+// while /sse and /messages provide the HTTP+SSE transport used by 2024-11-05 clients.
 //
-// POST /mcp  — client sends JSON-RPC requests and notifications;
-//              server responds with application/json or text/event-stream.
-// GET  /mcp  — client opens a persistent SSE stream for server-initiated
-//              messages (none from this bridge; kept alive with comments).
-// DELETE /mcp — client terminates a session.
-// GET  /     — health check (returns JSON status object).
+// POST /mcp      - client sends JSON-RPC requests and notifications;
+//                  server responds with application/json or text/event-stream.
+// GET  /mcp      - client opens a persistent SSE stream for server-initiated
+//                  messages (none from this bridge; kept alive with comments).
+// DELETE /mcp    - client terminates a session.
+// GET  /sse      - client opens a 2024-11-05 SSE stream and receives an endpoint event.
+// POST /messages - client posts 2024-11-05 JSON-RPC messages; responses return over SSE.
+// GET  /         - health check (returns JSON status object).
 internal static class StreamableHttpMode
 {
     private const string McpPath = "/mcp";
@@ -22,6 +25,7 @@ internal static class StreamableHttpMode
     private const string ContentTypeSse = "text/event-stream";
     private const string SessionIdHeader = "MCP-Session-Id";
     private const int StatusOk = 200;
+    private const int StatusAccepted = 202;
     private const int StatusBadRequest = 400;
 
     private static readonly ConcurrentDictionary<string, StreamableSession> Sessions = new();
@@ -96,18 +100,38 @@ internal static class StreamableHttpMode
                 return;
             }
 
-            bool isMcpPath = path == McpPath || path == "/mcp/" || path == "/";
+            bool isHealthPath = path == "/";
+            bool isMcpPath = IsPath(path, McpPath);
+            bool isLegacySsePath = LegacySseHttpTransport.IsSsePath(path);
+            bool isLegacyMessagesPath = LegacySseHttpTransport.IsMessagesPath(path);
 
-            if (!isMcpPath)
+            if (!isHealthPath && !isMcpPath && !isLegacySsePath && !isLegacyMessagesPath)
             {
                 ctx.Response.StatusCode = 404;
                 return;
             }
 
-            // GET / with no MCP path → health check
-            if (method == "GET" && path != McpPath && path != "/mcp/")
+            if (method == "GET" && isHealthPath)
             {
                 await WriteHealthAsync(ctx).ConfigureAwait(false);
+                return;
+            }
+
+            if (isLegacySsePath)
+            {
+                if (method == "GET")
+                    await LegacySseHttpTransport.HandleSseAsync(ctx).ConfigureAwait(false);
+                else
+                    SetMethodNotAllowed(ctx, "GET, OPTIONS");
+                return;
+            }
+
+            if (isLegacyMessagesPath)
+            {
+                if (method == "POST")
+                    await LegacySseHttpTransport.HandleMessagePostAsync(ctx, bridge, toolSurface).ConfigureAwait(false);
+                else
+                    SetMethodNotAllowed(ctx, "POST, OPTIONS");
                 return;
             }
 
@@ -123,8 +147,7 @@ internal static class StreamableHttpMode
                     HandleDelete(ctx);
                     break;
                 default:
-                    ctx.Response.StatusCode = 405;
-                    ctx.Response.Headers["Allow"] = "GET, POST, DELETE, OPTIONS";
+                    SetMethodNotAllowed(ctx, "GET, POST, DELETE, OPTIONS");
                     break;
             }
         }
@@ -147,49 +170,9 @@ internal static class StreamableHttpMode
 
     private static async Task HandlePostAsync(HttpListenerContext ctx, BridgeConnection bridge, McpToolSurface toolSurface)
     {
-        // Read and parse the request body.
-        string body;
-        try
-        {
-            using StreamReader reader = new(ctx.Request.InputStream,
-                ctx.Request.ContentEncoding ?? Encoding.UTF8);
-            body = await reader.ReadToEndAsync().ConfigureAwait(false);
-        }
-        catch (IOException ex)
-        {
-            McpServerLog.Write($"streamable-http body read error: {ex.Message}");
-            ctx.Response.StatusCode = StatusBadRequest;
-            return;
-        }
-        catch (ObjectDisposedException ex)
-        {
-            McpServerLog.Write($"streamable-http body read error: {ex.Message}");
-            ctx.Response.StatusCode = StatusBadRequest;
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(body))
-        {
-            ctx.Response.StatusCode = StatusBadRequest;
-            return;
-        }
-
-        JsonObject? request;
-        try
-        {
-            request = JsonNode.Parse(body) as JsonObject;
-        }
-        catch
-        {
-            ctx.Response.StatusCode = StatusBadRequest;
-            return;
-        }
-
+        JsonObject? request = await ReadJsonRequestAsync(ctx).ConfigureAwait(false);
         if (request is null)
-        {
-            ctx.Response.StatusCode = StatusBadRequest;
             return;
-        }
 
         string requestMethod = request["method"]?.GetValue<string>() ?? string.Empty;
         bool isInitialize = string.Equals(requestMethod, "initialize", StringComparison.Ordinal);
@@ -205,7 +188,7 @@ internal static class StreamableHttpMode
         // Notifications get 202; no response body needed.
         if (requestMethod.StartsWith("notifications/", StringComparison.Ordinal))
         {
-            ctx.Response.StatusCode = 202;
+            ctx.Response.StatusCode = StatusAccepted;
             return;
         }
 
@@ -216,7 +199,7 @@ internal static class StreamableHttpMode
 
         if (response is null)
         {
-            ctx.Response.StatusCode = 202;
+            ctx.Response.StatusCode = StatusAccepted;
             return;
         }
 
@@ -300,7 +283,7 @@ internal static class StreamableHttpMode
             McpServerLog.Write($"streamable-http session deleted id={sessionId}");
         }
 
-        ctx.Response.StatusCode = 202;
+        ctx.Response.StatusCode = StatusAccepted;
     }
 
     // ── Response helpers ──────────────────────────────────────────────────────
@@ -340,7 +323,7 @@ internal static class StreamableHttpMode
             ["name"] = "vs-ide-bridge",
             ["version"] = "0.1.0",
             ["transport"] = "streamable-http",
-            ["protocolVersions"] = new JsonArray { "2025-03-26", "2024-11-05" },
+            ["protocolVersions"] = CreateSupportedProtocolVersionsArray(),
             ["capabilities"] = new JsonObject { ["tools"] = new JsonObject() },
             ["status"] = "ok",
         };
@@ -348,6 +331,69 @@ internal static class StreamableHttpMode
     }
 
     // ── Utilities ─────────────────────────────────────────────────────────────
+
+    private static async Task<JsonObject?> ReadJsonRequestAsync(HttpListenerContext ctx)
+    {
+        string body;
+        try
+        {
+            using StreamReader reader = new(ctx.Request.InputStream,
+                ctx.Request.ContentEncoding ?? Encoding.UTF8);
+            body = await reader.ReadToEndAsync().ConfigureAwait(false);
+        }
+        catch (IOException ex)
+        {
+            McpServerLog.Write($"streamable-http body read error: {ex.Message}");
+            ctx.Response.StatusCode = StatusBadRequest;
+            return null;
+        }
+        catch (ObjectDisposedException ex)
+        {
+            McpServerLog.Write($"streamable-http body read error: {ex.Message}");
+            ctx.Response.StatusCode = StatusBadRequest;
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            ctx.Response.StatusCode = StatusBadRequest;
+            return null;
+        }
+
+        JsonObject? request;
+        try
+        {
+            request = JsonNode.Parse(body) as JsonObject;
+        }
+        catch
+        {
+            ctx.Response.StatusCode = StatusBadRequest;
+            return null;
+        }
+
+        if (request is null)
+            ctx.Response.StatusCode = StatusBadRequest;
+
+        return request;
+    }
+
+    private static bool IsPath(string path, string expected)
+        => string.Equals(path, expected, StringComparison.Ordinal)
+            || string.Equals(path, expected + "/", StringComparison.Ordinal);
+
+    private static void SetMethodNotAllowed(HttpListenerContext ctx, string allow)
+    {
+        ctx.Response.StatusCode = 405;
+        ctx.Response.Headers["Allow"] = allow;
+    }
+
+    private static JsonArray CreateSupportedProtocolVersionsArray()
+    {
+        JsonArray versions = [];
+        foreach (string version in McpProtocol.SupportedProtocolVersions)
+            versions.Add(version);
+        return versions;
+    }
 
     private static void AddCorsHeaders(HttpListenerContext ctx)
     {
@@ -382,5 +428,181 @@ internal static class StreamableHttpMode
     {
         public string Id { get; } = id;
         public DateTimeOffset CreatedAt { get; } = DateTimeOffset.UtcNow;
+    }
+}
+
+internal static class LegacySseHttpTransport
+{
+    private const string SsePath = "/sse";
+    private const string MessagesPath = "/messages";
+    private const string SessionIdQueryParameter = "sessionId";
+    private const string ContentTypeSse = "text/event-stream";
+    private const int StatusOk = 200;
+    private const int StatusAccepted = 202;
+    private const int StatusBadRequest = 400;
+
+    private static readonly ConcurrentDictionary<string, LegacySseSession> Sessions = new();
+
+    public static bool IsSsePath(string path)
+        => IsPath(path, SsePath);
+
+    public static bool IsMessagesPath(string path)
+        => IsPath(path, MessagesPath);
+
+    public static async Task HandleSseAsync(HttpListenerContext ctx)
+    {
+        string newId = GenerateSessionId();
+        LegacySseSession session = new(newId);
+        Sessions[newId] = session;
+
+        ctx.Response.StatusCode = StatusOk;
+        ctx.Response.ContentType = ContentTypeSse;
+        ctx.Response.Headers["Cache-Control"] = "no-cache";
+        ctx.Response.Headers["Connection"] = "keep-alive";
+
+        McpServerLog.Write($"streamable-http legacy SSE stream opened session={newId}");
+
+        try
+        {
+            await WriteEndpointEventAsync(ctx, newId).ConfigureAwait(false);
+
+            while (await session.Messages.Reader.WaitToReadAsync().ConfigureAwait(false))
+            {
+                while (session.Messages.Reader.TryRead(out JsonObject? payload))
+                    await WriteMessageEventAsync(ctx, payload).ConfigureAwait(false);
+            }
+        }
+        catch (HttpListenerException ex)
+        {
+            McpServerLog.Write($"streamable-http legacy SSE disconnect session={newId}: {ex.Message}");
+        }
+        catch (IOException ex)
+        {
+            McpServerLog.Write($"streamable-http legacy SSE disconnect session={newId}: {ex.Message}");
+        }
+        catch (ObjectDisposedException)
+        {
+            McpServerLog.Write($"streamable-http legacy SSE stopped session={newId}");
+        }
+        finally
+        {
+            Sessions.TryRemove(newId, out _);
+            session.Messages.Writer.TryComplete();
+        }
+
+        McpServerLog.Write($"streamable-http legacy SSE stream closed session={newId}");
+    }
+
+    public static async Task HandleMessagePostAsync(HttpListenerContext ctx, BridgeConnection bridge, McpToolSurface toolSurface)
+    {
+        string? sessionId = ctx.Request.QueryString[SessionIdQueryParameter];
+        if (string.IsNullOrEmpty(sessionId) || !Sessions.TryGetValue(sessionId, out LegacySseSession? session))
+        {
+            ctx.Response.StatusCode = StatusBadRequest;
+            return;
+        }
+
+        JsonObject? request = await ReadJsonRequestAsync(ctx).ConfigureAwait(false);
+        if (request is null)
+            return;
+
+        string requestMethod = request["method"]?.GetValue<string>() ?? string.Empty;
+        if (requestMethod.StartsWith("notifications/", StringComparison.Ordinal))
+        {
+            ctx.Response.StatusCode = StatusAccepted;
+            return;
+        }
+
+        McpServerLog.WriteRequest(request, McpProtocol.WireFormat.RawJson);
+
+        JsonObject? response = await McpServerMode.HandleRequestAsync(request, bridge, controlClient: null, toolSurface)
+            .ConfigureAwait(false);
+
+        if (response is not null)
+        {
+            McpServerLog.WriteResponse(response);
+            if (!session.Messages.Writer.TryWrite(response))
+            {
+                ctx.Response.StatusCode = StatusBadRequest;
+                return;
+            }
+        }
+
+        ctx.Response.StatusCode = StatusAccepted;
+    }
+
+    private static async Task<JsonObject?> ReadJsonRequestAsync(HttpListenerContext ctx)
+    {
+        string body;
+        try
+        {
+            using StreamReader reader = new(ctx.Request.InputStream,
+                ctx.Request.ContentEncoding ?? Encoding.UTF8);
+            body = await reader.ReadToEndAsync().ConfigureAwait(false);
+        }
+        catch (IOException ex)
+        {
+            McpServerLog.Write($"streamable-http legacy body read error: {ex.Message}");
+            ctx.Response.StatusCode = StatusBadRequest;
+            return null;
+        }
+        catch (ObjectDisposedException ex)
+        {
+            McpServerLog.Write($"streamable-http legacy body read error: {ex.Message}");
+            ctx.Response.StatusCode = StatusBadRequest;
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            ctx.Response.StatusCode = StatusBadRequest;
+            return null;
+        }
+
+        JsonObject? request;
+        try
+        {
+            request = JsonNode.Parse(body) as JsonObject;
+        }
+        catch
+        {
+            ctx.Response.StatusCode = StatusBadRequest;
+            return null;
+        }
+
+        if (request is null)
+            ctx.Response.StatusCode = StatusBadRequest;
+
+        return request;
+    }
+
+    private static Task WriteEndpointEventAsync(HttpListenerContext ctx, string sessionId)
+        => WriteRawSseAsync(ctx, $"event: endpoint\ndata: {BuildMessageEndpoint(sessionId)}\n\n");
+
+    private static Task WriteMessageEventAsync(HttpListenerContext ctx, JsonObject payload)
+        => WriteRawSseAsync(ctx, $"event: message\ndata: {payload.ToJsonString()}\n\n");
+
+    private static string BuildMessageEndpoint(string sessionId)
+        => $"{MessagesPath}?{SessionIdQueryParameter}={Uri.EscapeDataString(sessionId)}";
+
+    private static async Task WriteRawSseAsync(HttpListenerContext ctx, string text)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(text);
+        await ctx.Response.OutputStream.WriteAsync(bytes).ConfigureAwait(false);
+        await ctx.Response.OutputStream.FlushAsync().ConfigureAwait(false);
+    }
+
+    private static bool IsPath(string path, string expected)
+        => string.Equals(path, expected, StringComparison.Ordinal)
+            || string.Equals(path, expected + "/", StringComparison.Ordinal);
+
+    private static string GenerateSessionId()
+        => Guid.NewGuid().ToString("N");
+
+    private sealed class LegacySseSession(string id)
+    {
+        public string Id { get; } = id;
+        public DateTimeOffset CreatedAt { get; } = DateTimeOffset.UtcNow;
+        public Channel<JsonObject> Messages { get; } = Channel.CreateUnbounded<JsonObject>();
     }
 }

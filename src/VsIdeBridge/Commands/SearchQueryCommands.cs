@@ -50,7 +50,11 @@ internal static partial class SearchNavigationCommands
             }
             catch (JsonException ex)
             {
-                throw new CommandErrorException(InvalidJsonErrorCode, $"The queries parameter could not be parsed as JSON: {ex.Message}. Pass a JSON array of strings, e.g. [\"MyClass\", \"MyMethod\"]. Check for trailing commas, unescaped characters, or single quotes.");
+                throw new CommandErrorException(
+                    InvalidJsonErrorCode,
+                    $"The queries parameter could not be parsed as JSON: {ex.Message}. " +
+                    "Pass a JSON array of strings, e.g. [\"MyClass\", \"MyMethod\"]. " +
+                    "Check for trailing commas, unescaped characters, or single quotes.");
             }
 
             string[] queries =

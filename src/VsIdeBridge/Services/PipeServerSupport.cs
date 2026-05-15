@@ -131,7 +131,18 @@ internal static class PipeServerSupport
         }
     }
 
-    private static string SerializeQueuedEnvelope(string commandName, string? requestId, bool success, string summary, JToken data, JArray warnings, object? error, DateTimeOffset enqueuedAtUtc, DateTimeOffset startedAtUtc, int queuePositionAtEnqueue, double queueWaitMs)
+    private static string SerializeQueuedEnvelope(
+        string commandName,
+        string? requestId,
+        bool success,
+        string summary,
+        JToken data,
+        JArray warnings,
+        object? error,
+        DateTimeOffset enqueuedAtUtc,
+        DateTimeOffset startedAtUtc,
+        int queuePositionAtEnqueue,
+        double queueWaitMs)
     {
         string queuedSummary = BuildQueuedSummary(summary, queuePositionAtEnqueue, queueWaitMs);
         JToken responseData = WithQueueMetadata(data, enqueuedAtUtc, startedAtUtc, queuePositionAtEnqueue, queueWaitMs);

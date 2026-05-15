@@ -256,7 +256,11 @@ internal static partial class IdeCoreCommands
                 ["smartContextExample"] = CreateExampleCommand("smart_context", ("query", new JValue("where is GUI_App::OnInit used")), ("max_contexts", new JValue(3)), ("out", new JValue(@"C:\temp\smart-context.json"))),
                 ["referencesExample"] = CreateExampleCommand("find_references", [.. CreateExampleLocationArguments(), ("out", new JValue(@"C:\temp\references.json"))]),
                 ["callHierarchyExample"] = CreateExampleCommand("call_hierarchy", [.. CreateExampleLocationArguments(), ("max_depth", new JValue(2)), ("max_children", new JValue(10)), ("out", new JValue(@"C:\temp\call_hierarchy.json"))]),
-                ["applyDiffFormat"] = "PREFER editor patch format: *** Begin Patch / *** Update File: path/to/file / @@ / context line / -old line / +new line / context line / *** End of File / *** End Patch. Matches by content context — tolerates line shifts after prior edits. Use *** Add File: or *** Delete File: for whole-file operations.",
+                ["applyDiffFormat"] =
+                    "PREFER editor patch format: *** Begin Patch / *** Update File: path/to/file / " +
+                    "@@ / context line / -old line / +new line / context line / *** End of File / *** End Patch. " +
+                    "Matches by content context — tolerates line shifts after prior edits. " +
+                    "Use *** Add File: or *** Delete File: for whole-file operations.",
                 ["applyDiffExample"] = CreateExampleCommand("apply-diff", ("patch_file", new JValue(@"C:\temp\change.diff")), ("out", new JValue(@"C:\temp\apply-diff.json"))),
                 ["openSolutionExample"] = CreateExampleCommand("open-solution", ("solution", new JValue(@"C:\path\to\solution.sln")), ("out", new JValue(@"C:\temp\open-solution.json")))
             }));

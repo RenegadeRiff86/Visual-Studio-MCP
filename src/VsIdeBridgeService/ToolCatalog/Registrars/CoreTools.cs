@@ -20,7 +20,8 @@ internal static partial class ToolCatalog
     private static IEnumerable<ToolEntry> CoreTools() =>
         CoreBindingTools()
             .Concat(CoreRegistryTools())
-            .Concat(CoreSystemTools());
+            .Concat(CoreSystemTools())
+            .Concat(CoreHttpTools());
 
     private static IEnumerable<ToolEntry> CoreBindingTools()
     {
@@ -415,7 +416,11 @@ internal static partial class ToolCatalog
                     ("arguments", new JsonObject
                     {
                         ["type"] = "object",
-                        ["description"] = "Arguments for the target catalog tool. Example wrapper: call_tool with { name: \"read_file\", arguments: { file: \"Foo.cs\" } }. Call tool_help with the same name to inspect its schema first.",
+                        ["description"] =
+                            "Arguments object for the target catalog tool. " +
+                            "Example wrapper: call_tool with { name: \"read_file\", arguments: { file: \"h:2\", start_line: 260, end_line: 360 } }. " +
+                            "Use handles returned by bridge results as file/path values instead of copying full paths. " +
+                            "Call tool_help with the same name to inspect its schema first.",
                         ["additionalProperties"] = true,
                     }, false)))
                 .WithSearchHints(BuildSearchHints(
@@ -582,30 +587,59 @@ internal static partial class ToolCatalog
                 workflow: [("vs_state", "Confirm the bound instance before capture")],
                 related: [("activate_window", "Bring a specific tool window forward first"), ("list_windows", "Inspect current VS windows")]));
 
+    }
+
+    private static IEnumerable<ToolEntry> CoreHttpTools()
+    {
         yield return new("http_enable",
-            $"Enable the shared HTTP MCP endpoint on localhost:{HttpServerDefaults.HttpPort}. " +
-            "Enables Ollama and other local LLM clients to connect directly to the bridge. " +
+            $"Enable the legacy shared HTTP MCP endpoint on localhost:{HttpServerDefaults.HttpPort}. " +
+            "Enables local clients that still expect direct JSON-RPC POST bodies to connect to the bridge. " +
             "The enabled state persists across restarts and, when the Windows service is installed, reconciles the service-owned listener instead of only the current process. " +
             $"Clients send POST requests with JSON-RPC 2.0 bodies to {HttpServerDefaults.HttpUrl}.",
             EmptySchema(), Core,
             (_, _, _) => Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(HttpServerController.Enable())),
             searchHints: BuildSearchHints(
-                workflow: [("http_status", "Verify the server is running")],
-                related: [("http_disable", "Stop the HTTP server"), ("http_status", "Check server status")]));
+                workflow: [("http_status", "Verify the legacy server is running")],
+                related: [("http_disable", "Stop the legacy HTTP server"), ("streamable_http_enable", "Start the preferred HTTP MCP server")]));
 
         yield return new("http_disable",
-            "Disable the shared HTTP MCP endpoint and persist the disabled state across restarts. " +
+            "Disable the legacy shared HTTP MCP endpoint and persist the disabled state across restarts. " +
             "When the Windows service is installed, this reconciles the service-owned listener so the port is actually released.",
             EmptySchema(), Core,
             (_, _, _) => Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(HttpServerController.Disable())),
             searchHints: BuildSearchHints(
-                related: [("http_enable", "Start the HTTP server"), ("http_status", "Check server status")]));
+                related: [("http_enable", "Start the legacy HTTP server"), ("http_status", "Check legacy server status")]));
 
         yield return new("http_status",
-            $"Show the persisted HTTP MCP state, the actual listener status on localhost:{HttpServerDefaults.HttpPort}, and whether the shared enable flag is in sync with the live port probe.",
+            $"Show the persisted legacy HTTP MCP state, the actual listener status on localhost:{HttpServerDefaults.HttpPort}, and whether the shared enable flag is in sync with the live port probe.",
             EmptySchema(), Core,
             (_, _, _) => Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(HttpServerController.GetStatus())),
             searchHints: BuildSearchHints(
-                related: [("http_enable", "Start the HTTP server"), ("http_disable", "Stop the HTTP server")]));
+                related: [("http_enable", "Start the legacy HTTP server"), ("http_disable", "Stop the legacy HTTP server"), ("streamable_http_status", "Check preferred HTTP MCP server status")]));
+
+        yield return new("streamable_http_enable",
+            $"Enable the preferred Streamable HTTP MCP endpoint at {HttpServerDefaults.StreamableHttpUrl}. " +
+            "This listener also serves 2024-11-05-compatible /sse and /messages endpoints on the same port. " +
+            "The enabled state persists across restarts and reconciles the service-owned listener when the Windows service is installed.",
+            EmptySchema(), Core,
+            (_, _, _) => Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(StreamableHttpServerController.Enable())),
+            searchHints: BuildSearchHints(
+                workflow: [("streamable_http_status", "Verify the Streamable HTTP server is running")],
+                related: [("streamable_http_disable", "Stop the Streamable HTTP server"), ("http_enable", "Start the legacy HTTP server")]));
+
+        yield return new("streamable_http_disable",
+            "Disable the preferred Streamable HTTP MCP endpoint and persist the disabled state across restarts. " +
+            "When the Windows service is installed, this reconciles the service-owned listener so the port is actually released.",
+            EmptySchema(), Core,
+            (_, _, _) => Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(StreamableHttpServerController.Disable())),
+            searchHints: BuildSearchHints(
+                related: [("streamable_http_enable", "Start the Streamable HTTP server"), ("streamable_http_status", "Check Streamable HTTP server status")]));
+
+        yield return new("streamable_http_status",
+            $"Show the persisted Streamable HTTP MCP state, the actual listener status on localhost:{HttpServerDefaults.StreamableHttpPort}, and whether the streamable enable flag is in sync with the live port probe.",
+            EmptySchema(), Core,
+            (_, _, _) => Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(StreamableHttpServerController.GetStatus())),
+            searchHints: BuildSearchHints(
+                related: [("streamable_http_enable", "Start the Streamable HTTP server"), ("streamable_http_disable", "Stop the Streamable HTTP server"), ("http_status", "Check legacy server status")]));
     }
 }
