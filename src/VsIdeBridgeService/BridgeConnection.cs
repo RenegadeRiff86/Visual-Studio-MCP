@@ -27,6 +27,7 @@ internal sealed class BridgeConnection
         Fast,
         Interactive,
         Heavy,
+        BuildWait,
     }
 
     private sealed class ConnectionState
@@ -42,8 +43,14 @@ internal sealed class BridgeConnection
     public Task<JsonObject> SendAsync(JsonNode? id, string command, string args)
         => SendCoreAsync(id, command, JsonValue.Create(args), ignoreSolutionHint: false);
 
+    public Task<JsonObject> SendAsync(JsonNode? id, string command, string args, ToolTimeoutProfile timeoutProfile)
+        => SendCoreAsync(id, BuildRequest(command, JsonValue.Create(args)), ignoreSolutionHint: false, timeoutProfile);
+
     public Task<JsonObject> SendAsync(JsonNode? id, string command, JsonObject? args)
         => SendCoreAsync(id, command, args?.DeepClone(), ignoreSolutionHint: false);
+
+    public Task<JsonObject> SendAsync(JsonNode? id, string command, JsonObject? args, ToolTimeoutProfile timeoutProfile)
+        => SendCoreAsync(id, BuildRequest(command, args?.DeepClone()), ignoreSolutionHint: false, timeoutProfile);
 
     public Task<JsonObject> SendBatchAsync(JsonNode? id, JsonArray steps, bool stopOnError = false)
         => SendCoreAsync(id, BuildBatchRequest(steps, stopOnError), ignoreSolutionHint: false,
@@ -381,6 +388,7 @@ internal sealed class BridgeConnection
             ToolTimeoutProfile.Fast => FastTimeoutMs,
             ToolTimeoutProfile.Interactive => InteractiveTimeoutMs,
             ToolTimeoutProfile.Heavy => HeavyTimeoutMs,
+            ToolTimeoutProfile.BuildWait => BuildWaitTimeoutMs,
             _ => InteractiveTimeoutMs,
         };
     }
@@ -391,7 +399,7 @@ internal sealed class BridgeConnection
         {
             ToolTimeoutProfile.Fast => FastPipeGateTimeoutMs,
             ToolTimeoutProfile.Interactive => InteractivePipeGateTimeoutMs,
-            ToolTimeoutProfile.Heavy => HeavyPipeGateTimeoutMs,
+            ToolTimeoutProfile.Heavy or ToolTimeoutProfile.BuildWait => HeavyPipeGateTimeoutMs,
             _ => InteractivePipeGateTimeoutMs,
         };
 

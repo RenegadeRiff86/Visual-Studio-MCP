@@ -34,5 +34,50 @@ public sealed class BestPracticeAnalyzerTests
         Assert.Equal("BP1002", finding["code"]?.ToString());
         Assert.Equal("42", finding["symbol"]?.ToString());
     }
+
+    [Fact]
+    public void FindLongLines_FlagsLineOverLimit()
+    {
+        string longLine = new('x', 141);
+        string content = $"short line\n{longLine}\nshort again\n";
+
+        Newtonsoft.Json.Linq.JObject finding =
+            Assert.Single(BestPracticeAnalyzer.FindLongLines("sample.cs", content));
+        Assert.Equal("BP1046", finding["code"]?.ToString());
+        Assert.Equal("2", finding["line"]?.ToString());
+    }
+
+    [Fact]
+    public void FindLongLines_DoesNotFlagExactlyAtLimit()
+    {
+        string atLimit = new('x', 140);
+        string content = $"short line\n{atLimit}\nshort again\n";
+
+        Assert.Empty(BestPracticeAnalyzer.FindLongLines("sample.cs", content));
+    }
+
+    [Fact]
+    public void FindLongLines_SkipsUrlOnlyLines()
+    {
+        string urlLine = "https://" + new string('a', 135);
+        string content = $"{urlLine}\n";
+
+        Assert.Empty(BestPracticeAnalyzer.FindLongLines("sample.cs", content));
+    }
+
+    [Theory]
+    [InlineData("sample.cs")]
+    [InlineData("sample.cpp")]
+    [InlineData("sample.py")]
+    [InlineData("sample.ps1")]
+    public void FindLongLines_AppliesToAllLanguages(string fileName)
+    {
+        string longLine = new('x', 145);
+        string content = $"{longLine}\n";
+
+        Newtonsoft.Json.Linq.JObject finding =
+            Assert.Single(BestPracticeAnalyzer.FindLongLines(fileName, content));
+        Assert.Equal("BP1046", finding["code"]?.ToString());
+    }
 }
 

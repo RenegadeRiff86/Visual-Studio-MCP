@@ -79,7 +79,10 @@ internal static partial class ToolCatalog
                 related: [(FindReferencesTool, "Get the full list of usages"), ("call_hierarchy", "Explore the caller tree"), (SearchSymbolsTool, "Search related symbol definitions")]));
 
         yield return BridgeTool("call_hierarchy",
-            "Open Call Hierarchy for the symbol at a file/line/column and return a recursive caller tree — who calls this, and who calls those callers. Use this when you need to understand call chains, trace propagation paths, or find all entry points that can reach a symbol. For managed languages the tree is returned directly in the result. This can take longer than direct read/search tools.",
+            "Use this INSTEAD of looping find_text → read_file to trace call chains. Returns the full recursive caller tree in one " +
+            "call — who calls this symbol, who calls those callers, and so on. Use when you need to understand propagation paths, " +
+            "find all entry points that can reach a symbol, or know how far a change will ripple. For managed languages the tree is " +
+            "returned directly in the result. This can take longer than direct read/search tools.",
             ObjectSchema(
                 Req(FileArg, FileDesc),
                 ReqInt(Line, LineDesc),
@@ -96,9 +99,16 @@ internal static partial class ToolCatalog
                 ("max-children", OptionalText(a, "max_children")),
                 ("max-locations-per-caller", OptionalText(a, "max_locations_per_caller"))),
             Search,
+            summary: "Trace the full caller chain for a symbol — replaces manual find_text → read_file loops.",
             searchHints: BuildSearchHints(
                 workflow: [(FindReferencesTool, "Get all usages"), (SemanticReadFileTool, "Read a caller's implementation")],
-                related: [(GotoDefinitionTool, "Navigate to the symbol's definition"), ("count_references", "Count total usages"), (SearchSymbolsTool, "Search related symbol definitions"), ("smart_context", "Broader open-ended exploration of how a symbol fits in the codebase")]));
+                related: 
+                [
+                    (GotoDefinitionTool, "Navigate to the symbol's definition"),
+                    ("count_references", "Count total usages"),
+                    (SearchSymbolsTool, "Search related symbol definitions"),
+                    ("smart_context", "Broader open-ended exploration of how a symbol fits in the codebase"),
+                ]));
     }
 
     private static IEnumerable<ToolEntry> DefinitionNavigationTools()
@@ -114,7 +124,13 @@ internal static partial class ToolCatalog
             Search,
             searchHints: BuildSearchHints(
                 workflow: [(SemanticReadFileTool, "Read the definition"), ("file_outline", "See all symbols in the definition file"), (FindReferencesTool, "Find all usages")],
-                related: [("goto_implementation", "Navigate to an implementation"), ("peek_definition", "Peek inline without navigating"), (SearchSymbolsTool, "Search matching symbol definitions"), ("call_hierarchy", "See the recursive caller tree - who calls this symbol")]));
+                related: 
+                [
+                    ("goto_implementation", "Navigate to an implementation"),
+                    ("peek_definition", "Peek inline without navigating"),
+                    (SearchSymbolsTool, "Search matching symbol definitions"),
+                    ("call_hierarchy", "See the recursive caller tree - who calls this symbol"),
+                ]));
 
         yield return BridgeTool("goto_implementation",
             "Navigate to an implementation of the symbol at a file/line/column.",

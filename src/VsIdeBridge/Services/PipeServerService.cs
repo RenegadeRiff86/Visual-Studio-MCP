@@ -261,7 +261,17 @@ internal sealed class PipeServerService : IDisposable
         }
     }
 
-    private async Task<string> ExecuteRequestCoreAsync(PipeRequest request, string commandName, bool hasBatch, int timeoutMilliseconds, bool isDiagnosticsCommand, CancellationToken serverCancellationToken, DateTimeOffset enqueuedAtUtc, DateTimeOffset startedAtUtc, int queuePositionAtEnqueue, double queueWaitMs)
+    private async Task<string> ExecuteRequestCoreAsync(
+        PipeRequest request,
+        string commandName,
+        bool hasBatch,
+        int timeoutMilliseconds,
+        bool isDiagnosticsCommand,
+        CancellationToken serverCancellationToken,
+        DateTimeOffset enqueuedAtUtc,
+        DateTimeOffset startedAtUtc,
+        int queuePositionAtEnqueue,
+        double queueWaitMs)
     {
         Stopwatch commandStopwatch = Stopwatch.StartNew();
         string? requestId = request.Id;
@@ -359,7 +369,17 @@ internal sealed class PipeServerService : IDisposable
         }
     }
 
-    private async Task<string> CompleteSuccessfulRequestAsync(string commandName, string? requestId, CommandExecutionResult commandResult, Stopwatch commandStopwatch, CancellationToken commandToken, DateTimeOffset enqueuedAtUtc, DateTimeOffset startedAtUtc, int queuePositionAtEnqueue, double queueWaitMs, Action onCompleted)
+    private async Task<string> CompleteSuccessfulRequestAsync(
+        string commandName,
+        string? requestId,
+        CommandExecutionResult commandResult,
+        Stopwatch commandStopwatch,
+        CancellationToken commandToken,
+        DateTimeOffset enqueuedAtUtc,
+        DateTimeOffset startedAtUtc,
+        int queuePositionAtEnqueue,
+        double queueWaitMs,
+        Action onCompleted)
     {
         await _runtime.Logger.LogAsync(
             $"IDE Bridge: {commandName} OK - {commandResult.Summary}",
@@ -378,7 +398,18 @@ internal sealed class PipeServerService : IDisposable
             queueWaitMs);
     }
 
-    private async Task<string> HandleTimedOutRequestAsync(string commandName, string? requestId, bool isDiagnosticsCommand, int timeoutMilliseconds, Stopwatch commandStopwatch, IdeCommandContext? failureContext, DateTimeOffset enqueuedAtUtc, DateTimeOffset startedAtUtc, int queuePositionAtEnqueue, double queueWaitMs, Action onCompleted)
+    private async Task<string> HandleTimedOutRequestAsync(
+        string commandName,
+        string? requestId,
+        bool isDiagnosticsCommand,
+        int timeoutMilliseconds,
+        Stopwatch commandStopwatch,
+        IdeCommandContext? failureContext,
+        DateTimeOffset enqueuedAtUtc,
+        DateTimeOffset startedAtUtc,
+        int queuePositionAtEnqueue,
+        double queueWaitMs,
+        Action onCompleted)
     {
         string errorCode = isDiagnosticsCommand ? "ide_blocked" : "timeout";
         string summary = isDiagnosticsCommand
@@ -413,7 +444,17 @@ internal sealed class PipeServerService : IDisposable
             queueWaitMs);
     }
 
-    private async Task<string> HandleCommandFailureAsync(string commandName, string? requestId, CommandErrorException ex, Stopwatch commandStopwatch, IdeCommandContext? failureContext, DateTimeOffset enqueuedAtUtc, DateTimeOffset startedAtUtc, int queuePositionAtEnqueue, double queueWaitMs, Action onCompleted)
+    private async Task<string> HandleCommandFailureAsync(
+        string commandName,
+        string? requestId,
+        CommandErrorException ex,
+        Stopwatch commandStopwatch,
+        IdeCommandContext? failureContext,
+        DateTimeOffset enqueuedAtUtc,
+        DateTimeOffset startedAtUtc,
+        int queuePositionAtEnqueue,
+        double queueWaitMs,
+        Action onCompleted)
     {
         await _runtime.Logger.LogAsync($"IDE Bridge: {commandName} FAIL - {ex.Code}", CancellationToken.None, activatePane: true).ConfigureAwait(false);
         JObject errorObj = new()
@@ -440,7 +481,17 @@ internal sealed class PipeServerService : IDisposable
             queueWaitMs);
     }
 
-    private async Task<string> HandleInternalRequestFailureAsync(string commandName, string? requestId, Exception ex, Stopwatch commandStopwatch, IdeCommandContext? failureContext, DateTimeOffset enqueuedAtUtc, DateTimeOffset startedAtUtc, int queuePositionAtEnqueue, double queueWaitMs, Action onCompleted)
+    private async Task<string> HandleInternalRequestFailureAsync(
+        string commandName,
+        string? requestId,
+        Exception ex,
+        Stopwatch commandStopwatch,
+        IdeCommandContext? failureContext,
+        DateTimeOffset enqueuedAtUtc,
+        DateTimeOffset startedAtUtc,
+        int queuePositionAtEnqueue,
+        double queueWaitMs,
+        Action onCompleted)
     {
         await _runtime.Logger.LogAsync($"IDE Bridge: {commandName} FAIL - internal_error", CancellationToken.None, activatePane: true).ConfigureAwait(false);
         JObject errorObj = new()
@@ -499,7 +550,12 @@ internal sealed class PipeServerService : IDisposable
         return result;
     }
 
-    private static async Task<CommandExecutionResult> AwaitCommandExecutionAsync(JoinableTask<CommandExecutionResult> executionTask, int timeoutMilliseconds, CancellationTokenSource commandCts, CancellationToken commandToken, CancellationToken serverCancellationToken)
+    private static async Task<CommandExecutionResult> AwaitCommandExecutionAsync(
+        JoinableTask<CommandExecutionResult> executionTask,
+        int timeoutMilliseconds,
+        CancellationTokenSource commandCts,
+        CancellationToken commandToken,
+        CancellationToken serverCancellationToken)
     {
         Task<CommandExecutionResult> joinedExecutionTask = executionTask.JoinAsync(serverCancellationToken);
         Task completed = await Task.WhenAny(

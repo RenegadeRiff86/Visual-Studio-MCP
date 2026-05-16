@@ -12,6 +12,11 @@ internal static partial class ToolCatalog
 {
     private static bool ShouldLaunchInInteractiveSession()
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
         if (Environment.UserInteractive)
         {
             return false;
@@ -41,6 +46,11 @@ internal static partial class ToolCatalog
 
     private static int LaunchVisualStudioInInteractiveSession(string devenvPath, string? solution)
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("Interactive Visual Studio launch is Windows-only.");
+        }
+
         uint sessionId = WTSGetActiveConsoleSessionId();
         if (sessionId == 0xFFFFFFFF)
         {
@@ -87,6 +97,11 @@ internal static partial class ToolCatalog
 
     private static IntPtr CreatePrimaryUserToken(uint sessionId, out IntPtr userToken)
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("Windows session token APIs are Windows-only.");
+        }
+
         if (!WTSQueryUserToken(sessionId, out userToken))
         {
             throw new Win32Exception(Marshal.GetLastWin32Error(), "WTSQueryUserToken failed.");

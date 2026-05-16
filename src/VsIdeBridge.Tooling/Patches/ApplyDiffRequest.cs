@@ -40,13 +40,23 @@ public sealed class ApplyDiffRequest
         if (args is null)
             throw new ApplyDiffValidationException("apply_diff requires arguments object.");
 
-        if (args.ContainsKey("file") && args.ContainsKey("content"))
+        bool hasFile = args.ContainsKey("file");
+        bool hasTargetedReplace = hasFile && args.ContainsKey("old_content") && args.ContainsKey("new_content");
+        bool hasDiff = args.ContainsKey("diff");
+
+        if (hasFile && args.ContainsKey("content"))
         {
             throw new ApplyDiffValidationException(
                 "apply_diff does not accept 'file' + 'content' full-file replacement. Use write_file only when a full replacement is intentional, or use 'file' + 'old_content' + 'new_content' for a targeted replacement.");
         }
 
-        if (args.ContainsKey("file") && args.ContainsKey("old_content") && args.ContainsKey("new_content"))
+        if (hasTargetedReplace && hasDiff)
+        {
+            throw new ApplyDiffValidationException(
+                "apply_diff received both targeted replacement fields and 'diff'. Use exactly one shape: preferred 'file' + 'old_content' + 'new_content' for a single-file edit, or 'diff' only for multi-file or structural patches.");
+        }
+
+        if (hasTargetedReplace)
         {
             string path = args["file"]!.GetValue<string>();
             string oldContent = args["old_content"]!.GetValue<string>();
@@ -54,15 +64,15 @@ public sealed class ApplyDiffRequest
             return FromSimpleReplace(path, oldContent, newContent);
         }
 
-        if (args.ContainsKey("diff"))
+        if (hasDiff)
         {
             return FromPatchText(args["diff"]?.GetValue<string>());
         }
 
         throw new ApplyDiffValidationException(
             "apply_diff requires one of these input shapes:\n" +
-            "  • \"diff\": \"*** Begin Patch ... *** End Patch\"   (advanced patch)\n" +
-            "  • \"file\" + \"old_content\" + \"new_content\"     (targeted simple replace)");
+            "  • \"file\" + \"old_content\" + \"new_content\"     (preferred targeted replace)\n" +
+            "  • \"diff\": \"*** Begin Patch ... *** End Patch\"   (multi-file or structural patch only)");
     }
 
     public static ApplyDiffRequest FromPatchText(string? diff)
@@ -121,6 +131,12 @@ public sealed class ApplyDiffRequest
         if (operations.Count == 0)
         {
             throw new ApplyDiffValidationException("Patch has no file operations. Add at least one Add File, Delete File, or Update File directive.");
+        }
+
+        if (LooksLikeSingleFileSimpleReplacementPatch(lines, operations))
+        {
+            throw new ApplyDiffValidationException(
+                "apply_diff diff form is for multi-file or structural patches. For a single-file replacement, call apply_diff with 'file' + 'old_content' + 'new_content' and pass any handle directly as 'file'.");
         }
 
         return new ApplyDiffRequest(normalized, operations, mutationLineCount);
@@ -271,6 +287,58 @@ public sealed class ApplyDiffRequest
         int lastIndex = lines.Length - 1;
         return lines[lastIndex];
 #endif
+    }
+
+    private static bool LooksLikeSingleFileSimpleReplacementPatch(
+        string[] lines,
+        List<ApplyDiffFileOperation> operations)
+    {
+        if (operations.Count != 1)
+        {
+            return false;
+        }
+
+        ApplyDiffFileOperation operation = operations[0];
+        if (!string.Equals(operation.Operation, "update", StringComparison.Ordinal)
+            || !string.IsNullOrWhiteSpace(operation.MoveTo)
+            || operation.HunkCount != 1)
+        {
+            return false;
+        }
+
+        bool sawAddition = false;
+        bool sawDeletion = false;
+        bool sawContext = false;
+        bool inHunk = false;
+        for (int i = 1; i < lines.Length - 1; i++)
+        {
+            string line = lines[i];
+            if (line == "@@" || line.StartsWith("@@ ", StringComparison.Ordinal))
+            {
+                inHunk = true;
+                continue;
+            }
+
+            if (!inHunk || line.Length == 0 || IsDirective(line))
+            {
+                continue;
+            }
+
+            switch (line[0])
+            {
+                case ' ':
+                    sawContext = true;
+                    break;
+                case '+':
+                    sawAddition = true;
+                    break;
+                case '-':
+                    sawDeletion = true;
+                    break;
+            }
+        }
+
+        return sawAddition && sawDeletion && !sawContext;
     }
 
     private static void ThrowUnsupportedDirective(string line)

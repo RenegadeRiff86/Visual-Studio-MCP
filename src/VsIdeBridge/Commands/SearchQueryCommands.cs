@@ -31,6 +31,7 @@ internal static partial class SearchNavigationCommands
                 project,
                 args.GetString("path")).ConfigureAwait(true);
 
+            context.Handles.RegisterSearchHits((JArray)commandData["matches"]!);
             return CreateFoundResult("match(es)", commandData);
         }
     }
@@ -49,7 +50,11 @@ internal static partial class SearchNavigationCommands
             }
             catch (JsonException ex)
             {
-                throw new CommandErrorException(InvalidJsonErrorCode, $"The queries parameter could not be parsed as JSON: {ex.Message}. Pass a JSON array of strings, e.g. [\"MyClass\", \"MyMethod\"]. Check for trailing commas, unescaped characters, or single quotes.");
+                throw new CommandErrorException(
+                    InvalidJsonErrorCode,
+                    $"The queries parameter could not be parsed as JSON: {ex.Message}. " +
+                    "Pass a JSON array of strings, e.g. [\"MyClass\", \"MyMethod\"]. " +
+                    "Check for trailing commas, unescaped characters, or single quotes.");
             }
 
             string[] queries =
@@ -102,6 +107,8 @@ internal static partial class SearchNavigationCommands
                 extensions,
                 args.GetInt32("max-results", 200),
                 args.GetBoolean("include-non-project", true)).ConfigureAwait(true);
+
+            context.Handles.RegisterFileMatches((JArray)commandData["matches"]!);
             return CreateFoundResult("file(s)", commandData);
         }
     }

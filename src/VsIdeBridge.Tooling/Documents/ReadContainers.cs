@@ -476,7 +476,7 @@ public sealed class ReadQueryOptions(
         string normalized = NormalizeToken(sortBy);
         return normalized switch
         {
-            "" => "path",
+            "" => "index",
             "file" => "path",
             "resolvedpath" => "path",
             "requestedstart" => ReadJsonNames.RequestedStartLineSort,
@@ -493,7 +493,7 @@ public sealed class ReadQueryOptions(
             "text" => "text",
             "revealnote" => "revealnote",
             "index" => "index",
-            _ => "path",
+            _ => "index",
         };
     }
 

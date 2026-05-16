@@ -126,8 +126,8 @@ public sealed class SearchResultRow
         => _original.DeepClone();
 
     public bool Matches(SearchQueryOptions options)
-        => Contains(Path, options.Path)
-            && Contains(Project, options.Project)
+        => ContainsPath(Path, options.Path)
+            && ContainsPath(Project, options.Project)
             && Contains(Kind, options.Kind)
             && Contains(Source, options.Source)
             && ContainsAny(options.Text, Text, Preview, Message, Signature, Name, FullName, Path, Project, Kind, Source);
@@ -165,6 +165,19 @@ public sealed class SearchResultRow
 
     private static bool Contains(string value, string? filter)
         => string.IsNullOrWhiteSpace(filter) || value.Contains(filter, StringComparison.OrdinalIgnoreCase);
+
+    private static bool ContainsPath(string value, string? filter)
+    {
+        if (filter is null || string.IsNullOrWhiteSpace(filter))
+        {
+            return true;
+        }
+
+        return NormalizePathSeparators(value).Contains(NormalizePathSeparators(filter), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizePathSeparators(string value)
+        => value.Replace('\\', '/');
 
     private static bool ContainsAny(string? filter, params string[] values)
         => string.IsNullOrWhiteSpace(filter)

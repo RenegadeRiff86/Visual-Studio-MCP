@@ -99,6 +99,25 @@ public sealed class DiagnosticCollectionTests
     }
 
     [Fact]
+    public void FromJsonObjectFiltersByFileAndChunkSize()
+    {
+        DiagnosticCollection collection = DiagnosticCollection.FromJsonObject(CreateBucket());
+        JsonObject args = new()
+        {
+            ["file"] = "Analyzer.cs",
+            ["chunk_size"] = SingleRowChunkSize,
+        };
+
+        JsonObject result = collection.ToJsonObject(DiagnosticQueryOptions.FromJsonObject(args, DefaultChunkSize), CreateBucket());
+        JsonArray rows = Assert.IsType<JsonArray>(result[DiagnosticJsonNames.Rows]);
+        JsonObject row = Assert.IsType<JsonObject>(rows.Single());
+
+        Assert.Equal(SingleRowChunkSize, result[DiagnosticJsonNames.Count]!.GetValue<int>());
+        Assert.Equal(SingleRowChunkSize, result[DiagnosticJsonNames.ChunkSize]!.GetValue<int>());
+        Assert.Equal("CA2000", row[DiagnosticJsonNames.Code]!.GetValue<string>());
+    }
+
+    [Fact]
     public void ChunkSizeZeroReturnsAllRowsAsOneChunk()
     {
         DiagnosticCollection collection = DiagnosticCollection.FromJsonObject(CreateBucket());

@@ -299,8 +299,12 @@ internal static partial class SolutionProjectCommands
         {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             EnsureSolutionOpen(context.Dte);
-
             string solutionPath = context.Dte.Solution.FullName;
+            return await Task.Run(() => BuildProfileList(solutionPath)).ConfigureAwait(false);
+        }
+
+        private static CommandExecutionResult BuildProfileList(string solutionPath)
+        {
             string slnLaunchPath = Path.ChangeExtension(solutionPath, ".slnLaunch");
 
             if (!File.Exists(slnLaunchPath))
@@ -310,15 +314,16 @@ internal static partial class SolutionProjectCommands
             string json = File.ReadAllText(slnLaunchPath);
             JArray rawProfiles = JArray.Parse(json);
 
-            JArray profiles = new JArray();
-            List<string> names = new List<string>();
-            foreach (JObject raw in rawProfiles)
+            JArray profiles = [];
+            List<string> names = [];
+            foreach (JObject raw in rawProfiles.Cast<JObject>())
             {
                 string name = raw["Name"]?.ToString() ?? "(unnamed)";
                 names.Add(name);
 
-                JArray projects = new JArray();
-                foreach (JObject proj in raw["Projects"] ?? new JArray())
+                JArray projects = [];
+                JArray rawProjects = raw["Projects"] as JArray ?? [];
+                foreach (JObject proj in rawProjects.Cast<JObject>())
                 {
                     projects.Add(new JObject
                     {
@@ -360,8 +365,14 @@ internal static partial class SolutionProjectCommands
             string profileQuery = args.GetRequiredString("name");
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             EnsureSolutionOpen(context.Dte);
-
             string solutionPath = context.Dte.Solution.FullName;
+            DTE2 dte = context.Dte;
+            return await Task.Run(() => ApplyProfileAsync(solutionPath, profileQuery, dte)).ConfigureAwait(false);
+        }
+
+        private static async Task<CommandExecutionResult> ApplyProfileAsync(
+            string solutionPath, string profileQuery, DTE2 dte)
+        {
             string slnLaunchPath = Path.ChangeExtension(solutionPath, ".slnLaunch");
 
             if (!File.Exists(slnLaunchPath))
@@ -373,10 +384,11 @@ internal static partial class SolutionProjectCommands
             JObject matched = FindMatchingProfile(rawProfiles, profileQuery);
 
             string profileName = matched["Name"]?.ToString() ?? "(unnamed)";
-            JArray profileProjects = matched["Projects"] as JArray ?? new JArray();
+            JArray profileProjects = matched["Projects"] as JArray ?? [];
             (List<string> startupPaths, JArray appliedProjects) = CollectStartupPaths(profileProjects);
 
-            ApplyStartupProjects(context.Dte, startupPaths);
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            ApplyStartupProjects(dte, startupPaths);
 
             return new CommandExecutionResult(
                 $"Activated launch profile '{profileName}' with {startupPaths.Count} startup project(s).",
@@ -390,15 +402,15 @@ internal static partial class SolutionProjectCommands
 
         private static JObject FindMatchingProfile(JArray rawProfiles, string profileQuery)
         {
-            foreach (JObject raw in rawProfiles)
+            foreach (JObject raw in rawProfiles.Cast<JObject>())
             {
                 string name = raw["Name"]?.ToString() ?? "";
                 if (string.Equals(name, profileQuery, StringComparison.OrdinalIgnoreCase))
                     return raw;
             }
 
-            List<JObject> candidates = new List<JObject>();
-            foreach (JObject raw in rawProfiles)
+            List<JObject> candidates = [];
+            foreach (JObject raw in rawProfiles.Cast<JObject>())
             {
                 string name = raw["Name"]?.ToString() ?? "";
                 if (name.IndexOf(profileQuery, StringComparison.OrdinalIgnoreCase) >= 0)
@@ -419,10 +431,10 @@ internal static partial class SolutionProjectCommands
 
         private static (List<string> startupPaths, JArray appliedProjects) CollectStartupPaths(JArray profileProjects)
         {
-            List<string> startupPaths = new List<string>();
-            JArray appliedProjects = new JArray();
+            List<string> startupPaths = [];
+            JArray appliedProjects = [];
 
-            foreach (JObject proj in profileProjects)
+            foreach (JObject proj in profileProjects.Cast<JObject>())
             {
                 string path = proj["Path"]?.ToString() ?? "";
                 string action = proj["Action"]?.ToString() ?? "None";
@@ -581,7 +593,11 @@ internal static partial class SolutionProjectCommands
                 ?? throw CreateProjectNotFound(projectQuery);
 
             ProjectItem projectItem = FindProjectItem(project.ProjectItems, fileQuery)
-                ?? throw new CommandErrorException(FileNotFoundCode, $"File '{fileQuery}' was not found in project '{project.Name}'. Call query_project_items with the project name to list all files in the project, then retry with the exact file name.");
+                ?? throw new CommandErrorException(
+                    FileNotFoundCode,
+                    $"File '{fileQuery}' was not found in project '{project.Name}'. " +
+                    "Call query_project_items with the project name to list all files in the project, " +
+                    "then retry with the exact file name.");
 
             string fileName = projectItem.Name;
             projectItem.Remove();

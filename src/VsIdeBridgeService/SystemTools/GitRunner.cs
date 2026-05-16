@@ -26,12 +26,39 @@ internal static class GitRunner
 
         // Suppress prompts and pager output that would hang a headless process.
         string fullArgs = $"--no-pager -c safe.directory=\"{repoDirectory}\" {gitArgs}";
+        ProcessStartInfo psi = CreateStartInfo(gitExe, repoDirectory);
+        psi.Arguments = fullArgs;
 
+        return await RunProcessAsync(id, psi, gitArgs, timeoutMs).ConfigureAwait(false);
+    }
+
+    public static async Task<JsonNode> RunArgumentsAsync(
+        JsonNode? id,
+        string repoDirectory,
+        IReadOnlyList<string> gitArgs,
+        int timeoutMs = DefaultTimeoutMs)
+    {
+        string gitExe = ResolveGitExecutable();
+        ProcessStartInfo psi = CreateStartInfo(gitExe, repoDirectory);
+        psi.ArgumentList.Add("--no-pager");
+        psi.ArgumentList.Add("-c");
+        psi.ArgumentList.Add($"safe.directory={repoDirectory}");
+        foreach (string arg in gitArgs)
+        {
+            psi.ArgumentList.Add(arg);
+        }
+
+        string displayArgs = string.Join(" ", gitArgs.Select(EscapeForDisplay));
+        return await RunProcessAsync(id, psi, displayArgs, timeoutMs).ConfigureAwait(false);
+    }
+
+    private static ProcessStartInfo CreateStartInfo(string gitExe, string repoDirectory)
+    {
         ProcessStartInfo psi = new()
         {
             FileName = gitExe,
-            Arguments = fullArgs,
             WorkingDirectory = repoDirectory,
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -43,9 +70,19 @@ internal static class GitRunner
         psi.Environment["GIT_NO_PAGER"] = "1";
         psi.Environment["GIT_ASKPASS"] = "echo";
 
+        return psi;
+    }
+
+    private static async Task<JsonNode> RunProcessAsync(
+        JsonNode? id,
+        ProcessStartInfo psi,
+        string displayArgs,
+        int timeoutMs)
+    {
         using Process process = Process.Start(psi)
             ?? throw new McpRequestException(id, McpErrorCodes.BridgeError,
-                $"Failed to start git process at '{gitExe}'.");
+                $"Failed to start git process at '{psi.FileName}'.");
+        process.StandardInput.Close();
 
         Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
         Task<string> stderrTask = process.StandardError.ReadToEndAsync();
@@ -57,7 +94,7 @@ internal static class GitRunner
         {
             TryKill(process);
             throw new McpRequestException(id, McpErrorCodes.TimeoutError,
-                $"git {gitArgs} timed out after {timeoutMs} ms.");
+                $"git {displayArgs} timed out after {timeoutMs} ms.");
         }
 
         string stdout = await stdoutTask.ConfigureAwait(false);
@@ -75,6 +112,9 @@ internal static class GitRunner
         string successText = $"Git command completed with exit code {process.ExitCode}.";
         return ToolResultFormatter.StructuredToolResult(payload, isError: !success, successText: successText);
     }
+
+    private static string EscapeForDisplay(string value)
+        => value.Any(char.IsWhiteSpace) ? $"\"{value.Replace("\"", "\\\"", StringComparison.Ordinal)}\"" : value;
 
     /// <summary>Network operations (push/pull/fetch/merge) get a longer timeout.</summary>
     public static Task<JsonNode> RunNetworkAsync(

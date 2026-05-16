@@ -14,7 +14,9 @@ public static partial class BridgeCommandCatalog
                 return true;
             case "find_text_batch":
             case "find-text-batch":
-                detail = ("Find text for multiple queries in one bridge round-trip, internally chunked when needed. Related tools: find_text, search_symbols.", ExampleCommand("find_text_batch", @"{""queries"": [""OnInit"", ""RunAsync"", ""BridgeHealth""], ""path"": ""src\\VsIdeBridge"", ""max_queries_per_chunk"": 5}"));
+                detail = (
+                    "Find text for multiple queries in one bridge round-trip, internally chunked when needed. Related tools: find_text, search_symbols.",
+                    ExampleCommand("find_text_batch", @"{""queries"": [""OnInit"", ""RunAsync"", ""BridgeHealth""], ""path"": ""src\\VsIdeBridge"", ""max_queries_per_chunk"": 5}"));
                 return true;
             case "find_files":
             case "find-files":
@@ -32,11 +34,15 @@ public static partial class BridgeCommandCatalog
                 return true;
             case "count_references":
             case "count-references":
-                detail = ("Run Find All References and return exact count when Visual Studio exposes one, or explicit unknown otherwise. Related tools: find_references, call_hierarchy.", ExampleCommand("count_references", @"{""file"":""" + ExampleFilePath + @""",""line"":42,""column"":13}"));
+                detail = (
+                    "Run Find All References and return exact count when Visual Studio exposes one, or explicit unknown otherwise. Related tools: find_references, call_hierarchy.",
+                    ExampleCommand("count_references", @"{""file"":""" + ExampleFilePath + @""",""line"":42,""column"":13}"));
                 return true;
             case "call_hierarchy":
             case "call-hierarchy":
-                detail = ("Open Call Hierarchy for the symbol at a file, line, and column. For managed languages, also return a bounded caller tree in the command result. Related tools: find_references, search_symbols.", ExampleCommand("call_hierarchy", @"{""file"":""" + ExampleFilePath + @""",""line"":42,""column"":13,""max_depth"":2}"));
+                detail = (
+                    "Open Call Hierarchy for the symbol at a file, line, and column. For managed languages, also return a bounded caller tree in the command result. Related tools: find_references, search_symbols.",
+                    ExampleCommand("call_hierarchy", @"{""file"":""" + ExampleFilePath + @""",""line"":42,""column"":13,""max_depth"":2}"));
                 return true;
             case "smart_context":
             case "smart-context":
@@ -48,11 +54,15 @@ public static partial class BridgeCommandCatalog
                 return true;
             case "goto_implementation":
             case "goto-implementation":
-                detail = ("Navigate to one implementation of the symbol at a file, line, and column. Related tools: find_references, goto_definition.", ExampleCommand("goto_implementation", @"{""file"":""" + ExampleFilePath + @""",""line"":42,""column"":13}"));
+                detail = (
+                    "Navigate to one implementation of the symbol at a file, line, and column. Related tools: find_references, goto_definition.",
+                    ExampleCommand("goto_implementation", @"{""file"":""" + ExampleFilePath + @""",""line"":42,""column"":13}"));
                 return true;
             case "peek_definition":
             case "peek-definition":
-                detail = ("Read the definition source for the symbol at a file, line, and column without navigating away. Related tools: symbol_info, goto_definition.", ExampleCommand("peek_definition", @"{""file"":""" + ExampleFilePath + @""",""line"":42,""column"":13}"));
+                detail = (
+                    "Read the definition source for the symbol at a file, line, and column without navigating away. Related tools: symbol_info, goto_definition.",
+                    ExampleCommand("peek_definition", @"{""file"":""" + ExampleFilePath + @""",""line"":42,""column"":13}"));
                 return true;
             case "file_outline":
             case "file-outline":
@@ -68,7 +78,9 @@ public static partial class BridgeCommandCatalog
                 return true;
             case "quick_info":
             case "quick-info":
-                detail = ("Resolve symbol information at file, line, and column with surrounding context. Related tools: goto_definition, find_references.", ExampleCommand("quick_info", @"{""file"":""" + ExampleFilePath + @""",""line"":42,""column"":13}"));
+                detail = (
+                    "Resolve symbol information at file, line, and column with surrounding context. Related tools: goto_definition, find_references.",
+                    ExampleCommand("quick_info", @"{""file"":""" + ExampleFilePath + @""",""line"":42,""column"":13}"));
                 return true;
             default:
                 detail = default;

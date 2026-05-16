@@ -1,6 +1,7 @@
 ﻿using EnvDTE;
 using EnvDTE80;
 using Microsoft.VisualStudio.Shell;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -20,6 +21,16 @@ internal static class SolutionFileLocator
         public int Score { get; set; }
 
         public string Source { get; set; } = "solution";
+
+        /// <summary>Serializes this match to a JSON object for tool output.</summary>
+        public JObject ToJson() => new()
+        {
+            ["path"] = Path,
+            ["name"] = System.IO.Path.GetFileName(Path),
+            ["project"] = ProjectUniqueName,
+            ["score"] = Score,
+            ["source"] = Source,
+        };
     }
 
     public static IReadOnlyList<Match> FindMatches(
@@ -107,6 +118,10 @@ internal static class SolutionFileLocator
         return false;
     }
 
+    /// <summary>
+    /// Finds disk matches — must be called on the VS main thread so the solution directory
+    /// can be resolved from DTE. Delegates the actual disk crawl to the thread-safe overload.
+    /// </summary>
     public static IReadOnlyList<Match> FindDiskMatches(
         DTE2 dte,
         string query,
@@ -115,14 +130,27 @@ internal static class SolutionFileLocator
         int maxResults = 200)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
+        string solutionDirectory = GetSolutionDirectory(dte);
+        return FindDiskMatches(solutionDirectory, query, pathFilter, extensions, maxResults);
+    }
 
+    /// <summary>
+    /// Finds disk matches given a pre-resolved solution directory. Pure file-system I/O —
+    /// no VS API access. Safe to call off the main thread.
+    /// </summary>
+    public static IReadOnlyList<Match> FindDiskMatches(
+        string solutionDirectory,
+        string query,
+        string? pathFilter = null,
+        IReadOnlyCollection<string>? extensions = null,
+        int maxResults = 200)
+    {
         string trimmedQuery = query?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(trimmedQuery))
         {
             return [];
         }
 
-        string? solutionDirectory = GetSolutionDirectory(dte);
         if (string.IsNullOrWhiteSpace(solutionDirectory) || !Directory.Exists(solutionDirectory))
         {
             return [];
@@ -326,7 +354,7 @@ internal static class SolutionFileLocator
         return true;
     }
 
-    private static string GetSolutionDirectory(DTE2 dte)
+    internal static string GetSolutionDirectory(DTE2 dte)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 

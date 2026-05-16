@@ -46,6 +46,14 @@ public sealed partial class ToolRegistry
         {
             workflowHint = "For Python work, list interpreters with python_list_envs, then create or select one with python_create_env or python_set_project_env before installing packages.";
         }
+        else if (profile.LooksLikeBuildTask)
+        {
+            workflowHint = "For build work, use build_errors for compiler-only failures or rebuild_solution/build_solution for full builds, then inspect errors, warnings, and messages.";
+        }
+        else if (profile.LooksLikeDiagnosticTask)
+        {
+            workflowHint = "For diagnostics work, read errors, warnings, and messages first; use diagnostics_snapshot or read_output when the Error List needs more context.";
+        }
         else if (profile.LooksLikeNuGetTask)
         {
             workflowHint = "For package management, use nuget_add_package / nuget_remove_package against a specific project; review query_project_references afterward.";

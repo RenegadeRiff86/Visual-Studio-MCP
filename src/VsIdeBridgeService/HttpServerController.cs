@@ -30,10 +30,10 @@ internal static class HttpServerController
 
     private static readonly string FlagFilePath = HttpServerStatePaths.GetHttpEnabledFlagPath();
 
-    private static readonly string[] ServerArgs = ["--port", "8080"];
+    private static readonly string[] ServerArgs = ["--port", HttpServerDefaults.HttpPortText];
 
-    internal const int DefaultPort = 8080;
-    internal static string Url => $"http://localhost:{DefaultPort}/";
+    internal const int DefaultPort = HttpServerDefaults.HttpPort;
+    internal static string Url => HttpServerDefaults.HttpUrl;
 
     private static readonly object Lock = new();
     private static CancellationTokenSource? _cts;
@@ -245,6 +245,11 @@ internal static class HttpServerController
 
     private static void SendControlEvent(string evt)
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("VsIdeBridgeService control pipes are Windows-only.");
+        }
+
         using NamedPipeClientStream pipe = new(
             ".", NamedPipeAccessDefaults.ServiceControlPipeName, PipeDirection.Out, PipeOptions.None);
         pipe.Connect(PipeConnectTimeoutMs);

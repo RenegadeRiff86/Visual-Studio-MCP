@@ -6,6 +6,7 @@ using System.IO;
 using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 using VsIdeBridge.Services;
+using VsIdeBridge.Tooling.Handles;
 
 namespace VsIdeBridge.Commands;
 
@@ -17,7 +18,10 @@ internal static partial class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            int? requestedLine = args.GetNullableInt32("line");
+            // If the file argument is a handle, use its embedded line as the default anchor.
+            string? fileArg = args.GetString("file");
+            (int? embeddedLine, _) = context.Handles.GetEmbeddedPosition(fileArg);
+            int? requestedLine = args.GetNullableInt32("line") ?? embeddedLine;
             int baseLine = requestedLine ?? 1;
             int contextBefore = args.GetInt32("context-before", 0);
             int? contextAfter = args.GetNullableInt32("context-after");
@@ -37,6 +41,15 @@ internal static partial class SearchNavigationCommands
                 revealInEditor,
                 revealLine)
                 .ConfigureAwait(true);
+
+            // Register a file handle so callers can immediately pass it to apply_diff
+            // without needing a separate find_files or find_text call first.
+            string? resolvedPath = (string?)documentSlice["resolvedPath"];
+            if (!string.IsNullOrEmpty(resolvedPath))
+            {
+                FileMatchHandle fileHandle = context.Handles.RegisterFileRead(resolvedPath!);
+                documentSlice["handle"] = fileHandle.Id;
+            }
 
             string documentText = (string?)documentSlice["text"] ?? string.Empty;
             string documentSummary = string.IsNullOrWhiteSpace(documentText)
@@ -66,6 +79,9 @@ internal static partial class SearchNavigationCommands
                 args.GetInt32("context-after", 10),
                 args.GetBoolean("populate-results-window", false),
                 args.GetInt32("results-window", 1)).ConfigureAwait(true);
+
+            if (smartContextResult["matches"] is JArray smartMatches)
+                context.Handles.RegisterSearchHits(smartMatches);
 
             return new CommandExecutionResult(
                 $"Captured {smartContextResult["contextCount"]} smart context(s) from {smartContextResult["totalMatchCount"]} match(es). See Data.contexts and Data.matches for details.",
@@ -97,7 +113,12 @@ internal static partial class SearchNavigationCommands
             }
             catch (JsonException ex)
             {
-                throw new CommandErrorException("invalid_json", $"The ranges parameter could not be parsed as JSON: {ex.Message}. Pass a JSON array of range objects, e.g. [{{\"file\": \"path.cs\", \"startLine\": 10, \"endLine\": 30}}]. Check for trailing commas or unescaped characters.");
+                throw new CommandErrorException(
+                    "invalid_json",
+                    $"The ranges parameter could not be parsed as JSON: {ex.Message}. " +
+                    "Pass a JSON array of range objects, e.g. " +
+                    "[{\"file\": \"path.cs\", \"startLine\": 10, \"endLine\": 30}]. " +
+                    "Check for trailing commas or unescaped characters.");
             }
         }
 

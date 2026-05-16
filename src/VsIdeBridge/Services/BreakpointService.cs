@@ -121,7 +121,8 @@ internal sealed class BreakpointService
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
         string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
-        Breakpoint bp = FindBreakpoint(dte, normalizedPath, line) ?? throw new CommandErrorException("not_found", $"No breakpoint found at {normalizedPath}:{line}. Call list_breakpoints to see all active breakpoints, then retry with a valid file path and line number.");
+        Breakpoint bp = FindBreakpoint(dte, normalizedPath, line)
+            ?? throw CreateBreakpointNotFound(normalizedPath, line);
         bp.Enabled = true;
         return SerializeBreakpoint(bp, normalizedPath, line);
     }
@@ -131,7 +132,8 @@ internal sealed class BreakpointService
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
         string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
-        Breakpoint bp = FindBreakpoint(dte, normalizedPath, line) ?? throw new CommandErrorException("not_found", $"No breakpoint found at {normalizedPath}:{line}. Call list_breakpoints to see all active breakpoints, then retry with a valid file path and line number.");
+        Breakpoint bp = FindBreakpoint(dte, normalizedPath, line)
+            ?? throw CreateBreakpointNotFound(normalizedPath, line);
         bp.Enabled = false;
         return SerializeBreakpoint(bp, normalizedPath, line);
     }
@@ -281,6 +283,14 @@ internal sealed class BreakpointService
             ["traceMessage"] = string.IsNullOrWhiteSpace(traceMessage) ? JValue.CreateNull() : traceMessage,
             ["breakWhenHit"] = !continueExecution,
         };
+    }
+
+    private static CommandErrorException CreateBreakpointNotFound(string normalizedPath, int line)
+    {
+        return new(
+            "not_found",
+            $"No breakpoint found at {normalizedPath}:{line}. " +
+            "Call list_breakpoints to see all active breakpoints, then retry with a valid location.");
     }
 
     private static dbgBreakpointConditionType MapConditionType(string value)

@@ -111,7 +111,9 @@ internal static partial class ToolCatalog
                 throw new McpRequestException(
                     id,
                     McpErrorCodes.BridgeError,
-                    $"'vs_open' launch is disabled because it is not yet production-ready and can destabilize Visual Studio startup. Start Visual Studio manually and bind to it, or set {VsOpenLaunchOptInEnvironmentVariable}=1 only when deliberately testing the launch path.");
+                    $"'vs_open' launch is disabled because it is not yet production-ready and can destabilize Visual Studio startup. Start " +
+                    $"Visual Studio manually and bind to it, or set {VsOpenLaunchOptInEnvironmentVariable}=1 only when deliberately testing " +
+                    $"the launch path.");
             }
 
             return await LaunchNewVsInstanceAsync(id, devenvPath, solution).ConfigureAwait(false);

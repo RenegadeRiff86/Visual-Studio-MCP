@@ -28,9 +28,19 @@ if not defined MSBUILD (
     exit /b 1
 )
 
+:: Derive DevEnvDir so HintPath references (e.g. CallHierarchy) resolve correctly
+:: when building outside a VS Developer Command Prompt.
+for /f "usebackq delims=" %%I in (`"%VSWHERE%" -latest -prerelease -property installationPath 2^>nul`) do (
+    set "VS_INSTALL_DIR=%%I"
+)
+if defined VS_INSTALL_DIR (
+    set "DevEnvDir=%VS_INSTALL_DIR%\Common7\IDE\"
+)
+
 echo MSBuild : %MSBUILD%
 echo Solution: %SOLUTION%
 echo Config  : %CONFIG%
+if defined DevEnvDir echo DevEnvDir: %DevEnvDir%
 echo.
 
 if exist "%VSIX_BIN%" (

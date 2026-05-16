@@ -23,7 +23,12 @@ internal static partial class ToolCatalog
             Opt(Configuration, "Optional build configuration (e.g. Release)."),
             Opt(Platform, "Optional build platform (e.g. x64)."),
             OptBool(WaitForIntellisense, "Wait for IntelliSense readiness before building (default true)."),
-            OptBool(WaitForCompletion, $"When false, start the operation and return immediately (default {(defaultWaitForCompletion ? "true" : "false")}). When explicitly set to true, solution-wide builds wait up to {BuildExplicitWaitMilliseconds / 60_000} minutes for completion. When using the default value, they stop waiting after {BuildCourtesyWaitMilliseconds / 1_000} seconds and prompt the model to ask the user before waiting longer."),
+            OptBool(
+                WaitForCompletion,
+                $"When false, start the operation and return immediately (default {(defaultWaitForCompletion ? "true" : "false")}). When " +
+                $"explicitly set to true, solution-wide builds wait up to {BuildExplicitWaitMilliseconds / 60_000} minutes for completion. " +
+                $"When using the default value, they stop waiting after {BuildCourtesyWaitMilliseconds / 1_000} seconds and prompt the " +
+                "model to ask the user before waiting longer."),
             OptBool(RequireCleanDiagnostics, "When false, bypasses the pre-build dirty-diagnostics guard (default true)."),
             OptBool(ErrorsOnly, "When true, return the build summary plus only error rows so warnings and messages do not flood the response."),
             OptInt(Max, "Max error rows to return when errors_only is true (default 50)."),
@@ -60,7 +65,8 @@ internal static partial class ToolCatalog
         bool waitForCompletion = OptionalBool(args, WaitForCompletion, defaultWaitForCompletion);
         bool errorsOnly = args?[ErrorsOnly]?.GetValue<bool>() ?? false;
         // Detect whether the caller explicitly provided wait_for_completion (vs. accepting the default).
-        // Explicit callers get a 10-minute poll window; default callers get the 10-second courtesy wait.
+        // Explicit waits use the VS build command's completion path; default solution-wide builds
+        // start in the background and get only the short courtesy wait.
         bool waitForCompletionExplicit = args?[WaitForCompletion] is not null;
         if (!waitForCompletion && errorsOnly)
         {
@@ -73,13 +79,17 @@ internal static partial class ToolCatalog
         }
 
         JsonObject? preBuild = errorsOnly || !waitForCompletion ? null : await TryCapturePreBuildDiagnosticsAsync(id, bridge).ConfigureAwait(false);
-        bool useCourtesyWait = waitForCompletion && IsSolutionWideBuild(includeProject, args);
-        int waitTimeoutMs = waitForCompletionExplicit ? BuildExplicitWaitMilliseconds : BuildCourtesyWaitMilliseconds;
-        JsonObject response = await bridge.SendAsync(
-                id,
-                pipeCommand,
-                BuildBuildCommandArgs(args, includeProject, waitForCompletion && !useCourtesyWait, defaultWaitForCompletion))
-            .ConfigureAwait(false);
+        bool useCourtesyWait = ShouldUseCourtesyWaitForBuild(waitForCompletion, waitForCompletionExplicit, includeProject, args);
+        bool useDirectBuildWait = waitForCompletion && !useCourtesyWait;
+        string buildCommandArgs = BuildBuildCommandArgs(args, includeProject, useDirectBuildWait, defaultWaitForCompletion);
+        JsonObject response = useDirectBuildWait
+            ? await bridge.SendAsync(
+                    id,
+                    pipeCommand,
+                    buildCommandArgs,
+                    BridgeConnection.ToolTimeoutProfile.BuildWait)
+                .ConfigureAwait(false)
+            : await bridge.SendAsync(id, pipeCommand, buildCommandArgs).ConfigureAwait(false);
 
         if (!waitForCompletion)
         {
@@ -88,6 +98,7 @@ internal static partial class ToolCatalog
 
         if (useCourtesyWait)
         {
+            int waitTimeoutMs = BuildCourtesyWaitMilliseconds;
             string expectedOperation = pipeCommand.StartsWith("rebuild", StringComparison.OrdinalIgnoreCase) ? "rebuild" : "build";
             string? expectedStartedAtUtc = response["Data"]?["startedAtUtc"]?.GetValue<string>();
 
@@ -150,15 +161,30 @@ internal static partial class ToolCatalog
     private static bool IsSolutionWideBuild(bool includeProject, JsonObject? args)
         => !includeProject || string.IsNullOrWhiteSpace(OptionalString(args, Project));
 
+    internal static bool ShouldUseCourtesyWaitForBuild(
+        bool waitForCompletion,
+        bool waitForCompletionExplicit,
+        bool includeProject,
+        JsonObject? args)
+        => waitForCompletion
+            && !waitForCompletionExplicit
+            && IsSolutionWideBuild(includeProject, args);
+
     private static async Task<(JsonObject? BuildResult, JsonObject? BackgroundOperation, bool PromptUser)> WaitForBackgroundBuildAsync(
         BridgeConnection bridge,
         JsonNode? id,
         string expectedOperation,
         string? expectedStartedAtUtc,
         int timeoutMs = BuildCourtesyWaitMilliseconds)
+    // Courtesy waits poll only default solution-wide builds; explicit waits stay on the VS build command path.
     {
         DateTimeOffset deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeoutMs);
         JsonObject? lastBackgroundOperation = null;
+
+        // If the MCP client cancels this request (notifications/cancelled), the registry
+        // will have fired the token — Task.Delay will throw OperationCanceledException,
+        // which propagates up and stops the polling loop immediately.
+        CancellationToken ct = RequestCancellationRegistry.GetToken(id);
 
         while (true)
         {
@@ -190,7 +216,7 @@ internal static partial class ToolCatalog
             }
 
             TimeSpan delay = deadline - DateTimeOffset.UtcNow;
-            await Task.Delay(delay < BuildCourtesyPollInterval ? delay : BuildCourtesyPollInterval).ConfigureAwait(false);
+            await Task.Delay(delay < BuildCourtesyPollInterval ? delay : BuildCourtesyPollInterval, ct).ConfigureAwait(false);
         }
     }
 

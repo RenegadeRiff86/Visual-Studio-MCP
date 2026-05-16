@@ -21,6 +21,10 @@ internal static partial class ToolCatalog
     private const string ChunkSize = "chunk_size";
     private const string SortBy = "sort_by";
     private const string SortDirection = "sort_direction";
+    private const string GroupSortBy = "group_sort_by";
+    private const string GroupSortDirection = "group_sort_direction";
+    private const string GroupMinCount = "group_min_count";
+    private const string GroupMaxCount = "group_max_count";
     private const string WaitForCompletion = "wait_for_completion";
     private const string WaitForIntellisenseHyphen = "wait-for-intellisense";
     private const string WaitForCompletionHyphen = "wait-for-completion";
@@ -122,8 +126,13 @@ internal static partial class ToolCatalog
             Opt(Code, codeFilterDescription),
             Opt(Project, ProjectFilterDesc),
             Opt(Path, "Optional path filter."),
+            Opt(FileArg, "Optional file filter. Accepts a full path, path fragment, or file name."),
             Opt(Text, "Optional message text filter."),
-            Opt(GroupBy, groupByDescription));
+            Opt(GroupBy, groupByDescription),
+            Opt(GroupSortBy, "Optional group sort field when using group_by: 'count' (default, most warnings first) or 'key' (alphabetical by group key)."),
+            Opt(GroupSortDirection, "Optional group sort direction: asc or desc. Default is desc for count, asc for key."),
+            OptInt(GroupMinCount, "Optional minimum group member count. Only return groups with this many or more items."),
+            OptInt(GroupMaxCount, "Optional maximum group member count. Only return groups with this many or fewer items."));
 
     private sealed class DiagnosticRowsToolView(
         string commandName,
@@ -146,20 +155,11 @@ internal static partial class ToolCatalog
             if (bridge.DocumentDiagnostics.TryGetCached(cacheSeverity, args, out JsonObject cachedDiagnostics))
             {
                 CompactDiagnosticsResponse(cachedDiagnostics, args);
+                PatchFilterEcho(cachedDiagnostics, args);
                 return BridgeResult(cachedDiagnostics);
             }
 
-            string diagnosticsArgs = Build(
-                (Severity, OptionalString(args, Severity) ?? defaultSeverity),
-                BoolArg(WaitForIntellisenseHyphen, args, WaitForIntellisense, false, true),
-                BoolArg(Quick, args, Quick, ShouldUsePassiveDiagnosticsRead(args), true),
-                BoolArg(Refresh, args, Refresh, false, true),
-                (Max, GetBridgeDiagnosticsMax(args)),
-                (Code, OptionalString(args, Code)),
-                (Project, OptionalString(args, Project)),
-                (Path, OptionalString(args, Path)),
-                (Text, OptionalString(args, Text)),
-                ("group-by", OptionalString(args, GroupBy)));
+            string diagnosticsArgs = BuildDiagnosticRowsCommandArgs(args, defaultSeverity);
             JsonObject response = await SendDiagnosticsCommandWithSnapshotFallbackAsync(
                     bridge,
                     id,
@@ -168,6 +168,7 @@ internal static partial class ToolCatalog
                     args)
                 .ConfigureAwait(false);
             CompactDiagnosticsResponse(response, args);
+            PatchFilterEcho(response, args);
             return BridgeResult(response);
         }
     }
@@ -187,7 +188,10 @@ internal static partial class ToolCatalog
             "One-shot snapshot combining IDE state, build status, debugger mode, and error/warning counts. " +
             "Use at the start of a session or after a build instead of calling errors + vs_state separately. " +
             "This is a passive snapshot and may be stale relative to the current Error List. " +
-            "With wait_for_intellisense=false it prefers the fast current snapshot; true is slower but fresher.",
+            "With wait_for_intellisense=false it prefers the fast current snapshot; true is slower but fresher. " +
+            "Each row in the errors, warnings, and messages buckets includes a handle field " +
+            "(e:N for errors, w:N for warnings, m:N for messages) — pass it directly as the " +
+            "file argument to read_file, open_file, or apply_diff instead of copying the full path.",
             ObjectSchema(
                 OptBool(WaitForIntellisense, "Wait for IntelliSense readiness (default false)."),
                 OptInt(Max, "Legacy alias for chunk_size. Defaults to 10 when chunk_size is omitted."),
@@ -258,6 +262,28 @@ internal static partial class ToolCatalog
         AddSuppressionRepairPrompt(response, suppressionWarningCount);
     }
 
+    // The VSIX only receives severity/quick/max — content filters (code, project, path,
+    // file, text, sort, group_by, pagination) are applied service-side by DiagnosticCollection.
+    // Patch the filter echo so it reflects what was actually applied.
+    private static void PatchFilterEcho(JsonObject response, JsonObject? args)
+    {
+        if (args is null) return;
+        if (response["Data"] is not JsonObject data) return;
+        if (data["filter"] is not JsonObject filter) return;
+
+        DiagnosticQueryOptions opts = CreateDiagnosticQueryOptions(args);
+        if (!string.IsNullOrWhiteSpace(opts.Code))    filter["code"]          = opts.Code;
+        if (!string.IsNullOrWhiteSpace(opts.Project)) filter["project"]       = opts.Project;
+        if (!string.IsNullOrWhiteSpace(opts.Path))    filter["path"]          = opts.Path;
+        if (!string.IsNullOrWhiteSpace(opts.File))    filter["file"]          = opts.File;
+        if (!string.IsNullOrWhiteSpace(opts.Text))    filter["text"]          = opts.Text;
+        if (!string.IsNullOrWhiteSpace(opts.GroupBy)) filter["groupBy"]       = opts.GroupBy;
+        if (!string.IsNullOrWhiteSpace(opts.SortBy))  filter["sortBy"]        = opts.SortBy;
+        if (opts.SortDescending)                       filter["sortDirection"]  = "desc";
+        if (opts.ChunkSize > 0)                        filter["chunkSize"]     = opts.ChunkSize;
+        if (opts.ChunkIndex > 0)                       filter["chunkIndex"]    = opts.ChunkIndex;
+    }
+
     private static void AddSuppressionRepairPrompt(JsonObject response, int suppressionWarningCount)
     {
         if (suppressionWarningCount <= 0)
@@ -270,7 +296,9 @@ internal static partial class ToolCatalog
             : $"Model action: fix {suppressionWarningCount} in-source warning suppression(s) ({SuppressedWarningCode}) now instead of editing around them.";
 
         string detailPrompt = suppressionWarningCount > SuppressionPromptUserThreshold
-            ? $"Detected {suppressionWarningCount} in-source warning suppressions ({SuppressedWarningCode}). Ask the user before making a broad suppression cleanup pass, then remove them in focused batches and fix the underlying warnings instead of keeping the suppressions."
+            ? $"Detected {suppressionWarningCount} in-source warning suppressions ({SuppressedWarningCode}). Ask the user before making " +
+              $"a broad suppression cleanup pass, then remove them in focused batches and fix the underlying warnings instead of keeping " +
+              $"the suppressions."
             : $"Detected {suppressionWarningCount} in-source warning suppression(s) ({SuppressedWarningCode}). Fix them now by removing the suppressions and addressing the underlying warnings instead of editing around them.";
 
         AppendResponseWarning(response, detailPrompt);
@@ -476,17 +504,7 @@ internal static partial class ToolCatalog
                 || message.Contains("Visual Studio may be blocked", StringComparison.OrdinalIgnoreCase));
 
     private static string BuildQuickDiagnosticsArgs(JsonObject? args)
-        => Build(
-            (Severity, OptionalString(args, Severity)),
-            (Code, OptionalString(args, Code)),
-            (Project, OptionalString(args, Project)),
-            (Path, OptionalString(args, Path)),
-            (Text, OptionalString(args, Text)),
-            ("group-by", OptionalString(args, GroupBy)),
-            (Max, GetBridgeDiagnosticsMax(args)),
-            (Quick, "true"),
-            (Refresh, "false"),
-            (WaitForIntellisenseHyphen, "false"));
+        => BuildQuickDiagnosticRowsCommandArgs(args);
 
     private static string BuildDiagnosticsSnapshotArgs(JsonObject? args)
     {
@@ -668,7 +686,9 @@ internal static partial class ToolCatalog
 
         yield return CreateBuildTool(
             "rebuild",
-            "Rebuild the active solution inside Visual Studio. This performs a clean step before building and is heavier than build. By default it starts in the background and returns immediately. Set wait_for_completion=true to wait for completion. Set errors_only=true only when waiting.",
+            "Rebuild the active solution inside Visual Studio. This performs a clean step before building and is heavier than build. " +
+            "By default it starts in the background and returns immediately. Set wait_for_completion=true to wait for completion. Set " +
+            "errors_only=true only when waiting.",
             "rebuild",
             includeProject: false,
             defaultWaitForCompletion: false,
@@ -678,7 +698,9 @@ internal static partial class ToolCatalog
 
         yield return CreateBuildTool(
              BuildSolutionTool,
-            "Build the active solution explicitly. Use this when you want the solution-wide build command rather than the generic build entry. By default it starts in the background and returns immediately so large solution builds do not block the bridge. Set wait_for_completion=true to wait for completion. Set errors_only=true only when waiting.",
+            "Build the active solution explicitly. Use this when you want the solution-wide build command rather than the generic " +
+            "build entry. By default it starts in the background and returns immediately so large solution builds do not block the " +
+            "bridge. Set wait_for_completion=true to wait for completion. Set errors_only=true only when waiting.",
             "build",
             includeProject: false,
             defaultWaitForCompletion: false,
@@ -688,7 +710,9 @@ internal static partial class ToolCatalog
 
         yield return CreateBuildTool(
             "rebuild_solution",
-            "Rebuild the active solution explicitly. Use this when you want the solution-wide rebuild command by name. By default it starts in the background and returns immediately. Set wait_for_completion=true to wait for completion. Set errors_only=true only when waiting.",
+            "Rebuild the active solution explicitly. Use this when you want the solution-wide rebuild command by name. By default it " +
+            "starts in the background and returns immediately. Set wait_for_completion=true to wait for completion. Set " +
+            "errors_only=true only when waiting.",
             "rebuild-solution",
             includeProject: false,
             defaultWaitForCompletion: false,

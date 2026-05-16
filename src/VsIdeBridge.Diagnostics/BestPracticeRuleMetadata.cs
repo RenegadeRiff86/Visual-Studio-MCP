@@ -40,7 +40,9 @@ internal static class BestPracticeRuleMetadata
             [BestPracticeRuleCatalog.BP1004.Code] = new(
                 "This catch path suppresses exception intent, which makes failures invisible and encourages silent corruption or partial success.",
                 "Handle the exception explicitly by writing it to the log with useful context, translating it, or rethrowing it.",
-                "Fix this catch block so the exception is handled intentionally. If the block is empty or only contains comments, write the exception to the log with useful context, translate it to a narrower exception, or rethrow it. Do not leave a silent catch."),
+                "Fix this catch block so the exception is handled intentionally. If the block is empty or only contains comments, write " +
+                "the exception to the log with useful context, translate it to a narrower exception, or rethrow it. Do not leave a silent " +
+                "catch."),
             [BestPracticeRuleCatalog.BP1005.Code] = new(
                 "Async void methods hide failures from callers and make cancellation, composition, and testing much harder.",
                 "Return Task instead of async void unless this is a real event handler.",
@@ -72,7 +74,9 @@ internal static class BestPracticeRuleMetadata
             [BestPracticeRuleCatalog.BP1012.Code] = new(
                 "This file is carrying too many responsibilities, which raises navigation cost and makes targeted changes riskier.",
                 "Split the file into smaller focused types or helpers before adding more code.",
-                "This file is too long. Identify cohesive groups of types or helpers that can stand alone, then use create_project to create a new class library and apply_diff to move those types out. Prioritize types with the fewest cross-file dependencies so each move is self-contained. Update any using directives and project references after each extraction."),
+                "This file is too long. Identify cohesive groups of types or helpers that can stand alone, then use create_project to " +
+                "create a new class library and apply_diff to move those types out. Prioritize types with the fewest cross-file " +
+                "dependencies so each move is self-contained. Update any using directives and project references after each extraction."),
             [BestPracticeRuleCatalog.BP1013.Code] = new(
                 "This method is long enough that control flow and state changes are hard to reason about in one pass.",
                 "Extract smaller methods so each block has one clear job.",
@@ -84,7 +88,9 @@ internal static class BestPracticeRuleMetadata
             [BestPracticeRuleCatalog.BP1015.Code] = new(
                 "Deep nesting hides the happy path and increases the chance of missed edge cases during edits.",
                 "Flatten the control flow with guard clauses, extracted helpers, or simpler branching. Use file_outline first when you need a quick map of the surrounding type or method structure.",
-                "Use file_outline first if you need a quick map of the surrounding type or method structure, then refactor this nested control flow so the main path is easier to read. Prefer guard clauses, early returns, or extracted helpers over additional nesting."),
+                "Use file_outline first if you need a quick map of the surrounding type or method structure, then refactor this nested " +
+                "control flow so the main path is easier to read. Prefer guard clauses, early returns, or extracted helpers over " +
+                "additional nesting."),
             [BestPracticeRuleCatalog.BP1016.Code] = new(
                 "Commented-out code becomes stale quickly and is a poor substitute for version control history.",
                 "Delete the dead code and rely on version control instead of commented-out blocks.",
@@ -96,11 +102,9 @@ internal static class BestPracticeRuleMetadata
             [BestPracticeRuleCatalog.BP1018.Code] = new(
                 "This type has accumulated too many responsibilities, so changes in one area are likely to surprise other areas.",
                 "Extract one concrete responsibility at a time into focused helpers, services, or state objects before extending this type further.",
-                "Refactor this large type by identifying one overloaded responsibility and extracting it into a focused helper, service, or state object. Preserve public behavior, keep the API stable where possible, and make the remaining type clearly narrower in scope."),
-            [BestPracticeRuleCatalog.BP1019.Code] = new(
-                "Disposable resources that are not scoped explicitly are easy to leak across exceptions and early returns.",
-                "Wrap the disposable resource in using or await using so cleanup is guaranteed.",
-                "Refactor this resource usage so disposal is explicit and exception-safe. Prefer using or await using around the narrowest lifetime that still works."),
+                "Refactor this large type by identifying one overloaded responsibility and extracting it into a focused helper, service, " +
+                "or state object. Preserve public behavior, keep the API stable where possible, and make the remaining type clearly " +
+                "narrower in scope."),
             [BestPracticeRuleCatalog.BP1020.Code] = new(
                 "Reading the current time repeatedly inside a loop can create inconsistent comparisons and makes tests harder to stabilize.",
                 "Capture the time value once before the loop and reuse it inside the loop body.",
@@ -196,15 +200,24 @@ internal static class BestPracticeRuleMetadata
             [BestPracticeRuleCatalog.BP1043.Code] = new(
                 "Switching to the Visual Studio UI thread too early and then doing substantial work there can freeze the IDE and make the bridge look hung.",
                 "Keep the command on a background thread by default and limit UI-thread work to the smallest block that truly requires DTE or shell services.",
-                "Refactor this method so it stays off the Visual Studio UI thread by default. Move SwitchToMainThreadAsync as close as possible to the specific DTE or shell call that needs it, and move back to background work for parsing, shaping, and serialization."),
+                "Refactor this method so it stays off the Visual Studio UI thread by default. Move SwitchToMainThreadAsync as close as " +
+                "possible to the specific DTE or shell call that needs it, and move back to background work for parsing, shaping, and " +
+                "serialization."),
             [BestPracticeRuleCatalog.BP1044.Code] = new(
                 "Diagnostic suppression hides warnings and messages from both humans and models, which makes the codebase look healthier than it really is.",
                 "Remove pragma, .editorconfig, NoWarn, ruleset, or SuppressMessage suppression settings and fix the underlying diagnostic unless there is a rare, documented compatibility reason not to.",
-                "Delete this diagnostic suppression and fix the underlying analyzer or compiler diagnostic directly. This includes pragma suppression, .editorconfig severity downgrades to none or silent, NoWarn entries, ruleset suppressions, and SuppressMessage attributes. If the current diagnostics result shows more than 10 BP1044 rows, stop and ask the user before making a broad suppression cleanup pass. Only keep a suppression when there is a documented, unavoidable compatibility reason, and then explain that reason next to the suppression."),
+                "Delete this diagnostic suppression and fix the underlying analyzer or compiler diagnostic directly. This includes pragma " +
+                "suppression, .editorconfig severity downgrades to none or silent, NoWarn entries, ruleset suppressions, and " +
+                "SuppressMessage attributes. If the current diagnostics result shows more than 10 BP1044 rows, stop and ask the user " +
+                "before making a broad suppression cleanup pass. Only keep a suppression when there is a documented, unavoidable " +
+                "compatibility reason, and then explain that reason next to the suppression."),
             [BestPracticeRuleCatalog.BP1045.Code] = new(
                 "Marker comments like TODO, FIXME, XXX, HACK, TBD, and BUGBUG are easy to forget in code review and leave uncertain work hidden in the codebase instead of tracked in a visible backlog.",
                 "Resolve the marker comment or move the work into a tracked issue, then remove the marker from the code.",
-                "Find the work described by this marker comment and either implement it now or move it into a tracked issue or work item with enough context for follow-up. Remove the marker comment from the code once the work is tracked or resolved. Treat TODO, FIXME, XXX, HACK, TBD, and BUGBUG as reminders to finish or formally track the work, not as permanent code annotations."),
+                "Find the work described by this marker comment and either implement it now or move it into a tracked issue or work item " +
+                "with enough context for follow-up. Remove the marker comment from the code once the work is tracked or resolved. Treat " +
+                "TODO, FIXME, XXX, HACK, TBD, and BUGBUG as reminders to finish or formally track the work, not as permanent code " +
+                "annotations."),
         };
     }
 }

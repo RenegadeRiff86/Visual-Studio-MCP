@@ -37,6 +37,7 @@ internal static class ErrorListConstants
     public const int MaxSymbolsPerDiagnostic = 8;
     public const int MainThreadScopeWarningThreshold = 20;
     public const int MainThreadSwitchEarlyLineThreshold = 6;
+    public const int LineTooLongThreshold = 250;
 
     public const string SeverityKey = "severity";
     public const string CodeKey = "code";
@@ -83,7 +84,6 @@ internal static class ErrorListConstants
     public const string BP1016HelpUri = "https://learn.microsoft.com/en-us/dotnet/csharp/fundamentals/coding-style/coding-conventions";
     public const string BP1017HelpUri = "https://learn.microsoft.com/en-us/dotnet/csharp/fundamentals/coding-style/coding-conventions";
     public const string BP1018HelpUri = "https://learn.microsoft.com/en-us/dotnet/csharp/fundamentals/coding-style/coding-conventions";
-    public const string BP1019HelpUri = "https://learn.microsoft.com/en-us/dotnet/standard/garbage-collection/using-objects";
     public const string BP1020HelpUri = "https://learn.microsoft.com/en-us/dotnet/api/system.datetime.utcnow";
     public const string BP1021HelpUri = "https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/builtin-types/reference-types";
     public const string BP1022HelpUri = "https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#r11-avoid-calling-new-and-delete-explicitly";
@@ -110,8 +110,15 @@ internal static class ErrorListConstants
     public const string BP1043HelpUri = "https://learn.microsoft.com/en-us/visualstudio/extensibility/managing-multiple-threads-in-managed-code?view=vs-2022";
     public const string BP1044HelpUri = "https://learn.microsoft.com/en-us/dotnet/fundamentals/code-analysis/suppress-warnings";
     public const string BP1045HelpUri = "https://learn.microsoft.com/en-us/dotnet/csharp/fundamentals/coding-style/coding-conventions#commenting-conventions";
+    public const string BP1046HelpUri = "https://learn.microsoft.com/en-us/dotnet/csharp/fundamentals/coding-style/coding-conventions";
 
-    public static readonly string[] BestPracticeCodeExtensionValues = [".cs", ".vb", ".fs", ".fsi", ".fsx", ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".py", ".ps1", ".psm1", ".psd1", ".editorconfig", ".globalconfig", ".csproj", ".vbproj", ".fsproj", ".props", ".targets", ".ruleset"];
+    public static readonly string[] BestPracticeCodeExtensionValues =
+    [
+        ".cs", ".vb", ".fs", ".fsi", ".fsx", ".c", ".cc", ".cpp",
+        ".cxx", ".h", ".hh", ".hpp", ".hxx", ".py", ".ps1", ".psm1",
+        ".psd1", ".editorconfig", ".globalconfig", ".csproj", ".vbproj", ".fsproj", ".props", ".targets",
+        ".ruleset",
+    ];
     public static readonly HashSet<string> BestPracticeCodeExtensions = new(BestPracticeCodeExtensionValues, StringComparer.OrdinalIgnoreCase);
     public static readonly string[] IgnoredBestPracticePathFragments = ["\\.vs\\", "\\bin\\", "\\obj\\", "\\output\\"];
     public static readonly string[] BuildOutputPaneNames = ["Build", "Build Order"];

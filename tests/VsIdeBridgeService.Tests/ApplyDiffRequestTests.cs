@@ -61,6 +61,37 @@ public sealed class ApplyDiffRequestTests
     }
 
     [Fact]
+    public void RejectsMixedTargetedAndDiffShapes()
+    {
+        JsonObject args = new()
+        {
+            ["file"] = "src/Foo.cs",
+            ["old_content"] = "old",
+            ["new_content"] = "new",
+            ["diff"] = "*** Begin Patch\n*** Update File: src/Foo.cs\n@@\n-old\n+new\n*** End Patch",
+        };
+
+        ApplyDiffValidationException exception = Assert.Throws<ApplyDiffValidationException>(() => ApplyDiffRequest.FromJsonObject(args));
+
+        Assert.Contains("Use exactly one shape", exception.Message);
+    }
+
+    [Fact]
+    public void RejectsSimpleSingleFileDiffToPreferTargetedForm()
+    {
+        const string Patch = "*** Begin Patch\n" +
+            "*** Update File: src/Foo.cs\n" +
+            "@@\n" +
+            "-old\n" +
+            "+new\n" +
+            "*** End Patch";
+
+        ApplyDiffValidationException exception = Assert.Throws<ApplyDiffValidationException>(() => ApplyDiffRequest.FromPatchText(Patch));
+
+        Assert.Contains("file' + 'old_content' + 'new_content", exception.Message);
+    }
+
+    [Fact]
     public void RejectsFullFileWriteShape()
     {
         JsonObject args = new()

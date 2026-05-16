@@ -20,6 +20,9 @@ internal sealed partial class PatchService
     private const int PatchedContentVerificationAttemptCount = 3;
     private const int PatchedContentVerificationDelayMilliseconds = 50;
 
+    /// <summary>Injected after construction; resolves handle IDs in path arguments.</summary>
+    internal HandleService? HandleService { get; set; }
+
     public async Task<JObject> ApplyEditorPatchAsync(
         DTE2 dte,
         DocumentService documentService,
@@ -45,7 +48,9 @@ internal sealed partial class PatchService
             patchSource = PathNormalization.NormalizeFilePath(patchFilePath);
             if (!File.Exists(patchSource))
             {
-                throw new CommandErrorException("document_not_found", $"Patch file not found: {patchSource}. Verify the path exists on disk and retry with the correct absolute path, or omit --patch-file and use --patch-text-base64 to pass the patch inline.");
+                throw new CommandErrorException(
+                    "document_not_found",
+                    $"Patch file not found: {patchSource}. Verify the path exists on disk and retry with the correct absolute path, or omit --patch-file and use --patch-text-base64 to pass the patch inline.");
             }
 
             patchText = File.ReadAllText(patchSource);
@@ -72,12 +77,22 @@ internal sealed partial class PatchService
             PatchPaths paths = ResolvePatchPaths(dte, resolvedBaseDirectory, filePatch);
             EnsurePatchHasMeaningfulOperations(filePatch, paths);
             EnsureSafeToModifyOpenDocument(dte, paths.SourcePath);
+
+            // Auto-reload if the document is open in the editor.
+            // Prevents state drift between patches — very important for local models.
+            if (IsDocumentOpenInEditor(dte, paths.SourcePath))
+            {
+                await documentService.ReloadDocumentAsync(paths.SourcePath).ConfigureAwait(true);
+            }
+
             if (paths.IsMove)
             {
                 EnsureSafeToModifyOpenDocument(dte, paths.TargetPath);
                 if (File.Exists(paths.TargetPath))
                 {
-                    throw new CommandErrorException("unsupported_operation", $"Patch move target already exists: {paths.TargetPath}. Delete or rename the existing file first, or change the *** Move to: path in the patch to a location that does not exist.");
+                    throw new CommandErrorException(
+                        "unsupported_operation",
+                        $"Patch move target already exists: {paths.TargetPath}. Delete or rename the existing file first, or change the *** Move to: path in the patch to a location that does not exist.");
                 }
             }
 
@@ -103,7 +118,9 @@ internal sealed partial class PatchService
                         alreadySatisfied = true;
                         break;
                     default:
-                        throw new CommandErrorException("unsupported_operation", $"Patch add target already exists with different content: {paths.TargetPath}. Use *** Update File: instead of *** Add File: in the patch header to modify an existing file.");
+                        throw new CommandErrorException(
+                            "unsupported_operation",
+                            $"Patch add target already exists with different content: {paths.TargetPath}. Use *** Update File: instead of *** Add File: in the patch header to modify an existing file.");
                 }
             }
             else
@@ -307,14 +324,19 @@ internal sealed partial class PatchService
 
     private static bool CanRevealEditedFile(string path)
     {
+        return !IsDiskBackedPatchFile(path);
+    }
+
+    private static bool IsDiskBackedPatchFile(string path)
+    {
         string extension = Path.GetExtension(path);
-        return !string.Equals(extension, ".csproj", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(extension, ".vcxproj", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(extension, ".vbproj", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(extension, ".fsproj", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(extension, ".props", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(extension, ".targets", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(extension, ".sln", StringComparison.OrdinalIgnoreCase);
+        return string.Equals(extension, ".csproj", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".vcxproj", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".vbproj", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".fsproj", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".props", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".targets", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".sln", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void ThrowIfPatchProducedNoContentChange(string targetPath, FilePatch filePatch, ApplyFilePatchResult result, bool alreadySatisfied)
@@ -410,5 +432,21 @@ internal sealed partial class PatchService
 
         return expectedContent.Length == currentContent.Length ? -1 : comparisonLength;
     }
+
+    private static bool IsDocumentOpenInEditor(DTE2 dte, string path)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+
+        foreach (Document doc in dte.Documents)
+        {
+            if (string.Equals(doc.FullName, path, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
 }
 

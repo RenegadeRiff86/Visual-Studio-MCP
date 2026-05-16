@@ -43,6 +43,35 @@ public sealed class SearchResultCollectionTests
     }
 
     [Theory]
+    [InlineData("C:\\repo\\src\\VsIdeBridge\\VsIdeBridge.vsct", "src/VsIdeBridge")]
+    [InlineData("C:/repo/src/VsIdeBridge/VsIdeBridge.vsct", "src\\VsIdeBridge")]
+    public void PathFilterMatchesAcrossSeparatorStyles(string resultPath, string pathFilter)
+    {
+        JsonObject bucket = new()
+        {
+            [SearchJsonNames.Count] = 1,
+            [SearchJsonNames.Matches] = new JsonArray
+            {
+                new JsonObject
+                {
+                    [SearchJsonNames.Path] = resultPath,
+                    [SearchJsonNames.Name] = "VsIdeBridge.vsct",
+                },
+            },
+        };
+
+        SearchResultCollection collection = SearchResultCollection.FromJsonObject(bucket, SearchJsonNames.Matches);
+        JsonObject result = collection.ToJsonObject(new(DefaultChunkSize, FirstChunkIndex, null, false, pathFilter, null, null, null, null, null), bucket, SearchJsonNames.Matches);
+
+        JsonArray rows = Assert.IsType<JsonArray>(result[SearchJsonNames.Matches]);
+        JsonObject row = Assert.IsType<JsonObject>(rows.Single());
+
+        Assert.Equal(1, result[SearchJsonNames.Count]!.GetValue<int>());
+        Assert.Equal(1, result[SearchJsonNames.FilteredCount]!.GetValue<int>());
+        Assert.Equal(resultPath, row[SearchJsonNames.Path]!.GetValue<string>());
+    }
+
+    [Theory]
     [InlineData("path", "src/Alpha.cs", "src/Zeta.cs")]
     [InlineData("name", "AlphaTool", "ZetaTool")]
     [InlineData("project", "AlphaProject", "ZetaProject")]

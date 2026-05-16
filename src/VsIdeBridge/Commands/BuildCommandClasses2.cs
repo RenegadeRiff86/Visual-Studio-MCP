@@ -4,6 +4,7 @@ using System.ComponentModel.Design;
 using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 using VsIdeBridge.Services;
+using VsIdeBridge.Tooling.Handles;
 
 namespace VsIdeBridge.Commands;
 
@@ -28,7 +29,11 @@ internal static partial class DebugBuildCommands
             {
                 if (!waitForCompletion)
                 {
-                    throw new CommandErrorException("invalid_arguments", $"wait_for_completion: false is not supported when a project is specified. To build a specific project, set wait_for_completion: true. To fire-and-forget a build, remove the project parameter to build the entire solution.");
+                    throw new CommandErrorException(
+                        "invalid_arguments",
+                        "wait_for_completion: false is not supported when a project is specified. " +
+                        "To build a specific project, set wait_for_completion: true. " +
+                        "To fire-and-forget a build, remove the project parameter to build the entire solution.");
                 }
 
                 await context.Runtime.BridgeApprovalService.RequestApprovalAsync(
@@ -139,7 +144,11 @@ internal static partial class DebugBuildCommands
                 CreateErrorListQuery(args),
                 forceRefresh).ConfigureAwait(true);
 
-            return new CommandExecutionResult($"Captured {errorListResult["count"]} Error List row(s).", errorListResult);
+            context.Handles.RegisterDiagnosticRows(HandleKind.Error, (JArray)errorListResult["rows"]!);
+            return new CommandExecutionResult(
+                BuildDiagnosticsCountSummary(errorListResult),
+                errorListResult,
+                BuildDiagnosticsCrossReferenceAdvisories(errorListResult, "Warning", "Message"));
         }
     }
 
@@ -159,7 +168,11 @@ internal static partial class DebugBuildCommands
                 CreateErrorListQuery(args, "warning"),
                 forceRefresh).ConfigureAwait(true);
 
-            return new CommandExecutionResult($"Captured {warningListResult["count"]} warning row(s).", warningListResult);
+            context.Handles.RegisterDiagnosticRows(HandleKind.Warning, (JArray)warningListResult["rows"]!);
+            return new CommandExecutionResult(
+                BuildDiagnosticsCountSummary(warningListResult),
+                warningListResult,
+                BuildDiagnosticsCrossReferenceAdvisories(warningListResult, "Error", "Message"));
         }
     }
 
@@ -179,7 +192,11 @@ internal static partial class DebugBuildCommands
                 CreateErrorListQuery(args, "message"),
                 forceRefresh).ConfigureAwait(true);
 
-            return new CommandExecutionResult($"Captured {messageListResult["count"]} message row(s).", messageListResult);
+            context.Handles.RegisterDiagnosticRows(HandleKind.Message, (JArray)messageListResult["rows"]!);
+            return new CommandExecutionResult(
+                BuildDiagnosticsCountSummary(messageListResult),
+                messageListResult,
+                BuildDiagnosticsCrossReferenceAdvisories(messageListResult, "Error", "Warning"));
         }
     }
 

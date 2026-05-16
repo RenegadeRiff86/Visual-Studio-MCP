@@ -21,7 +21,7 @@ internal static partial class ToolCatalog
     private const int DefaultSearchChunkSize = 25;
     private const string ReadChunkSizeDescription = "Slices per returned chunk (default 10). Set 0 to return all filtered slices.";
     private const string ReadChunkIndexDescription = "Zero-based slice chunk index to return (default 0).";
-    private const string ReadSortByDescription = "Optional slice sort field: path/file, name, requestedStartLine, requestedEndLine, actualStartLine, actualEndLine, lineCount, text, revealNote, or index.";
+    private const string ReadSortByDescription = "Optional slice sort field: path/file, name, requestedStartLine, requestedEndLine, actualStartLine, actualEndLine, lineCount, text, revealNote, or index (default index — preserves request order).";
     private const string ReadSortDirectionDescription = "Optional sort direction: asc or desc (default asc).";
     private const string ReadPathFilterDescription = "Optional path filter applied to returned slices.";
     private const string ReadTextFilterDescription = "Optional text filter applied to slice text, path, filename, and reveal note.";
@@ -46,15 +46,20 @@ internal static partial class ToolCatalog
             ToolDefinitionCatalog.ReadFile(
                 ObjectSchema(
                     Req("file", FileDesc),
-                    OptInt("start_line", "First 1-based line to read. Use with end_line."),
-                    OptInt("end_line", "Last 1-based line to read (inclusive). Use with start_line."),
+                    OptInt("start_line", "First 1-based line to read. Omit to start at line 1. To continue past a previous slice: set to (last line shown + 1)."),
+                    OptInt("end_line", "Last 1-based line (inclusive). Always a windowed range — there is no full-file mode."),
                     OptInt("line", "Anchor 1-based line. Use with context_before/context_after."),
                     OptInt("context_before", "Lines before anchor (default 10)."),
                     OptInt("context_after", "Lines after anchor (default 30)."),
                     OptBool("reveal_in_editor", "Reveal slice in editor (default true).")))
                 .WithSearchHints(BuildSearchHints(
                     workflow: [("apply_diff", "Apply targeted edits to the file"), ("file_outline", "Get symbol structure of the file")],
-                     related: [("read_file_batch", "Read multiple slices in one call — per range: start_line+end_line for a fixed range, or line+context_before+context_after for an anchor"), ("file_outline", "Get symbol line numbers first, then re-call read_file with start_line/end_line to read only that slice"), ("find_text", "Search for text to locate the right line before slicing")])),
+                     related: 
+                     [
+                         ("read_file_batch", "Read multiple slices in one call — per range: start_line+end_line for a fixed range, or line+context_before+context_after for an anchor"),
+                         ("file_outline", "Get symbol line numbers first, then re-call read_file with start_line/end_line to read only that slice"),
+                         ("find_text", "Search for text to locate the right line before slicing"),
+                     ])),
             "document-slice",
             a => Build(
                 ("file", OptionalString(a, "file")),
@@ -66,7 +71,7 @@ internal static partial class ToolCatalog
                     BoolArg("reveal-in-editor", a, "reveal_in_editor", true, true)),
             transformResponse: NormalizeReadSliceResponse);
 
-        yield return BridgeTool(
+        yield return new(
             ToolDefinitionCatalog.ReadFileBatch(
                 ObjectSchema(
                     WithReadSliceOptions(
@@ -87,10 +92,48 @@ internal static partial class ToolCatalog
                             true)))))
                 .WithSearchHints(BuildSearchHints(
                     workflow: [("apply_diff", "Apply changes after reading multiple files")],
-                    related: [("read_file", "Read a single slice with start_line/end_line"), ("file_outline", "Get line numbers for each symbol first, then batch the slices here"), ("find_text_batch", "Search multiple patterns to discover line numbers before batching")])),
-            "document-slices",
-            a => Build(("ranges", a?["ranges"]?.ToJsonString())),
-            transformResponse: CompactReadSlicesResponse);
+                    related:
+                    [
+                        ("read_file", "Read a single slice with start_line/end_line"),
+                        ("file_outline", "Get line numbers for each symbol first, then batch the slices here"),
+                        ("find_text_batch", "Search multiple patterns to discover line numbers before batching"),
+                    ])),
+            async (id, args, bridge) =>
+            {
+                JsonArray ranges = args?["ranges"]?.AsArray() ?? [];
+                JsonArray slices = [];
+                foreach (JsonNode? rangeNode in ranges)
+                {
+                    if (rangeNode is not JsonObject range) continue;
+                    string sliceArgs = Build(
+                        ("file",             OptionalString(range, "file")),
+                        ("start-line",       OptionalText(range, "start_line")),
+                        ("end-line",         OptionalText(range, "end_line")),
+                        (Line,               OptionalText(range, "line")),
+                        ("context-before",   OptionalText(range, "context_before")),
+                        ("context-after",    OptionalText(range, "context_after")),
+                        ("reveal-in-editor", "false"));
+                    JsonObject sliceResponse = await bridge.SendAsync(id, "document-slice", sliceArgs)
+                        .ConfigureAwait(false);
+                    NormalizeReadSliceResponse(sliceResponse, null);
+                    if (sliceResponse["Data"] is JsonObject sliceData)
+                        slices.Add(sliceData.DeepClone());
+                    else
+                        slices.Add(new JsonObject { ["error"] = sliceResponse["Summary"]?.GetValue<string>() ?? "Unknown error reading slice." });
+                }
+                JsonObject combined = new()
+                {
+                    ["Success"]  = true,
+                    ["Summary"]  = $"Captured {slices.Count} slice(s).",
+                    ["Warnings"] = new JsonArray(),
+                    ["Data"]     = new JsonObject
+                    {
+                        ["count"]  = slices.Count,
+                        ["slices"] = slices,
+                    },
+                };
+                return BridgeResult(CompactReadSlicesResponse(combined, args));
+            });
     }
 
     private static (string Name, JsonObject Schema, bool Required)[] WithReadSliceOptions(
@@ -271,10 +314,11 @@ internal static partial class ToolCatalog
                 int filteredCount = data[SearchJsonNames.FilteredCount]?.GetValue<int>() ?? count;
                 int totalCount = data[SearchJsonNames.TotalCount]?.GetValue<int>() ?? filteredCount;
                 string query = data[Query]?.GetValue<string>() ?? OptionalString(args, Query) ?? string.Empty;
+                const string SearchToolsHint = " Tip: find_text and search_symbols also return h: handles you can pass directly to apply_diff. Call list_tools_by_category({\"category\":\"search\"}) to see all search tools.";
                 string text = totalCount == 0 || filteredCount == 0
-                    ? $"find_files: no file(s) found for '{query}'. If you expected a pattern match, try glob instead."
-                    : ToolResultFormatter.StructuredToolResult(response, args).AsObject()["content"]?[0]?["text"]?.GetValue<string>()
-                        ?? $"find_files: found {count} file(s) in this chunk.";
+                    ? $"find_files: no file(s) found for '{query}'. If you expected a pattern match, try glob instead.{SearchToolsHint}"
+                    : (ToolResultFormatter.StructuredToolResult(response, args).AsObject()["content"]?[0]?["text"]?.GetValue<string>()
+                        ?? $"find_files: found {count} file(s) in this chunk.") + SearchToolsHint;
 
                 return new JsonObject
                 {
@@ -604,7 +648,12 @@ internal static partial class ToolCatalog
                     },
                 },
             },
-            ["required"] = new JsonArray { "query", "pathFilter", SearchExtensionsProperty, "includeNonProject", "count", "totalCount", "filteredCount", "chunkIndex", "chunkSize", "chunkCount", "chunkStart", "chunkEnd", "hasMoreChunks", "truncated", "chunkOutOfRange", "matches" },
+            ["required"] = new JsonArray
+            {
+                "query", "pathFilter", SearchExtensionsProperty, "includeNonProject", "count", "totalCount",
+                "filteredCount", "chunkIndex", "chunkSize", "chunkCount", "chunkStart", "chunkEnd",
+                "hasMoreChunks", "truncated", "chunkOutOfRange", "matches",
+            },
             ["additionalProperties"] = false,
         };
 
@@ -676,7 +725,8 @@ internal static partial class ToolCatalog
         yield return new("glob",
             "Find files by glob pattern — use instead of Glob. " +
             "Supports **/*.cs, src/**/*.tsx, *.sln and any pattern supported by " +
-            "Microsoft.Extensions.FileSystemGlobbing. Root defaults to solution directory.",
+            "Microsoft.Extensions.FileSystemGlobbing. Root defaults to solution directory. " +
+            "Each match includes a \"handle\" field (f:N) — pass it as the file argument to read_file, file_outline, apply_diff, or write_file instead of copying the full path.",
             ObjectSchema(WithSearchResultOptions(
                 Req("pattern", "Glob pattern, e.g. \"**/*.cs\", \"src/**/*.tsx\", \"*.sln\"."),
                 Opt(Path, "Root directory. Defaults to solution directory."),

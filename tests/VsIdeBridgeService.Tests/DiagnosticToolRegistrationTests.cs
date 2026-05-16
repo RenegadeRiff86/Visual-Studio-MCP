@@ -20,6 +20,7 @@ public sealed class DiagnosticToolRegistrationTests
         "code",
         "project",
         "path",
+        "file",
         "text",
         "group_by",
     ];
@@ -55,6 +56,44 @@ public sealed class DiagnosticToolRegistrationTests
         Assert.Contains("list_warnings", definition.Aliases);
         Assert.Contains("diagnostic_warnings", definition.Aliases);
         Assert.NotNull(definition.SearchHints);
+    }
+
+    [Theory]
+    [InlineData(true, false, false, true)]
+    [InlineData(true, true, false, false)]
+    [InlineData(false, false, false, false)]
+    public void SolutionBuildCourtesyWaitOnlyAppliesToDefaultWaits(
+        bool waitForCompletion,
+        bool waitForCompletionExplicit,
+        bool includeProject,
+        bool expected)
+    {
+        Assert.Equal(expected, ToolCatalog.ShouldUseCourtesyWaitForBuild(
+            waitForCompletion,
+            waitForCompletionExplicit,
+            includeProject,
+            args: null));
+    }
+
+    [Fact]
+    public void ProjectBuildDoesNotUseCourtesyWait()
+    {
+        JsonObject args = new() { ["project"] = "VsIdeBridgeService" };
+
+        Assert.False(ToolCatalog.ShouldUseCourtesyWaitForBuild(
+            waitForCompletion: true,
+            waitForCompletionExplicit: false,
+            includeProject: true,
+            args));
+    }
+
+    [Fact]
+    public void BuildToolsDescribeExplicitWaitAsTenMinutes()
+    {
+        JsonObject properties = GetSchemaProperties(GetDefinition("rebuild"));
+        string description = properties["wait_for_completion"]!["description"]!.GetValue<string>();
+
+        Assert.Contains("wait up to 10 minutes", description);
     }
 
     private static ToolDefinition GetDefinition(string toolName)

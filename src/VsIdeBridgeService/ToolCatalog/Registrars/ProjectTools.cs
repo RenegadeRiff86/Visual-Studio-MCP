@@ -131,6 +131,11 @@ internal static partial class ToolCatalog
         };
 
     private static IEnumerable<ToolEntry> ProjectManagementTools()
+        => ProjectSolutionTools()
+            .Concat(LaunchProfileTools())
+            .Concat(ProjectFileTools());
+
+    private static IEnumerable<ToolEntry> ProjectSolutionTools()
     {
         yield return BridgeTool("add_project",
             "Add an existing or new project to the solution.",
@@ -197,24 +202,39 @@ internal static partial class ToolCatalog
             searchHints: BuildSearchHints(
                 workflow: [("debug_start", "Start debugging the startup project"), ("build", "Build the startup project")],
                 related: [(ListProjectsTool, "List projects to find the right name"), ("list_launch_profiles", "List solution launch profiles")]));
+    }
 
+    private static IEnumerable<ToolEntry> LaunchProfileTools()
+    {
         yield return BridgeTool("list_launch_profiles",
-            "List all solution-level launch profiles from the .slnLaunch file. These are the named profiles shown in the startup project dropdown in the VS toolbar.",
+            "List all solution-level launch profiles from the .slnLaunch file. " +
+            "A .slnLaunch file is a JSON array that lives next to the .sln file and defines named multi-project startup configurations — " +
+            "the same profiles that appear in the startup dropdown in the VS toolbar. " +
+            "Each profile has a Name and a Projects array; each project entry has a Path (relative to the solution), " +
+            "an Action (Start, StartWithoutDebugging, or None), and an optional DebugTarget. " +
+            "Returns profile names, project counts, and per-project path/action/debugTarget. " +
+            "Call this first to discover available profile names before calling set_launch_profile.",
             EmptySchema(), "list-launch-profiles", _ => Empty(), Project,
             searchHints: BuildSearchHints(
                 workflow: [("set_launch_profile", "Activate one of the listed profiles")],
                 related: [("set_startup_project", "Set a single startup project instead"), (ListProjectsTool, "List projects in the solution")]));
 
         yield return BridgeTool("set_launch_profile",
-            "Activate a named launch profile from the .slnLaunch file. Sets the startup projects and their debug targets. Supports exact or partial name matching (case-insensitive).",
-            ObjectSchema(Req("name", "Launch profile name (or partial match).")),
+            "Activate a named launch profile from the .slnLaunch file, switching VS's startup project selection immediately. " +
+            "Supports exact or partial name matching (case-insensitive); partial match must be unambiguous — if multiple profiles match the query an error lists them so you can be more specific. " +
+            "Only projects with Action 'Start' or 'StartWithoutDebugging' become startup projects; projects with Action 'None' are listed in the result but not activated. " +
+            "Call list_launch_profiles first to see available profile names.",
+            ObjectSchema(Req("name", "Launch profile name (or partial match, case-insensitive). Use the exact name from list_launch_profiles to avoid ambiguity.")),
             "set-launch-profile",
             a => Build(("name", OptionalString(a, "name"))),
             Project,
             searchHints: BuildSearchHints(
                 workflow: [("debug_start", "Start debugging with the activated profile"), ("build", "Build the startup projects")],
                 related: [("list_launch_profiles", "List available profiles first"), ("set_startup_project", "Set a single startup project instead")]));
+    }
 
+    private static IEnumerable<ToolEntry> ProjectFileTools()
+    {
         yield return BridgeTool("add_file_to_project",
             "Add an existing FileArg to a project.",
             ObjectSchema(
@@ -260,11 +280,11 @@ internal static partial class ToolCatalog
                 related: [("python_sync_env", "Sync bridge interpreter to VS project")]));
 
         yield return BridgeTool("python_set_startup_file",
-            "Set the startup FileArg for the active Python project.",
+            "Set the startup file for the active Python project.",
             ObjectSchema(
-                Req(FileArg, "Path to the Python FileArg to set as startup."),
+                Req(FileArg, "Path to the Python file to set as startup."),
                 Opt(Project, "Python project name or path. Defaults to the active project.")),
-            "set-python-startup-FileArg",
+            "set-python-startup-file",
             a => Build(
                 (FileArg, OptionalString(a, FileArg)),
                 (Project, OptionalString(a, Project))),
@@ -273,10 +293,10 @@ internal static partial class ToolCatalog
                 related: [("python_get_startup_file", "Read the current startup file")]));
 
         yield return BridgeTool("python_get_startup_file",
-            "Get the startup FileArg configured for the active Python project.",
+            "Get the startup file configured for the active Python project.",
             ObjectSchema(
                 Opt(Project, "Python project name or path. Defaults to the active project.")),
-            "get-python-startup-FileArg",
+            "get-python-startup-file",
             a => Build((Project, OptionalString(a, Project))),
             Project,
             searchHints: BuildSearchHints(

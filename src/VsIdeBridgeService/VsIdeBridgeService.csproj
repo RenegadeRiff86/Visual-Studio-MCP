@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
@@ -11,6 +11,10 @@
     <DisableMSBuildAssemblyCopyCheck>true</DisableMSBuildAssemblyCopyCheck>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\GitTools.cs" Link="GitTools.cs" />
+    <Compile Include="..\GitHubTools.cs" Link="GitHubTools.cs" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="LibGit2Sharp" Version="0.31.0" />
@@ -30,5 +34,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\VsIdeBridge.Discovery\VsIdeBridge.Discovery.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VsIdeBridge.ServiceDomain\VsIdeBridge.ServiceDomain.csproj" />
   </ItemGroup>
 </Project>

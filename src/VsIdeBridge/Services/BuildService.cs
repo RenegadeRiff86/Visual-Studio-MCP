@@ -253,16 +253,27 @@ internal sealed class BuildService(ReadinessService readinessService)
         if (buildManager is not null)
         {
             BuildCompletionWaiter waiter = new(buildManager);
+            using CancellationTokenSource launchCts = new();
             JoinableTask executeTask = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
             {
                 await Task.Yield();
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(CancellationToken.None);
                 try { dte.ExecuteCommand("Build.RunCodeAnalysisonSolution"); }
-                catch (COMException ex) { BridgeActivityLog.LogWarning(nameof(BuildService), "Failed to start solution code analysis command", ex); }
+                catch (COMException ex)
+                {
+                    BridgeActivityLog.LogWarning(nameof(BuildService), "Failed to start solution code analysis command", ex);
+                    launchCts.Cancel();
+                }
             });
             try
             {
-                await BuildServiceHelpers.WaitForBuildEventAsync(waiter.CompletionTask, deadline, context.CancellationToken, timeoutMessage).ConfigureAwait(false);
+                using CancellationTokenSource linkedCts = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken, launchCts.Token);
+                await BuildServiceHelpers.WaitForBuildEventAsync(waiter.CompletionTask, deadline, linkedCts.Token, timeoutMessage).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (launchCts.IsCancellationRequested && !context.CancellationToken.IsCancellationRequested)
+            {
+                await executeTask;
+                throw new CommandErrorException("analysis_launch_failed", "Code analysis could not be started. Check the build output for details.");
             }
             finally
             {

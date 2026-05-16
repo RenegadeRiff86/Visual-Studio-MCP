@@ -13,4 +13,10 @@
     <SourceRoot Include="C:\Users\elsto\.nuget\packages\" />
     <SourceRoot Include="C:\Program Files (x86)\Microsoft Visual Studio\Shared\NuGetPackages\" />
   </ItemGroup>
+  <PropertyGroup Condition=" '$(TargetFramework)' == 'net472' AND '$(ExcludeRestorePackageImports)' != 'true' ">
+    <PkgMicrosoft_CodeAnalysis_NetAnalyzers Condition=" '$(PkgMicrosoft_CodeAnalysis_NetAnalyzers)' == '' ">C:\Users\elsto\.nuget\packages\microsoft.codeanalysis.netanalyzers\10.0.202</PkgMicrosoft_CodeAnalysis_NetAnalyzers>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(TargetFramework)' == 'net8.0' AND '$(ExcludeRestorePackageImports)' != 'true' ">
+    <PkgMicrosoft_CodeAnalysis_NetAnalyzers Condition=" '$(PkgMicrosoft_CodeAnalysis_NetAnalyzers)' == '' ">C:\Users\elsto\.nuget\packages\microsoft.codeanalysis.netanalyzers\10.0.202</PkgMicrosoft_CodeAnalysis_NetAnalyzers>
+  </PropertyGroup>
 </Project>

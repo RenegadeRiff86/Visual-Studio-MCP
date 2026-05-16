@@ -11,7 +11,17 @@ C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Diagnost
 C:\Users\elsto\source\repos\vs-ide-bridge-major-cleanup\src\VsIdeBridge.Diagnostics\obj\Release\net472\VsIdeBridge.Diagnostics.pdb
 C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Diagnostics\bin\Release\net472\VsIdeBridge.Diagnostics.dll
 C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Diagnostics\bin\Release\net472\VsIdeBridge.Diagnostics.pdb
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Diagnostics\bin\Release\net472\Microsoft.Bcl.AsyncInterfaces.dll
 C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Diagnostics\bin\Release\net472\Newtonsoft.Json.dll
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Diagnostics\bin\Release\net472\System.Buffers.dll
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Diagnostics\bin\Release\net472\System.IO.Pipelines.dll
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Diagnostics\bin\Release\net472\System.Memory.dll
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Diagnostics\bin\Release\net472\System.Numerics.Vectors.dll
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Diagnostics\bin\Release\net472\System.Runtime.CompilerServices.Unsafe.dll
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Diagnostics\bin\Release\net472\System.Text.Encodings.Web.dll
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Diagnostics\bin\Release\net472\System.Text.Json.dll
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Diagnostics\bin\Release\net472\System.Threading.Tasks.Extensions.dll
+C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Diagnostics\bin\Release\net472\System.ValueTuple.dll
 C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Diagnostics\obj\Release\net472\VsIdeBridge.Diagnostics.csproj.AssemblyReference.cache
 C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Diagnostics\obj\Release\net472\VsIdeBridge.Diagnostics.GeneratedMSBuildEditorConfig.editorconfig
 C:\Users\elsto\source\repos\vs-ide-bridge\src\VsIdeBridge.Diagnostics\obj\Release\net472\VsIdeBridge.Diagnostics.AssemblyInfoInputs.cache

@@ -89,6 +89,8 @@ internal static partial class IdeCoreCommands
             ["bestPracticeDiagnostics"] = context.Runtime.UiSettings.BestPracticeDiagnosticsEnabled,
             ["goToEditedParts"] = context.Runtime.UiSettings.GoToEditedParts,
             ["allowBridgeBuild"] = context.Runtime.UiSettings.AllowBridgeBuild,
+            ["httpServerEnabled"] = HttpServerStateManager.IsEnabled,
+            ["streamableHttpServerEnabled"] = StreamableHttpServerStateManager.IsEnabled,
         };
     }
 
@@ -153,6 +155,102 @@ internal static partial class IdeCoreCommands
         }
     }
 
+    private static async Task<CommandExecutionResult> ToggleStreamableHttpServerAsync(IdeCommandContext _)
+    {
+        bool enabled = !StreamableHttpServerStateManager.IsEnabled;
+
+        try
+        {
+            if (enabled)
+                await StreamableHttpServerStateManager.EnableAndReconcileAsync().ConfigureAwait(true);
+            else
+                await StreamableHttpServerStateManager.DisableAndReconcileAsync().ConfigureAwait(true);
+
+            string statusMessage = enabled
+                ? $"Streamable HTTP MCP server enabled on {StreamableHttpServerStateManager.Url}"
+                : "Streamable HTTP MCP server disabled.";
+
+            return new CommandExecutionResult(
+                statusMessage,
+                new JObject
+                {
+                    ["enabled"] = enabled,
+                    ["port"] = StreamableHttpServerStateManager.DefaultPort,
+                    ["url"] = StreamableHttpServerStateManager.Url
+                });
+        }
+        catch (Exception ex) when (ex is not null)
+        {
+            throw new CommandErrorException("streamable_http_toggle_failed", $"Failed to toggle the Streamable HTTP server: {ex.Message}. Wait a moment and retry, or restart Visual Studio if it persists.");
+        }
+    }
+
+    internal sealed class IdeToggleStreamableHttpServerMenuCommand : IdeCommandBase
+    {
+        public IdeToggleStreamableHttpServerMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x0269, acceptsParameters: false)
+        {
+            MenuCommand.BeforeQueryStatus += (_, _) => MenuCommand.Checked = StreamableHttpServerStateManager.IsEnabled;
+        }
+
+        protected override string CanonicalName => "Tools.VsIdeBridgeToggleStreamableHttpServer";
+
+        internal override bool AllowAutomationInvocation => false;
+
+        protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+        {
+            return ToggleStreamableHttpServerAsync(context);
+        }
+    }
+
+    private static async Task<CommandExecutionResult> ToggleBestPracticeAsync(IdeCommandContext context)
+    {
+        // Read from _uiSettings (the authoritative flag read by RefreshBestPracticeDiagnosticsAsync).
+        // Default is true when the setting has never been written.
+        bool enabling = !context.Runtime.UiSettings.BestPracticeDiagnosticsEnabled;
+        try
+        {
+            // Keep both state stores in sync: _uiSettings gates RefreshBestPracticeDiagnosticsAsync;
+            // BestPracticeStateManager gates AnalyzeBestPracticeFindings (static path used by pre-write checks).
+            context.Runtime.UiSettings.BestPracticeDiagnosticsEnabled = enabling;
+            if (enabling)
+                BestPracticeStateManager.Enable();
+            else
+                BestPracticeStateManager.Disable();
+
+            await context.Runtime.ErrorListService
+                .RefreshBestPracticeDiagnosticsAsync(context)
+                .ConfigureAwait(true);
+
+            string msg = enabling
+                ? "Best-practice analysis enabled."
+                : "Best-practice analysis disabled.";
+            return new CommandExecutionResult(msg, new JObject { ["enabled"] = enabling });
+        }
+        catch (Exception ex) when (ex is not null)
+        {
+            throw new CommandErrorException("best_practice_toggle_failed",
+                $"Failed to toggle best-practice analysis: {ex.Message}.");
+        }
+    }
+
+    internal sealed class IdeToggleBestPracticeMenuCommand : IdeCommandBase
+    {
+        public IdeToggleBestPracticeMenuCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
+            : base(package, runtime, commandService, 0x026A, acceptsParameters: false)
+        {
+            // Read from _uiSettings to match the toggle's authoritative state store.
+            MenuCommand.BeforeQueryStatus += (_, _) => MenuCommand.Checked = runtime.UiSettings.BestPracticeDiagnosticsEnabled;
+        }
+
+        protected override string CanonicalName => "Tools.VsIdeBridgeToggleBestPractice";
+
+        internal override bool AllowAutomationInvocation => false;
+
+        protected override Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
+            => ToggleBestPracticeAsync(context);
+    }
+
     internal sealed class IdeRequestApprovalCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService)
         : IdeCommandBase(package, runtime, commandService, 0x024B)
     {
@@ -189,7 +287,12 @@ internal static partial class IdeCoreCommands
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
             JObject state = await context.Runtime.IdeStateService.GetStateAsync(context.Dte).ConfigureAwait(true);
-            return new CommandExecutionResult("IDE state captured.", state);
+            return new CommandExecutionResult(
+                "IDE state captured. " +
+                "Next: call_tool with name \"errors\" to check the Error List, " +
+                "\"read_file\" to read a file, \"find_text\" to search, " +
+                "\"list_projects\" to list projects, or \"list_tool_categories\" to browse all available tools.",
+                state);
         }
     }
 

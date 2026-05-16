@@ -38,8 +38,13 @@ internal static partial class SolutionProjectCommands
                 properties[name] = value;
             }
 
+            string propertyWord = properties.Count == 1 ? "property" : "properties";
+            string missingSuffix = requestedNameArray.Length > 0 && filteredProperties.Count < requestedNameArray.Length
+                ? $" ({requestedNameArray.Length - filteredProperties.Count} requested name(s) not found)"
+                : string.Empty;
+
             return new CommandExecutionResult(
-                $"Read {properties.Count} project propert{(properties.Count == 1 ? "y" : "ies")} from '{projectName}'{(requestedNameArray.Length > 0 && filteredProperties.Count < requestedNameArray.Length ? $" ({requestedNameArray.Length - filteredProperties.Count} requested name(s) not found)" : string.Empty)}.",
+                $"Read {properties.Count} project {propertyWord} from '{projectName}'{missingSuffix}.",
                 new JObject
                 {
                     ["project"] = projectName,

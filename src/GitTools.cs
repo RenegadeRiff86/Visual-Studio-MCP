@@ -1,7 +1,7 @@
 using System.Text.Json.Nodes;
+using VsIdeBridgeService.SystemTools;
 using static VsIdeBridgeService.ArgBuilder;
 using static VsIdeBridgeService.SchemaHelpers;
-using VsIdeBridgeService.SystemTools;
 
 namespace VsIdeBridgeService;
 
@@ -36,7 +36,7 @@ internal static partial class ToolCatalog
             async (id, _, bridge) =>
             {
                 string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
-                return await GitRunner.RunAsync(id, repo, "status --porcelain=v1 --branch")
+                return await GitSdkReader.GetStatusAsync(id, repo)
                     .ConfigureAwait(false);
             },
             searchHints: BuildSearchHints(
@@ -69,14 +69,18 @@ internal static partial class ToolCatalog
                 related: [("git_current_branch", "Get only the active branch"), ("git_create_branch", "Create a new branch")]));
 
         yield return new("git_log",
-            "Show the commit history. Defaults to the last 20 commits in ISO date format.",
-            ObjectSchema(OptInt("max_count", "Max number of commits to show (default 20).")),
+            "Show the commit history. Defaults to the last 20 commits in ISO date format. " +
+            "Pass path to limit history to commits that touched a specific file or directory.",
+            ObjectSchema(
+                OptInt("max_count", "Max number of commits to show (default 20)."),
+                Opt("path", "Optional file or directory path; limits results to commits that touched it (equivalent to git log -- <path>).")),
             Git,
             async (id, args, bridge) =>
             {
                 string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
                 int max = args?["max_count"]?.GetValue<int?>() ?? 20;
-                return await GitSdkReader.GetLogAsync(id, repo, max).ConfigureAwait(false);
+                string? path = args?["path"]?.GetValue<string>();
+                return await GitSdkReader.GetLogAsync(id, repo, max, path).ConfigureAwait(false);
             },
             searchHints: BuildSearchHints(
                 workflow: [("git_show", "Inspect a specific commit from the log")],
@@ -89,8 +93,8 @@ internal static partial class ToolCatalog
             async (id, args, bridge) =>
             {
                 string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
-                string rev = args?["revision"]?.GetValue<string>() ?? "HEAD";
-                return await GitRunner.RunAsync(id, repo, $"show --no-color {EscapeArg(rev)}")
+                string rev = RequiredString(id, args, "revision");
+                return await GitRunner.RunArgumentsAsync(id, repo, ["show", "--no-color", rev])
                     .ConfigureAwait(false);
             },
             searchHints: BuildSearchHints(
@@ -100,14 +104,18 @@ internal static partial class ToolCatalog
     private static IEnumerable<ToolEntry> GitDiffAndMetaTools()
     {
         yield return new(GitDiffUnstagedTool,
-            "Show unstaged changes in the working tree (not yet git-added).",
-            ObjectSchema(OptInt("context", "Lines of context around each hunk (default 3).")),
+            "Show unstaged changes in the working tree (not yet git-added). " +
+            "Pass paths to scope the diff to specific files.",
+            ObjectSchema(
+                OptInt("context", "Lines of context around each hunk (default 3)."),
+                OptArr(Paths, "Optional list of file paths to scope the diff, e.g. [\"src/Foo.cs\"].")),
             Git,
             async (id, args, bridge) =>
             {
                 string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
                 int ctx = args?["context"]?.GetValue<int?>() ?? DefaultDiffContext;
-                return await GitRunner.RunAsync(id, repo, $"diff --no-color --unified={ctx}")
+                IEnumerable<string>? paths = GetPathListOrNull(args, Paths);
+                return await GitSdkReader.GetUnstagedDiffAsync(id, repo, ctx, paths)
                     .ConfigureAwait(false);
             },
             searchHints: BuildSearchHints(
@@ -115,14 +123,20 @@ internal static partial class ToolCatalog
                 related: [(GitDiffStagedTool, "See already-staged changes"), (GitStatusTool, "See which files changed")]));
 
         yield return new(GitDiffStagedTool,
-            "Show staged changes ready to commit (git-added but not yet committed).",
-            ObjectSchema(OptInt("context", "Lines of context around each hunk (default 3).")),
+            "Show staged changes ready to commit (git-added but not yet committed). " +
+            "Pass paths to scope the diff to specific files.",
+            ObjectSchema(
+                OptInt("context", "Lines of context around each hunk (default 3)."),
+                OptArr(Paths, "Optional list of file paths to scope the diff, e.g. [\"src/Foo.cs\"].")),
             Git,
             async (id, args, bridge) =>
             {
                 string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
                 int ctx = args?["context"]?.GetValue<int?>() ?? DefaultDiffContext;
-                return await GitRunner.RunAsync(id, repo, $"diff --cached --no-color --unified={ctx}")
+                List<string> gitArgs = ["diff", "--cached", "--no-color", $"--unified={ctx}"];
+                IEnumerable<string>? paths = GetPathListOrNull(args, Paths);
+                if (paths is not null) { gitArgs.Add("--"); gitArgs.AddRange(paths); }
+                return await GitRunner.RunArgumentsAsync(id, repo, gitArgs)
                     .ConfigureAwait(false);
             },
             searchHints: BuildSearchHints(
@@ -146,109 +160,89 @@ internal static partial class ToolCatalog
             async (id, _, bridge) =>
             {
                 string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
-                return await GitRunner.RunAsync(id, repo, "tag --list --sort=-version:refname")
+                return await GitRunner.RunArgumentsAsync(id, repo, ["tag", "--list", "--sort=-version:refname"])
                     .ConfigureAwait(false);
             },
             searchHints: BuildSearchHints(
                 related: [("git_log", "Browse commit history"), ("git_show", "Inspect a tag's commit")]));
 
-        yield return new("git_stash_list",
-            "List stash entries.",
-            EmptySchema(), Git,
-            async (id, _, bridge) =>
-            {
-                string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
-                return await GitRunner.RunAsync(id, repo, "stash list").ConfigureAwait(false);
-            },
-            searchHints: BuildSearchHints(
-                workflow: [("git_stash_pop", "Apply the most recent stash entry")],
-                related: [("git_stash_push", "Save changes to a new stash")]));
     }
 
     private static IEnumerable<ToolEntry> GitStagingCommitTools()
     {
         yield return new("git_add",
-            "Stage files for the next commit. Pass an array of paths relative to the repo root, " +
-            "or [\".\" ] to stage everything.",
-            ObjectSchema(ReqArr(Paths, "Array of file paths or globs to stage, e.g. [\"src/Foo.cs\"] or [\".\"].")),
-            Git,
-            async (id, args, bridge) =>
-            {
-                string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
-                string pathList = BuildPathList(args, Paths);
-                return await GitRunner.RunAsync(id, repo, $"add -- {pathList}")
-                    .ConfigureAwait(false);
-            },
-            searchHints: BuildSearchHints(
-                workflow: [(GitCommitTool, "Commit after staging"), (GitDiffStagedTool, "Review what was staged")],
-                related: [("git_restore", "Discard working-tree changes"), ("git_reset", "Unstage files"), (GitStatusTool, "Check which files are staged")]));
+                "Stage files for the next commit. Pass an array of paths relative to the repo root, " +
+                "or [\".\" ] to stage everything.",
+                ObjectSchema(ReqArr(Paths, "Array of file paths or globs to stage, e.g. [\"src/Foo.cs\"] or [\".\"].")),
+                Git,
+                 async (id, args, bridge) =>
+                {
+                    string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
+                    return await GitSdkReader.StageAsync(id, repo, GetPathList(args, Paths))
+                        .ConfigureAwait(false);
+                },
+                searchHints: BuildSearchHints(
+                    workflow: [(GitCommitTool, "Commit after staging"), (GitDiffStagedTool, "Review what was staged")],
+                    related: [("git_restore", "Discard working-tree changes"), ("git_reset", "Unstage files"), (GitStatusTool, "Check which files are staged")]));
 
-        yield return new("git_restore",
-            "Discard working-tree changes for the specified files, restoring them to HEAD. " +
-            "Does not touch the index.",
-            ObjectSchema(ReqArr(Paths, "Array of file paths to restore, e.g. [\"src/Foo.cs\"].")),
-            Git,
-            async (id, args, bridge) =>
-            {
-                string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
-                string pathList = BuildPathList(args, Paths);
-                return await GitRunner.RunAsync(id, repo,
-                    $"restore --source=HEAD --worktree -- {pathList}")
-                    .ConfigureAwait(false);
-            },
-            searchHints: BuildSearchHints(
-                related: [(GitStatusTool, "Check remaining changes"), (GitDiffUnstagedTool, "Preview changes before discarding"), ("git_reset", "Unstage instead of discard")]));
+            yield return new("git_restore",
+                "Discard working-tree changes for the specified files, restoring them to HEAD. " +
+                "Does not touch the index.",
+                ObjectSchema(ReqArr(Paths, "Array of file paths to restore, e.g. [\"src/Foo.cs\"].")),
+                Git,
+                 async (id, args, bridge) =>
+                {
+                    string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
+                    return await GitSdkReader.RestoreAsync(id, repo, GetPathList(args, Paths))
+                        .ConfigureAwait(false);
+                },
+                searchHints: BuildSearchHints(
+                    related: [(GitStatusTool, "Check remaining changes"), (GitDiffUnstagedTool, "Preview changes before discarding"), ("git_reset", "Unstage instead of discard")]));
 
-        yield return new("git_reset",
-            "Unstage files (mixed reset). If no paths are given, unstages everything.",
-            ObjectSchema(OptArr(Paths, "Array of paths to unstage, or omit for all.")),
-            Git,
-            async (id, args, bridge) =>
-            {
-                string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
-                string pathList = BuildPathList(args, Paths);
-                string pathSpec = pathList == "." ? string.Empty : $"-- {pathList}";
-                return await GitRunner.RunAsync(id, repo, $"reset {pathSpec}".TrimEnd())
-                    .ConfigureAwait(false);
-            },
-            searchHints: BuildSearchHints(
-                related: [("git_restore", "Discard working-tree changes"), ("git_diff_staged", "Review staged changes before resetting"), ("git_status", "Check resulting state")]));
+            yield return new("git_reset",
+                "Unstage files (mixed reset). If no paths are given, unstages everything.",
+                ObjectSchema(OptArr(Paths, "Array of paths to unstage, or omit for all.")),
+                Git,
+                 async (id, args, bridge) =>
+                {
+                    string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
+                    return await GitSdkReader.UnstageAsync(id, repo, GetPathListOrNull(args, Paths))
+                        .ConfigureAwait(false);
+                },
+                searchHints: BuildSearchHints(
+                    related: [("git_restore", "Discard working-tree changes"), ("git_diff_staged", "Review staged changes before resetting"), ("git_status", "Check resulting state")]));
 
-        yield return new(GitCommitTool,
-            "Create a commit with a message. Stage files with git_add first.",
-            ObjectSchema(Req(Message, "Commit message.")),
-            Git,
-            async (id, args, bridge) =>
-            {
-                string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
-                string msg = args?[Message]?.GetValue<string>() ?? string.Empty;
-                return await GitRunner.RunAsync(id, repo, $"commit -m {EscapeArg(msg)}")
-                    .ConfigureAwait(false);
-            },
-            searchHints: BuildSearchHints(
-                workflow: [(GitPushTool, "Push after committing"), (GitStatusTool, "Confirm clean working tree")],
-                related: [("git_add", "Stage files before committing"), ("git_commit_amend", "Amend the commit message"), (GitDiffStagedTool, "Review staged changes before committing")]));
+            yield return new(GitCommitTool,
+                "Create a commit with a message. Stage files with git_add first.",
+                ObjectSchema(Req(Message, "Commit message.")),
+                Git,
+                async (id, args, bridge) =>
+                {
+                    string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
+                    string msg = args?[Message]?.GetValue<string>() ?? string.Empty;
+                    return await GitSdkReader.CommitAsync(id, repo, msg)
+                        .ConfigureAwait(false);
+                },
+                searchHints: BuildSearchHints(
+                    workflow: [(GitPushTool, "Push after committing"), (GitStatusTool, "Confirm clean working tree")],
+                    related: [("git_add", "Stage files before committing"), ("git_commit_amend", "Amend the commit message"), (GitDiffStagedTool, "Review staged changes before committing")]));
 
-        yield return new("git_commit_amend",
-            "Amend the most recent commit. Pass a new message or set no_edit to true to keep it.",
-            ObjectSchema(
-                Opt(Message, "New commit message. Omit to use --no-edit."),
-                OptBool("no_edit", "Keep the existing commit message (default true when no message given).")),
-            Git,
-            async (id, args, bridge) =>
-            {
-                string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
-                string? msg = args?[Message]?.GetValue<string>();
-                bool noEdit = string.IsNullOrWhiteSpace(msg) &&
-                              (args?["no_edit"]?.GetValue<bool?>() ?? true);
-                string msgArg = !string.IsNullOrWhiteSpace(msg)
-                    ? $"-m {EscapeArg(msg)}"
-                    : noEdit ? "--no-edit" : string.Empty;
-                return await GitRunner.RunAsync(id, repo, $"commit --amend {msgArg}".TrimEnd())
-                    .ConfigureAwait(false);
-            },
-            searchHints: BuildSearchHints(
-                related: [(GitCommitTool, "Create a new commit instead"), (GitDiffStagedTool, "Review staged changes"), (GitStatusTool, "Check state after amending")]));
+            yield return new("git_commit_amend",
+                "Amend the most recent commit. Pass a new message or set no_edit to true to keep it.",
+                ObjectSchema(
+                    Opt(Message, "New commit message. Omit to use --no-edit."),
+                    OptBool("no_edit", "Keep the existing commit message (default true when no message given).")),
+                Git,
+                async (id, args, bridge) =>
+                {
+                    string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
+                    string? msg = args?[Message]?.GetValue<string>();
+                    // Pass null when no message supplied so AmendCommitAsync keeps the existing message.
+                    return await GitSdkReader.AmendCommitAsync(id, repo, msg)
+                        .ConfigureAwait(false);
+                },
+                searchHints: BuildSearchHints(
+                    related: [(GitCommitTool, "Create a new commit instead"), (GitDiffStagedTool, "Review staged changes"), (GitStatusTool, "Check state after amending")]));
     }
 
     private static IEnumerable<ToolEntry> GitBranchTools()
@@ -328,7 +322,7 @@ internal static partial class ToolCatalog
                 string remoteArg = string.IsNullOrWhiteSpace(remote) ? string.Empty : EscapeArg(remote);
                 string branchArg = string.IsNullOrWhiteSpace(branch) ? string.Empty : EscapeArg(branch);
                 return await GitRunner.RunNetworkAsync(id, repo,
-                    $"pull {remoteArg} {branchArg}".TrimEnd())
+                    string.Join(" ", new[] { "pull", remoteArg, branchArg }.Where(s => !string.IsNullOrEmpty(s))))
                     .ConfigureAwait(false);
             },
             searchHints: BuildSearchHints(
@@ -349,18 +343,17 @@ internal static partial class ToolCatalog
                 string branch = args?["branch"]?.GetValue<string>() ?? string.Empty;
                 bool setUpstream = args?["set_upstream"]?.GetValue<bool?>() ?? false;
                 string uFlag = setUpstream ? "-u" : string.Empty;
-               if (setUpstream && string.IsNullOrWhiteSpace(remote))
-                   remote = "origin";
-               string remoteArg = string.IsNullOrWhiteSpace(remote) ? string.Empty : EscapeArg(remote);
+                if (setUpstream && string.IsNullOrWhiteSpace(remote))
+                    remote = "origin";
+                string remoteArg = string.IsNullOrWhiteSpace(remote) ? string.Empty : EscapeArg(remote);
                 string branchArg = string.IsNullOrWhiteSpace(branch) ? string.Empty : EscapeArg(branch);
                 return await GitRunner.RunNetworkAsync(id, repo,
-                    $"push {uFlag} {remoteArg} {branchArg}".TrimEnd().Replace("  ", " "))
+                    string.Join(" ", new[] { "push", uFlag, remoteArg, branchArg }.Where(s => !string.IsNullOrEmpty(s))))
                     .ConfigureAwait(false);
             },
             searchHints: BuildSearchHints(
                 workflow: [(GitStatusTool, "Confirm clean state before pushing"), ("git_log", "Review commits being pushed")],
                 related: [(GitPullTool, "Pull before pushing to avoid conflicts"), ("git_remote_list", "Check available remotes")]));
-
     }
 
     private static IEnumerable<ToolEntry> GitMergeTools()
@@ -400,6 +393,18 @@ internal static partial class ToolCatalog
 
     private static IEnumerable<ToolEntry> GitStashTools()
     {
+        yield return new("git_stash_list",
+            "List stash entries.",
+            EmptySchema(), Git,
+            async (id, _, bridge) =>
+            {
+                string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
+                return await GitRunner.RunArgumentsAsync(id, repo, ["stash", "list"]).ConfigureAwait(false);
+            },
+            searchHints: BuildSearchHints(
+                workflow: [("git_stash_pop", "Apply the most recent stash entry")],
+                related: [("git_stash_push", "Save changes to a new stash")]));
+
         yield return new("git_stash_push",
             "Stash current working-tree and index changes.",
             ObjectSchema(
@@ -443,16 +448,31 @@ internal static partial class ToolCatalog
         => "\"" + value.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
 
     /// <summary>
-    /// Build a space-separated quoted path list from a JSON array arg.
+    /// Extract path strings from a JSON array arg for use with LibGit2Sharp.
+    /// Falls back to <c>["."]</c> if the arg is absent.
     /// </summary>
-    private static string BuildPathList(JsonObject? args, string argName)
+    private static IEnumerable<string> GetPathList(JsonObject? args, string argName)
     {
         if (args?[argName] is JsonArray arr)
-            return string.Join(" ", arr.Select(n => EscapeArg(n?.GetValue<string>() ?? string.Empty)));
+        {
+            List<string> items =
+            [
+                .. arr
+                    .Select(n => n?.GetValue<string>() ?? string.Empty)
+                    .Where(s => !string.IsNullOrWhiteSpace(s)),
+            ];
+            return items.Count > 0 ? items : ["."];
+        }
 
-        // Fallback: single string value.
         string? single = args?[argName]?.GetValue<string>();
-        return string.IsNullOrWhiteSpace(single) ? "." : EscapeArg(single);
+        return string.IsNullOrWhiteSpace(single) ? ["."] : [single];
     }
+
+    /// <summary>
+    /// Like <see cref="GetPathList"/> but returns <see langword="null"/> when the arg is absent,
+    /// signalling "all paths" to operations like unstage.
+    /// </summary>
+    private static IEnumerable<string>? GetPathListOrNull(JsonObject? args, string argName)
+        => args?[argName] is null ? null : GetPathList(args, argName);
 
 }

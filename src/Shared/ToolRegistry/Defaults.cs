@@ -21,13 +21,29 @@ public sealed partial class ToolRegistry
         "write_file",
     ];
 
+    private static readonly string[] DefaultRecommendedDiagnosticToolNames =
+    [
+        "errors",
+        "warnings",
+        "messages",
+        "diagnostics_snapshot",
+        "build_errors",
+        "read_output",
+    ];
+
     private static readonly string[] DefaultRecommendedBuildToolNames =
     [
-        "build",
         "build_errors",
+        "build",
+        "build_solution",
+        "rebuild_solution",
+        "rebuild",
         "errors",
+        "warnings",
+        "messages",
         "build_configurations",
         "set_build_configuration",
+        "read_output",
     ];
 
     private static readonly string[] DefaultRecommendedGitToolNames =
@@ -63,6 +79,7 @@ public sealed partial class ToolRegistry
         new("git", "Version control", "Bridge-managed Git and GitHub helpers, with fallback paths where needed."),
         new("python", "Python runtime", "Python environments, packages, and stateless scratchpad tools."),
         new("project", "Projects and solutions", "Projects, references, outputs, NuGet, and solution structure."),
+        new("developer_tools", "Bridge development", "Bridge-code-only maintenance tools for installed logs, release versioning, and VS IDE Bridge internals."),
         new("system", "Discovery and host", "Tool discovery, host control, and last-resort process execution."),
     ];
 

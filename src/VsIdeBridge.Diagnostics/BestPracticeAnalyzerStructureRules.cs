@@ -11,34 +11,6 @@ namespace VsIdeBridge.Diagnostics;
 
 internal static partial class BestPracticeAnalyzer
 {
-    // ── BP1019: Missing using for IDisposable (C#) ────────────────────────────
-
-    public static IEnumerable<JObject> FindMissingUsing(string file, string content)
-    {
-        int findingCount = 0;
-        foreach (Match match in NewDisposablePattern().Matches(content))
-        {
-            string line = BestPracticeAnalyzerHelpers.GetLineAt(content, match.Index);
-            if (line.TrimStart().StartsWith("using ", StringComparison.Ordinal)
-                || line.TrimStart().StartsWith("using(", StringComparison.Ordinal)
-                || line.TrimStart().StartsWith("await using", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            string varName = match.Groups[1].Value;
-            yield return DiagnosticRowFactory.CreateBestPracticeRow(
-                code: "BP1019",
-                message: $"'{varName}' is IDisposable but not wrapped in a 'using' statement. Resources may leak.",
-                file: file,
-                line: GetLineNumber(content, match.Index),
-                symbol: varName,
-                helpUri: BP1019HelpUri);
-            findingCount++;
-            if (findingCount >= MaxSuppressionFindingsPerFile) { yield break; }
-        }
-    }
-
     // ── BP1044: Diagnostic suppression ─────────────────────────────────────────
 
     public static IEnumerable<JObject> FindDiagnosticSuppressions(string file, string content)

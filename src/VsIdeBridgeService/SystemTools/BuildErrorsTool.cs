@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Text.Json.Nodes;
+using VsIdeBridge.ServiceDomain;
 
 namespace VsIdeBridgeService.SystemTools;
 
@@ -41,13 +42,13 @@ internal static partial class BuildErrorsTool
             .ConfigureAwait(false);
         sw.Stop();
 
-        List<JsonObject> allErrors = buildRun.Errors;
+        List<BuildDiagnostic> allErrors = buildRun.Diagnostics;
         int totalErrors = allErrors.Count;
         bool truncated = totalErrors > max;
 
         JsonArray errorArray = [];
-        foreach (JsonObject error in truncated ? allErrors.GetRange(0, max) : allErrors)
-            errorArray.Add(error);
+        foreach (BuildDiagnostic error in truncated ? allErrors.GetRange(0, max) : allErrors)
+            errorArray.Add(error.ToJson());
 
         JsonObject payload = new()
         {
@@ -109,7 +110,7 @@ internal static partial class BuildErrorsTool
         string combinedOutput = string.Join(Environment.NewLine, new[] { stdout, stderr }
             .Where(text => !string.IsNullOrWhiteSpace(text)));
 
-        List<JsonObject> errors = ParseCliBuildErrors(combinedOutput);
+        List<BuildDiagnostic> errors = ParseCliBuildErrors(combinedOutput);
 
         BuildRunCode resultCode = process.ExitCode == 0 ? BuildRunCode.Success : BuildRunCode.Failure;
         return new BuildRunResult(resultCode, errors);
@@ -136,21 +137,21 @@ internal static partial class BuildErrorsTool
         }
     }
 
-    private static List<JsonObject> ParseCliBuildErrors(string buildOutputText)
+    private static List<BuildDiagnostic> ParseCliBuildErrors(string buildOutputText)
     {
-        List<JsonObject> diagnostics = [];
+        List<BuildDiagnostic> diagnostics = [];
         string[] lines = buildOutputText.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
         foreach (string line in lines)
         {
-            JsonObject? diagnostic = TryParseMsBuildDiagnostic(line) ?? TryParseStructuredDiagnostic(line);
+            BuildDiagnostic? diagnostic = TryParseMsBuildDiagnostic(line) ?? TryParseStructuredDiagnostic(line);
             if (diagnostic is not null)
-                diagnostics.Add(diagnostic);
+                diagnostics.Add(diagnostic.Value);
         }
 
         return diagnostics;
     }
 
-    private static JsonObject? TryParseMsBuildDiagnostic(string line)
+    private static BuildDiagnostic? TryParseMsBuildDiagnostic(string line)
     {
         Match match = MsBuildDiagnosticPattern().Match(line);
         if (!match.Success || !string.Equals(match.Groups["severity"].Value, "error", StringComparison.OrdinalIgnoreCase))
@@ -158,7 +159,7 @@ internal static partial class BuildErrorsTool
 
         string filePath = match.Groups["file"].Value;
         string project = match.Groups["project"].Value;
-        return CreateCliDiagnostic(
+        return new BuildDiagnostic(
             filePath,
             int.TryParse(match.Groups["line"].Value, out int lineNumber) ? lineNumber : 1,
             int.TryParse(match.Groups["column"].Value, out int columnNumber) ? columnNumber : 1,
@@ -168,14 +169,14 @@ internal static partial class BuildErrorsTool
             project);
     }
 
-    private static JsonObject? TryParseStructuredDiagnostic(string line)
+    private static BuildDiagnostic? TryParseStructuredDiagnostic(string line)
     {
         Match match = StructuredDiagnosticPattern().Match(line);
         if (!match.Success || !string.Equals(match.Groups["severity"].Value, "error", StringComparison.OrdinalIgnoreCase))
             return null;
 
         string project = match.Groups["project"].Value;
-        return CreateCliDiagnostic(
+        return new BuildDiagnostic(
             string.Empty,
             1,
             1,
@@ -184,26 +185,6 @@ internal static partial class BuildErrorsTool
             project,
             project);
     }
-
-    private static JsonObject CreateCliDiagnostic(
-        string filePath,
-        int lineNumber,
-        int columnNumber,
-        string code,
-        string message,
-        string project,
-        string projectPath)
-        => new()
-        {
-            ["file"] = string.IsNullOrWhiteSpace(filePath) ? string.Empty : Path.GetFileName(filePath),
-            ["path"] = filePath,
-            ["line"] = lineNumber,
-            ["column"] = columnNumber,
-            ["code"] = code,
-            ["message"] = message,
-            ["project"] = project,
-            ["projectPath"] = projectPath,
-        };
 
     private static string ResolveDotnetExecutable(JsonNode? id)
     {
@@ -233,7 +214,7 @@ internal static partial class BuildErrorsTool
         Failure,
     }
 
-    private sealed record BuildRunResult(BuildRunCode ResultCode, List<JsonObject> Errors);
+    private sealed record BuildRunResult(BuildRunCode ResultCode, List<BuildDiagnostic> Diagnostics);
 
     private static string FindSolutionFile(string directory)
     {

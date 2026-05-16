@@ -52,7 +52,11 @@ internal static partial class ErrorListPatterns
     [GeneratedRegex(@"//.*?$|/\*.*?\*/", RegexOptions.Multiline)]
     public static partial Regex CSharpCommentPattern();
 
-    [GeneratedRegex(@"^[ \t]*(?:(?:public|private|protected|internal|static|virtual|override|abstract|sealed|async|new|partial|readonly)\s+)*(?!return\b|if\b|else\b|while\b|for\b|foreach\b|switch\b|catch\b|using\b|lock\b|yield\b|class\b|struct\b|interface\b|enum\b|record\b|namespace\b|delegate\b)[\w<>\[\],\?]+\s+(\w+)\s*(?:<[^>]+>)?\s*\(", RegexOptions.Multiline)]
+    [GeneratedRegex(
+        @"^[ \t]*(?:(?:public|private|protected|internal|static|virtual|override|abstract|sealed|async|new|partial|readonly)\s+)*(?" +
+        @"!return\b|if\b|else\b|while\b|for\b|foreach\b|switch\b|catch\b|using\b|lock\b|yield\b|class\b|struct\b|interface\b|enum\b" +
+        @"|record\b|namespace\b|delegate\b)[\w<>\[\],\?]+\s+(\w+)\s*(?:<[^>]+>)?\s*\(",
+        RegexOptions.Multiline)]
     public static partial Regex CSharpMethodSignaturePattern();
 
     [GeneratedRegex(@"^[ \t]*def\s+(\w+)\s*\(", RegexOptions.Multiline)]
@@ -144,9 +148,6 @@ internal static partial class ErrorListPatterns
 
     [GeneratedRegex(@"^[ \t]*(?:(?:public|private|protected|internal|static|readonly|volatile|const)\s+)+[\w<>\[\],\?\s]+\s+_?\w+\s*[=;]", RegexOptions.Multiline)]
     public static partial Regex CSharpFieldDeclPattern();
-
-    [GeneratedRegex(@"(?<!using\s*\([^)]*)\b(?:var|[\w<>\[\]]+)\s+(\w+)\s*=\s*new\s+(?:Stream(?:Reader|Writer)|FileStream|Http(?:Client|ResponseMessage)|SqlConnection|SqlCommand|Process|Timer|MemoryStream|BinaryReader|BinaryWriter|WebClient|TcpClient|UdpClient|NetworkStream|CryptoStream)\s*\(")]
-    public static partial Regex NewDisposablePattern();
 
     [GeneratedRegex(@"(?:for\s*\(|foreach\s*\(|while\s*\()[^{]*\{[^}]*DateTime\s*\.\s*(?:Now|UtcNow)", RegexOptions.Singleline)]
     public static partial Regex DateTimeInLoopPattern();

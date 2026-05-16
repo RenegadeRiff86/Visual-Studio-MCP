@@ -20,6 +20,62 @@ public sealed class ToolRecommendationTests
     }
 
     [Fact]
+    public void BuildDiagnosticsTaskPrioritizesBuildAndDiagnosticTools()
+    {
+        JsonObject recommendation = ToolCatalog.CreateRegistry().Definitions.RecommendTools(
+            "read current diagnostics and rebuild the active solution");
+        JsonArray tools = Assert.IsType<JsonArray>(recommendation["recommendations"]);
+
+        Assert.Contains(tools, item => HasName(item, "build_errors"));
+        Assert.Contains(tools, item => HasName(item, "rebuild_solution"));
+        Assert.Contains(tools, item => HasName(item, "errors"));
+        Assert.Contains(tools, item => HasName(item, "warnings"));
+        Assert.Contains(tools, item => HasName(item, "messages"));
+        Assert.Contains("rebuild_solution", recommendation["workflowHint"]!.GetValue<string>());
+
+        int buildErrorsIndex = IndexOf(tools, "build_errors");
+        int readFileIndex = IndexOf(tools, "read_file");
+        Assert.True(readFileIndex == -1 || buildErrorsIndex < readFileIndex);
+    }
+
+    [Fact]
+    public void CommonAgentSearchAndEditTermsResolveToBridgeTools()
+    {
+        JsonObject recommendation = ToolCatalog.CreateRegistry().Definitions.RecommendTools(
+            "grep search for TypeFormatHelper then edit the file with a small replacement");
+        JsonArray tools = Assert.IsType<JsonArray>(recommendation["recommendations"]);
+
+        Assert.Contains(tools, item => HasName(item, "find_text"));
+        Assert.Contains(tools, item => HasName(item, "read_file"));
+        Assert.Contains(tools, item => HasName(item, "apply_diff"));
+    }
+
+    [Fact]
+    public void CommonAgentRunTestTermsResolveToShellAndDiagnosticsTools()
+    {
+        JsonObject recommendation = ToolCatalog.CreateRegistry().Definitions.RecommendTools(
+            "run npm test and inspect failing output logs");
+        JsonArray tools = Assert.IsType<JsonArray>(recommendation["recommendations"]);
+
+        Assert.Contains(tools, item => HasName(item, "shell_exec"));
+        Assert.Contains(tools, item => HasName(item, "read_output"));
+        Assert.Contains(tools, item => HasName(item, "errors"));
+    }
+
+    [Fact]
+    public void LocalModelProviderPromptsStillSurfaceDiscoveryAndActionTools()
+    {
+        JsonObject recommendation = ToolCatalog.CreateRegistry().Definitions.RecommendTools(
+            "Qwen Gemini Grok DeepSeek local model wants to search, read, and edit code");
+        JsonArray tools = Assert.IsType<JsonArray>(recommendation["recommendations"]);
+
+        Assert.Contains(tools, item => HasName(item, "list_tools"));
+        Assert.Contains(tools, item => HasName(item, "find_text"));
+        Assert.Contains(tools, item => HasName(item, "read_file"));
+        Assert.Contains(tools, item => HasName(item, "apply_diff"));
+    }
+
+    [Fact]
     public void BoundSessionGuidanceIncludesDiscoveryAndGitRestoreTools()
     {
         JsonObject target = [];
@@ -33,4 +89,15 @@ public sealed class ToolRecommendationTests
 
     private static bool HasName(JsonNode? item, string name)
         => string.Equals(item?["name"]?.GetValue<string>(), name, StringComparison.Ordinal);
+
+    private static int IndexOf(JsonArray tools, string name)
+    {
+        for (int i = 0; i < tools.Count; i++)
+        {
+            if (HasName(tools[i], name))
+                return i;
+        }
+
+        return -1;
+    }
 }

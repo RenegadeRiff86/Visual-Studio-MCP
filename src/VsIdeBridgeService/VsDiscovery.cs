@@ -50,18 +50,29 @@ internal static class VsDiscovery
 
         if (instances.Count == 0)
             throw new BridgeException(
-                "No live VS IDE Bridge instance found. Open Visual Studio with the VS IDE Bridge extension installed.");
+                "No live VS IDE Bridge instance found. " +
+                "Visual Studio must be running with the VS IDE Bridge extension installed. " +
+                "Ask the user to open Visual Studio with the desired solution and then call list_instances to get the instance_id, then call bind_instance to connect.");
 
         BridgeInstance[] matches = [.. Filter(instances, selector)];
         if (matches.Length == 1) return matches[0];
 
         if (matches.Length == 0)
             throw new BridgeException(selector.HasAny
-                ? $"No live VS IDE Bridge instance matched {selector.Describe()}. Call list_instances to see available instances."
-                : "Multiple VS IDE Bridge instances are available. Call bind_solution or bind_instance to select one.");
+                ? $"No live VS IDE Bridge instance matched {selector.Describe()}. " +
+                  $"Call list_instances to see what is currently open, " +
+                  $"then call bind_instance with the correct instance_id from that list to rebind. " +
+                  $"If the target solution is not in that list it is not open in Visual Studio yet — " +
+                  $"use glob with pattern **/*.sln and set the path to one level above the current solution root (the repos root) to search sibling repositories on disk. " +
+                  $"Ask the user if they want to save any unsaved work in the current solution first. " +
+                  $"Then tell the user which .sln you found and offer two options: " +
+                  $"(a) open it in a new VS window — both solutions stay open and you can switch between them at any time using bind_instance, or " +
+                  $"(b) swap it into the current VS window using open_solution — this closes the current solution in that window. " +
+                  $"Once the target solution is open in VS, call list_instances to confirm it appeared, then call bind_instance with the new instance_id."
+                : "Multiple VS IDE Bridge instances are available. Call list_instances to see them, then call bind_solution or bind_instance to select one.");
 
         throw new BridgeException(
-            $"Multiple VS IDE Bridge instances matched {selector.Describe()}. Call bind_instance with a specific instance_id.");
+            $"Multiple VS IDE Bridge instances matched {selector.Describe()}. Call list_instances to see them, then call bind_instance with a specific instance_id.");
     }
 
     public static IEnumerable<BridgeInstance> Filter(IEnumerable<BridgeInstance> instances, BridgeInstanceSelector sel)

@@ -2,11 +2,15 @@ namespace VsIdeBridge.Shared;
 
 public sealed partial class ToolRegistry
 {
+    private const int StandardRecommendationScore = 45;
+    private const int PrimaryRecommendationScore = 70;
+
     private (int Score, string Reason) ScoreTool(ToolDefinition tool, TaskProfile profile)
     {
         int score = 0;
         string reason = string.Empty;
 
+        score += ScoreHighIntentMatches(tool, profile, ref reason);
         score += ScoreRecommendedMatches(tool, profile, ref reason);
         score += ScoreCategoryMatches(tool, profile, ref reason);
         score += ScoreKeywordMatches(tool, profile.Tokens, ref reason);
@@ -18,37 +22,96 @@ public sealed partial class ToolRegistry
         return (score, reason == string.Empty ? "Broadly relevant tool" : reason);
     }
 
-    private int ScoreRecommendedMatches(ToolDefinition tool, TaskProfile profile, ref string reason)
+    private static int ScoreHighIntentMatches(ToolDefinition tool, TaskProfile profile, ref string reason)
     {
         int score = 0;
 
-        if (profile.LooksLikeNavigationTask && _featuredTools.Contains(tool.Name, StringComparer.OrdinalIgnoreCase))
+        if (profile.LooksLikeDiagnosticTask)
+        {
+            int diagnosticScore = tool.Name switch
+            {
+                "errors" or "warnings" or "messages" => 95,
+                "diagnostics_snapshot" => 85,
+                "build_errors" => 75,
+                "read_output" => 55,
+                _ => 0,
+            };
+
+            if (diagnosticScore > 0)
+            {
+                score += diagnosticScore;
+                reason = ChooseReason(reason, "Primary diagnostics tool for Error List and build output");
+            }
+        }
+
+        if (profile.LooksLikeBuildTask)
+        {
+            int buildScore = tool.Name switch
+            {
+                "build_errors" => 100,
+                "rebuild_solution" or "build_solution" or "rebuild" or "build" => 90,
+                "errors" or "warnings" or "messages" => PrimaryRecommendationScore,
+                "build_configurations" or "set_build_configuration" => StandardRecommendationScore,
+                "read_output" => StandardRecommendationScore,
+                _ => 0,
+            };
+
+            if (buildScore > 0)
+            {
+                score += buildScore;
+                reason = ChooseReason(reason, "Primary Visual Studio build workflow tool");
+            }
+        }
+
+        if (profile.LooksLikeExternalProcessTask && string.Equals(tool.Name, "shell_exec", StringComparison.OrdinalIgnoreCase))
+        {
+            score += 80;
+            reason = ChooseReason(reason, "Run shell/Bash commands, scripts, tests, or lint tools");
+        }
+
+        return score;
+    }
+
+    private int ScoreRecommendedMatches(ToolDefinition tool, TaskProfile profile, ref string reason)
+    {
+        int score = 0;
+        bool prioritizeNavigation = profile.LooksLikeNavigationTask
+            && !profile.LooksLikeBuildTask
+            && !profile.LooksLikeDiagnosticTask;
+
+        if (prioritizeNavigation && _featuredTools.Contains(tool.Name, StringComparer.OrdinalIgnoreCase))
         {
             score += 40;
             reason = ChooseReason(reason, "Featured code navigation tool");
         }
 
-        if (profile.LooksLikeNavigationTask && DefaultRecommendedNavigationToolNames.Contains(tool.Name, StringComparer.OrdinalIgnoreCase))
+        if (prioritizeNavigation && DefaultRecommendedNavigationToolNames.Contains(tool.Name, StringComparer.OrdinalIgnoreCase))
         {
-            score += 45;
+            score += StandardRecommendationScore;
             reason = ChooseReason(reason, "Top navigation tool for code understanding");
         }
 
         if (profile.LooksLikeSolutionExplorerTask && string.Equals(tool.Name, "find_files", StringComparison.OrdinalIgnoreCase))
         {
-            score += 70;
+            score += PrimaryRecommendationScore;
             reason = ChooseReason(reason, "Matches Solution Explorer-style file search task");
+        }
+
+        if (profile.LooksLikeDiagnosticTask && DefaultRecommendedDiagnosticToolNames.Contains(tool.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            score += PrimaryRecommendationScore;
+            reason = ChooseReason(reason, "Primary diagnostics reading tool");
         }
 
         if (profile.LooksLikeBuildTask && DefaultRecommendedBuildToolNames.Contains(tool.Name, StringComparer.OrdinalIgnoreCase))
         {
-            score += 45;
+            score += PrimaryRecommendationScore;
             reason = ChooseReason(reason, "Primary Visual Studio build tool");
         }
 
         if (profile.LooksLikeEditTask && DefaultRecommendedEditToolNames.Contains(tool.Name, StringComparer.OrdinalIgnoreCase))
         {
-            score += 45;
+            score += StandardRecommendationScore;
             reason = ChooseReason(reason, "Primary bridge editing tool");
         }
 
@@ -77,7 +140,11 @@ public sealed partial class ToolRegistry
     {
         int score = 0;
 
-        if (profile.LooksLikeNavigationTask && string.Equals(tool.Category, "search", StringComparison.OrdinalIgnoreCase))
+        bool prioritizeNavigation = profile.LooksLikeNavigationTask
+            && !profile.LooksLikeBuildTask
+            && !profile.LooksLikeDiagnosticTask;
+
+        if (prioritizeNavigation && string.Equals(tool.Category, "search", StringComparison.OrdinalIgnoreCase))
         {
             score += 18;
             reason = ChooseReason(reason, "Search category matches code-navigation task");

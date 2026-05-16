@@ -256,7 +256,11 @@ internal static partial class IdeCoreCommands
                 ["smartContextExample"] = CreateExampleCommand("smart_context", ("query", new JValue("where is GUI_App::OnInit used")), ("max_contexts", new JValue(3)), ("out", new JValue(@"C:\temp\smart-context.json"))),
                 ["referencesExample"] = CreateExampleCommand("find_references", [.. CreateExampleLocationArguments(), ("out", new JValue(@"C:\temp\references.json"))]),
                 ["callHierarchyExample"] = CreateExampleCommand("call_hierarchy", [.. CreateExampleLocationArguments(), ("max_depth", new JValue(2)), ("max_children", new JValue(10)), ("out", new JValue(@"C:\temp\call_hierarchy.json"))]),
-                ["applyDiffFormat"] = "PREFER editor patch format: *** Begin Patch / *** Update File: path/to/file / @@ / context line / -old line / +new line / context line / *** End of File / *** End Patch. Matches by content context — tolerates line shifts after prior edits. Use *** Add File: or *** Delete File: for whole-file operations.",
+                ["applyDiffFormat"] =
+                    "PREFER editor patch format: *** Begin Patch / *** Update File: path/to/file / " +
+                    "@@ / context line / -old line / +new line / context line / *** End of File / *** End Patch. " +
+                    "Matches by content context — tolerates line shifts after prior edits. " +
+                    "Use *** Add File: or *** Delete File: for whole-file operations.",
                 ["applyDiffExample"] = CreateExampleCommand("apply-diff", ("patch_file", new JValue(@"C:\temp\change.diff")), ("out", new JValue(@"C:\temp\apply-diff.json"))),
                 ["openSolutionExample"] = CreateExampleCommand("open-solution", ("solution", new JValue(@"C:\path\to\solution.sln")), ("out", new JValue(@"C:\temp\open-solution.json")))
             }));
@@ -304,6 +308,22 @@ internal static partial class IdeCoreCommands
             });
     }
 
+    private static string? TryResolveInstallDocPath(string fileName)
+    {
+        try
+        {
+            string? installPath = BridgeLogPaths.GetInstallPath();
+            if (string.IsNullOrWhiteSpace(installPath))
+                return null;
+            string docPath = Path.Combine(installPath, fileName);
+            return File.Exists(docPath) ? docPath : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static string? TryResolveSolutionDocPath(IdeCommandContext context, string fileName)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
@@ -349,25 +369,23 @@ internal static partial class IdeCoreCommands
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
 
-        string? readmePath = TryResolveSolutionDocPath(context, "README.md");
-        string? bugsPath = TryResolveSolutionDocPath(context, "BUGS.md");
+        string? readmePath = TryResolveInstallDocPath("README.md") ?? TryResolveSolutionDocPath(context, "README.md");
+        string? bugsPath = TryResolveInstallDocPath("BUGS.md") ?? TryResolveSolutionDocPath(context, "BUGS.md");
         bool openedReadme = !string.IsNullOrWhiteSpace(readmePath);
         if (openedReadme)
         {
             context.Dte.ItemOperations.OpenFile(readmePath);
         }
-
-        string message = !openedReadme
-            ? "README.md could not be resolved from the current solution. Start with the repo README for setup and usage, check BUGS.md for current runtime gaps, and use Tools.IdeHelp only when you need the raw command catalog."
-            : $"Opened README.md for the main product guide.{Environment.NewLine}{Environment.NewLine}Check BUGS.md for current runtime gaps and use Tools.IdeHelp only when you need the raw command catalog.";
-
-        VsShellUtilities.ShowMessageBox(
-            context.Package,
-            message,
-            "VS IDE Bridge",
-            OLEMSGICON.OLEMSGICON_INFO,
-            OLEMSGBUTTON.OLEMSGBUTTON_OK,
-            OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
+        else
+        {
+            VsShellUtilities.ShowMessageBox(
+                context.Package,
+                "README.md was not found. Try reinstalling VS IDE Bridge, or visit the project page for documentation.",
+                "VS IDE Bridge",
+                OLEMSGICON.OLEMSGICON_INFO,
+                OLEMSGBUTTON.OLEMSGBUTTON_OK,
+                OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
+        }
 
         await Task.Yield();
         return (readmePath, bugsPath, openedReadme);

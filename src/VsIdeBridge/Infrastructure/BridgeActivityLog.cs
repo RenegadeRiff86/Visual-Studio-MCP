@@ -2,13 +2,13 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using Microsoft.VisualStudio.Shell;
+using VsIdeBridge.Shared;
 
 namespace VsIdeBridge.Infrastructure;
 
 internal static class BridgeActivityLog
 {
-    private const string InstallFolderName = "VsIdeBridge";
-    private const string LogsFolderName = "logs";
+    private static volatile bool _prunedOnce;
 
     public static void LogWarning(string source, string context, Exception ex)
     {
@@ -17,17 +17,28 @@ internal static class BridgeActivityLog
         WriteToFile("WARNING", source, context, ex.ToString());
     }
 
+    /// <summary>
+    /// Logs at verbose level: debug output only, no VS ActivityLog entry and no file write.
+    /// Use for expected fallback conditions that should not appear in the log file.
+    /// </summary>
+    public static void LogVerbose(string source, string context, Exception ex)
+    {
+        Debug.WriteLine($"{source} verbose: {context}: {ex.Message}");
+    }
+
     private static void WriteToFile(string level, string source, string context, string detail)
     {
         try
         {
-            string logDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-                InstallFolderName,
-                LogsFolderName);
+            string logDir = BridgeLogPaths.GetSharedLogDirectory();
             Directory.CreateDirectory(logDir);
-            string fileName = $"vs-ide-bridge-{DateTime.Now:yyyy-MM-dd}.log";
-            string logPath = Path.Combine(logDir, fileName);
+            if (!_prunedOnce)
+            {
+                _prunedOnce = true;
+                BridgeLogPaths.PruneExtensionLogs(logDir);
+                BridgeLogPaths.CleanupLegacyLogs(logDir);
+            }
+            string logPath = BridgeLogPaths.GetVisualStudioExtensionLogPath();
             string entry = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [{level}] [{source}] {context}{Environment.NewLine}{detail}{Environment.NewLine}";
             File.AppendAllText(logPath, entry);
         }

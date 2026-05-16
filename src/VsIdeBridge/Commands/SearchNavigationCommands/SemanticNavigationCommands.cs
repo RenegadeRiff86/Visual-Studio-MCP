@@ -33,14 +33,21 @@ internal static partial class SearchNavigationCommands
                     args.GetInt32("timeout-ms", 5000))
                 .ConfigureAwait(true);
 
-            return new CommandExecutionResult("Find All References executed.", commandData);
+            AddReferenceRowsStatus(commandData);
+            commandData["countKnown"] = false;
+            commandData["count"] = null;
+
+            string summary = (bool?)commandData["resultWindowActivated"] == true
+                ? "Find All References executed; structured rows are not available through the VS automation result window."
+                : "Find All References executed, but no references result window was found before timeout.";
+            return new CommandExecutionResult(summary, commandData);
         }
     }
 
     internal sealed class IdeCountReferencesCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x023C)
     {
         private static readonly string[] CandidateCommands = ["Edit.FindAllReferences"];
-        private static readonly Regex CountPattern = new(@"\b(?<count>\d+)\b", RegexOptions.Compiled);
+        private static readonly Regex CountPattern = new(@"\b(?<count>\d+)\s+(?:reference|references|result|results)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         protected override string CanonicalName => "Tools.IdeCountReferences";
 
@@ -61,12 +68,15 @@ internal static partial class SearchNavigationCommands
                     args.GetInt32("timeout-ms", 5000))
                 .ConfigureAwait(true);
 
+            AddReferenceRowsStatus(referenceCommandResult);
+
             string caption = referenceCommandResult["resultWindow"]?["caption"]?.ToString() ?? string.Empty;
             Match match = CountPattern.Match(caption);
             if (match.Success && int.TryParse(match.Groups["count"].Value, out int count))
             {
                 referenceCommandResult["countKnown"] = true;
                 referenceCommandResult["count"] = count;
+                referenceCommandResult["countSource"] = "resultWindow.caption";
             }
             else
             {
@@ -79,6 +89,18 @@ internal static partial class SearchNavigationCommands
 
             return new CommandExecutionResult("Reference count request completed.", referenceCommandResult);
         }
+    }
+
+    private static void AddReferenceRowsStatus(JObject commandData)
+    {
+        bool hasResultWindow = commandData["resultWindow"] is JObject;
+        commandData["referencesAvailable"] = false;
+        commandData["references"] = new JArray();
+        commandData["referenceStatus"] = hasResultWindow ? "result-window-only" : "result-window-not-found";
+        commandData["referenceStatusReason"] = hasResultWindow
+            ? "Visual Studio returned Find All References window metadata, but this automation path does not expose structured reference rows."
+            : "The Find All References result window was not available before the timeout.";
+        commandData["resultWindowCaption"] = commandData["resultWindow"]?["caption"]?.ToString() ?? string.Empty;
     }
 
     internal sealed class IdeShowCallHierarchyCommand(VsIdeBridgePackage package, IdeBridgeRuntime runtime, OleMenuCommandService commandService) : IdeCommandBase(package, runtime, commandService, 0x021C)
@@ -131,7 +153,7 @@ internal static partial class SearchNavigationCommands
                 .ConfigureAwait(true);
 
             // CallHierarchy native SDK population disabled for VS 2026 compatibility
-            JObject nativeSdkPopulation = new JObject { ["available"] = false, ["reason"] = "CallHierarchy not available in VS 2026 build" };
+            JObject nativeSdkPopulation = new() { ["available"] = false, ["reason"] = "CallHierarchy not available in VS 2026 build" };
 
             callHierarchyResult["managedHierarchy"] = managedHierarchy;
             callHierarchyResult["nativeInvocationLocation"] = nativeInvocationLocation;
@@ -291,6 +313,7 @@ internal static partial class SearchNavigationCommands
                 args.GetString("path"),
                 args.GetInt32("max", 50)).ConfigureAwait(true);
 
+            context.Handles.RegisterSearchHits((JArray)symbolSearchResult["matches"]!);
             return CreateFoundResult("symbol match(es)", symbolSearchResult);
         }
     }

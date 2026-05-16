@@ -17,6 +17,17 @@ internal static partial class DebugBuildCommands
     private const string WaitForIntellisenseArgument = "wait-for-intellisense";
     private const string WaitForCompletionArgument = "wait-for-completion";
     private const string RequireCleanDiagnosticsArgument = "require-clean-diagnostics";
+    private const string MaxArgument = "max";
+    private const string FileArgument = "file";
+    private const string ChunkSizeArgument        = "chunk-size";
+    private const string ChunkSizeJsonArgument    = "chunk_size";
+    private const string ChunkIndexArgument       = "chunk-index";
+    private const string ChunkIndexJsonArgument   = "chunk_index";
+    private const string SortByArgument           = "sort-by";
+    private const string SortByJsonArgument       = "sort_by";
+    private const string SortDirectionArgument    = "sort-direction";
+    private const string SortDirectionJsonArgument = "sort_direction";
+    private const string GroupByJsonArgument      = "group_by";
     private const int DefaultDebuggerTimeoutMilliseconds = 120000;
     private const int MinimumBuildErrorsTimeoutMilliseconds = 5000;
     private const int DefaultBuildTimeoutMilliseconds = 600000;
@@ -102,7 +113,7 @@ internal static partial class DebugBuildCommands
                 waitForIntellisense: false,
                 preflightTimeout,
                 quickSnapshot: true,
-                query: new ErrorListQuery { Max = args.GetNullableInt32("max") ?? DefaultBlockingDiagnosticsMax }).ConfigureAwait(true)
+                query: new ErrorListQuery { Max = GetDiagnosticsMax(args) ?? DefaultBlockingDiagnosticsMax }).ConfigureAwait(true)
             : await GetDiagnosticsSnapshotAsync(
                 context,
                 args,
@@ -119,7 +130,7 @@ internal static partial class DebugBuildCommands
             waitForIntellisense,
             timeoutMilliseconds,
             quickSnapshot: true,
-            query: new ErrorListQuery { Max = args.GetNullableInt32("max") ?? DefaultBlockingDiagnosticsMax }).ConfigureAwait(true);
+            query: new ErrorListQuery { Max = GetDiagnosticsMax(args) ?? DefaultBlockingDiagnosticsMax }).ConfigureAwait(true);
     }
 
     private static async Task<JObject> GetDiagnosticsWithFallbackAsync(

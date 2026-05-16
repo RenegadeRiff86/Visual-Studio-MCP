@@ -21,13 +21,17 @@ public static partial class BridgeCommandCatalog
                 detail = ("Read current IDE Bridge UI/security settings without modifying them.", "ui-settings");
                 return true;
             case "capture-vs-window":
-                detail = ("Activate the bound Visual Studio main window, bring it to the foreground, and capture only that window to a PNG image. If no output path is provided, the bridge saves it under %TEMP%\\vs-ide-bridge\\screenshots.", commandName);
+                detail = (
+                    "Activate the bound Visual Studio main window, bring it to the foreground, and capture only that window to a PNG image. If no output path is provided, the bridge saves it under %TEMP%\\vs-ide-bridge\\screenshots.",
+                    commandName);
                 return true;
             case "ready":
                 detail = ("Wait for Visual Studio and IntelliSense to be ready for semantic commands.", ExampleCommand("ready", @"{""timeout_ms"":120000}"));
                 return true;
             case "open-solution":
-                detail = ("Open a specific existing .sln or .slnx file in the current Visual Studio instance without opening a new window. Use this when you already know the exact solution path.", ExampleCommand("open-solution", @"{""solution"":""C:\\repo\\PinballBot\\PinballBot.sln""}"));
+                detail = (
+                    "Open a specific existing .sln or .slnx file in the current Visual Studio instance without opening a new window. Use this when you already know the exact solution path.",
+                    ExampleCommand("open-solution", @"{""solution"":""C:\\repo\\PinballBot\\PinballBot.sln""}"));
                 return true;
             case "create-solution":
                 detail = ("Create and open a new solution in the current Visual Studio instance.", ExampleCommand("create-solution", @"{""directory"":""C:\\repo\\Scratch"",""name"":""ScratchApp""}"));
@@ -72,13 +76,19 @@ public static partial class BridgeCommandCatalog
                 detail = ("Execute an arbitrary Visual Studio command with optional arguments.", ExampleCommand("execute-command", @"{""name"":""Edit.FormatDocument""}"));
                 return true;
             case "document-slice":
-                detail = ("Fetch one code slice from a file. For files in the active solution, a unique bare filename like '" + ExampleSourceFile + @"' is usually enough; use a longer relative path only when needed.", ExampleCommand("document-slice", @"{""file"":""" + ExampleSourceFile + @""",""line"":120,""context_before"":8,""context_after"":20}"));
+                detail = (
+                    "Fetch one code slice from a file. For files in the active solution, a unique bare filename like '" + ExampleSourceFile + @"' is usually enough; use a longer relative path only when needed.",
+                    ExampleCommand("document-slice", @"{""file"":""" + ExampleSourceFile + @""",""line"":120,""context_before"":8,""context_after"":20}"));
                 return true;
             case "document-slices":
-                detail = ("Fetch multiple code slices from ranges_file or inline ranges JSON. For files in the active solution, a unique bare filename like '" + ExampleSourceFile + @"' is usually enough; use a longer relative path only when needed.", ExampleCommand("document-slices", @"{""ranges"": [{""file"": """ + ExampleSourceFile + @""", ""line"": 42, ""context_before"": 8, ""context_after"": 20}]}"));
+                detail = (
+                    "Fetch multiple code slices from ranges_file or inline ranges JSON. For files in the active solution, a unique bare filename like '" + ExampleSourceFile + @"' is usually enough; use a longer relative path only when needed.",
+                    ExampleCommand("document-slices", @"{""ranges"": [{""file"": """ + ExampleSourceFile + @""", ""line"": 42, ""context_before"": 8, ""context_after"": 20}]}"));
                 return true;
             case "apply-diff":
-                detail = ("Apply editor patch text through the live editor so changes are visible in Visual Studio. Use directives like '*** Update File:' rather than unified diff headers such as '---' and '+++'. Changed files open by default.", ExampleCommand("apply-diff", @"{""patch_file"":""C:\\temp\\change.diff""}"));
+                detail = (
+                    "Apply editor patch text through the live editor so changes are visible in Visual Studio. Use directives like '*** Update File:' rather than unified diff headers such as '---' and '+++'. Changed files open by default.",
+                    ExampleCommand("apply-diff", @"{""patch_file"":""C:\\temp\\change.diff""}"));
                 return true;
             default:
                 detail = default;

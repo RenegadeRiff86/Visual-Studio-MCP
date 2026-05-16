@@ -300,22 +300,33 @@ internal sealed partial class PatchService
         // Re-run Pass 3 to find the best partial match for a useful error message.
         (int errorBestCandidate, int errorBestScore) = FindBestAnchorMatch(existingLines, sourceIndex, maxStart, matchLines);
 
-        string descriptor = string.IsNullOrWhiteSpace(block.Header)
-            ? "editor patch block"
-            : $"editor patch block '{block.Header}'";
+        // Detect the simple-replace form (file + old_content + new_content).
+        // FromSimpleReplace produces a block with only '-' and '+' lines — no context lines.
+        bool isSimpleReplace = block.Lines.All(l => l.Kind != ' ');
+
         string firstMatchLine = matchLines.Length > 0 ? Truncate(matchLines[0], 60) : "(empty)";
+        string lineNoun = isSimpleReplace ? "old_content" : "context";
         string bestMatchHint = errorBestCandidate >= 0
-            ? $" The closest match was at line {errorBestCandidate + 1} but only {errorBestScore} of {matchLines.Length} context lines agreed."
-            : " No candidate position matched any context line.";
+            ? $" The closest match was at line {errorBestCandidate + 1} but only {errorBestScore} of {matchLines.Length} {lineNoun} lines matched."
+            : $" No candidate position matched any {lineNoun} line.";
+        string fixInstructions = isSimpleReplace
+            ? "NEVER fall back to write_file after this error — that overwrites the entire file and destroys unrelated content. " +
+              "To fix: (1) Call read_file on this file — use the h: or f: handle if you have one from a prior find_text, find_files, or search result. " +
+              "(2) Copy the exact text you want to replace verbatim from the read_file output into old_content — do not retype, paraphrase, or truncate any lines. " +
+              "(3) Resubmit apply_diff with the corrected old_content."
+            : "NEVER fall back to write_file after this error — that overwrites the entire file and destroys unrelated content. " +
+              "To fix: (1) Call read_file on this file — use the h: or f: handle if you have one. " +
+              "(2) Copy the exact lines you want to change verbatim from the read_file output — do not retype or paraphrase them. " +
+              "(3) Build a new @@ block using those exact lines as context, with - for deletions and + for additions. " +
+              "(4) Resubmit apply_diff with the corrected patch." +
+              BuildBackwardSearchHint(existingLines, sourceIndex, maxStart, matchLines);
+        string subject = isSimpleReplace ? "old_content" : "patch";
+        string problem = isSimpleReplace ? "old_content was not found" : "the @@ context block was not found";
         throw new CommandErrorException(
             InvalidArgumentsCode,
-            $"apply_diff failed: the @@ context block was not found in {path}. " +
-            $"The patch was looking for a block starting with \"{firstMatchLine}\".{bestMatchHint} " +
-            "To fix this: (1) Call read_file on this file to see the current content. " +
-            "(2) Copy the exact lines you want to change from the read_file output — do not retype or paraphrase them. " +
-            "(3) Build a new @@ block using those exact lines as context, with - for deletions and + for additions. " +
-            "(4) Resubmit apply_diff with the corrected patch." +
-            BuildBackwardSearchHint(existingLines, sourceIndex, maxStart, matchLines),
+            $"apply_diff failed: {problem} in {path}. " +
+            $"The {subject} started with \"{firstMatchLine}\".{bestMatchHint} " +
+            fixInstructions,
             new
             {
                 block = block.Header,
@@ -535,11 +546,14 @@ internal sealed partial class PatchService
     {
         if (index >= existingLines.Count)
         {
-            throw new CommandErrorException(InvalidArgumentsCode,
+            throw new CommandErrorException(
+                InvalidArgumentsCode,
                 $"apply_diff failed: the patch references line {index + 1} but {path} only has {existingLines.Count} lines. " +
-                "Your hunk line numbers are off — likely because a prior hunk added or removed lines and the numbers were not adjusted. " +
-                "Call read_file on this file, copy the exact lines you want to change, and resubmit the patch. " +
-                "Alternatively, switch to editor patch format (*** Begin Patch / *** Update File / @@ / -old / +new / *** End Patch), which finds lines by content and never needs line numbers.");
+                "Your hunk line numbers are off — this happens when a previous hunk added or removed lines and later hunks weren't adjusted. " +
+                "FIX: (1) Call reload_document on this file, (2) Call read_file again to get current line numbers, " +
+                "(3) Rebuild your patch with the new line numbers from the fresh read. " +
+                "BETTER: Switch to editor patch format (*** Begin Patch / *** Update File / @@ / -old / +new / *** End Patch) — it matches by content and never needs line numbers.",
+                new { line = index + 1, fileLineCount = existingLines.Count });
         }
 
         if (!LinesMatchFuzzy(existingLines[index], expected))
@@ -554,9 +568,10 @@ internal sealed partial class PatchService
                 InvalidArgumentsCode,
                 $"apply_diff failed: the {operation} line in your patch does not match the file. " +
                 $"Your patch says \"{Truncate(expected, 80)}\" — the file at line {index + 1} has \"{Truncate(existingLines[index], 80)}\". " +
-                "This usually means line numbers shifted because a prior hunk in this patch added or removed lines. " +
-                "Call read_file around line " + (index + 1) + " to see what is actually there, copy the exact text, and resubmit. " +
-                "Alternatively, switch to editor patch format (*** Begin Patch / *** Update File / @@ / -old / +new / *** End Patch), which matches by content and never needs line numbers.",
+                "This is almost always caused by whitespace differences or the file changing between reads. " +
+                "FIX: (1) Call reload_document on this file, (2) Call read_file again to get the current exact content, " +
+                "(3) Copy the lines you want to change DIRECTLY from the read_file output — do not retype them, " +
+                "(4) Build a new patch using those exact lines as context.",
                 new { expected, actual = existingLines[index], line = index + 1, fileContext = context });
         }
     }

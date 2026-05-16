@@ -94,6 +94,7 @@ public sealed class DiagnosticRow
             && MatchesPrefix(Code, options.Code)
             && Contains(Project, options.Project)
             && MatchesPath(options.Path)
+            && MatchesPath(options.File)
             && Contains(Message, options.Text);
     }
 
@@ -296,26 +297,52 @@ public sealed class DiagnosticCollection
             chunkOutOfRange);
     }
 
-    public JsonArray GroupBy(string? groupBy)
+    public JsonArray GroupBy(DiagnosticQueryOptions options)
     {
-        string? normalized = DiagnosticQueryOptions.NormalizeGroupBy(groupBy);
+        string? normalized = DiagnosticQueryOptions.NormalizeGroupBy(options.GroupBy);
         if (string.IsNullOrWhiteSpace(normalized))
         {
             return [];
         }
 
         string normalizedGroupBy = normalized!;
+        List<(IGrouping<string, DiagnosticRow> Group, int Count)> buckets =
+            [.. Rows
+                .GroupBy(row => GetGroupKey(row, normalizedGroupBy), StringComparer.OrdinalIgnoreCase)
+                .Select(g => (Group: g, Count: g.Count()))];
+
+        if (options.GroupMinCount.HasValue || options.GroupMaxCount.HasValue)
+        {
+            buckets = [.. buckets.Where(b =>
+                (!options.GroupMinCount.HasValue || b.Count >= options.GroupMinCount.Value) &&
+                (!options.GroupMaxCount.HasValue || b.Count <= options.GroupMaxCount.Value))];
+        }
+
+        string? groupSortBy = options.GroupSortBy;
+        bool sortDescending = options.GroupSortDescending ?? groupSortBy != "key";
+        IEnumerable<(IGrouping<string, DiagnosticRow> Group, int Count)> ordered;
+        if (groupSortBy == "key")
+        {
+            ordered = sortDescending
+                ? buckets.OrderByDescending(b => b.Group.Key, StringComparer.OrdinalIgnoreCase)
+                : buckets.OrderBy(b => b.Group.Key, StringComparer.OrdinalIgnoreCase);
+        }
+        else
+        {
+            ordered = sortDescending
+                ? buckets.OrderByDescending(b => b.Count).ThenBy(b => b.Group.Key, StringComparer.OrdinalIgnoreCase)
+                : buckets.OrderBy(b => b.Count).ThenBy(b => b.Group.Key, StringComparer.OrdinalIgnoreCase);
+        }
+
         JsonArray groups = [];
-        foreach (IGrouping<string, DiagnosticRow> group in Rows.GroupBy(row => GetGroupKey(row, normalizedGroupBy), StringComparer.OrdinalIgnoreCase)
-                     .OrderByDescending(group => group.Count())
-                     .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
+        foreach ((IGrouping<string, DiagnosticRow> group, int count) in ordered)
         {
             DiagnosticRow sample = group.First();
             groups.Add(new JsonObject
             {
                 [DiagnosticJsonNames.Key] = group.Key,
                 [DiagnosticJsonNames.GroupBy] = normalizedGroupBy,
-                [DiagnosticJsonNames.Count] = group.Count(),
+                [DiagnosticJsonNames.Count] = count,
                 [DiagnosticJsonNames.SampleMessage] = sample.Message,
                 [DiagnosticJsonNames.SampleFile] = sample.DisplayPath,
                 [DiagnosticJsonNames.SampleCode] = sample.Code,
@@ -376,7 +403,7 @@ public sealed class DiagnosticCollection
             // sampleMessage, sampleFile, sampleCode) is all a model needs to orient itself.
             // To drill into a specific group's rows, call again with a path/code/project filter
             // and no group_by.
-            JsonArray groupArray = sorted.GroupBy(options.GroupBy);
+            JsonArray groupArray = sorted.GroupBy(options);
             target[DiagnosticJsonNames.Groups] = groupArray;
             target[DiagnosticJsonNames.Rows] = new JsonArray();
             target[DiagnosticJsonNames.Count] = groupArray.Count;
@@ -533,7 +560,12 @@ public sealed class DiagnosticQueryOptions(
     string? project,
     string? path,
     string? text,
-    string? groupBy)
+    string? groupBy,
+    string? file = null,
+    string? groupSortBy = null,
+    bool? groupSortDescending = null,
+    int? groupMinCount = null,
+    int? groupMaxCount = null)
 {
     public int ChunkSize { get; } = chunkSize;
 
@@ -555,22 +587,39 @@ public sealed class DiagnosticQueryOptions(
 
     public string? GroupBy { get; } = groupBy;
 
+    public string? File { get; } = file;
+
+    public string? GroupSortBy { get; } = groupSortBy;
+
+    public bool? GroupSortDescending { get; } = groupSortDescending;
+
+    public int? GroupMinCount { get; } = groupMinCount;
+
+    public int? GroupMaxCount { get; } = groupMaxCount;
+
     public bool HasContentFilters
         => !string.IsNullOrWhiteSpace(Severity)
             || !string.IsNullOrWhiteSpace(Code)
             || !string.IsNullOrWhiteSpace(Project)
             || !string.IsNullOrWhiteSpace(Path)
+            || !string.IsNullOrWhiteSpace(File)
             || !string.IsNullOrWhiteSpace(Text);
 
     public static DiagnosticQueryOptions FromJsonObject(JsonObject? args, int defaultChunkSize)
     {
         int chunkSize = GetOptionalNonNegativeInt(args, "chunk_size")
+            ?? GetOptionalNonNegativeInt(args, "chunk-size")
             ?? GetOptionalNonNegativeInt(args, "max")
             ?? defaultChunkSize;
         int chunkIndex = GetOptionalNonNegativeInt(args, "chunk_index") ?? 0;
         string? sortBy = NormalizeSortField(GetOptionalString(args, "sort_by"));
         bool sortDescending = IsDescendingSort(GetOptionalString(args, "sort_direction"));
         string? groupBy = NormalizeGroupBy(GetOptionalString(args, "group_by") ?? GetOptionalString(args, "group-by"));
+        string? file = NullIfWhiteSpace(GetOptionalString(args, "file"));
+        string? groupSortBy = NormalizeGroupSortBy(GetOptionalString(args, "group_sort_by") ?? GetOptionalString(args, "group-sort-by"));
+        bool? groupSortDescending = ParseGroupSortDescending(GetOptionalString(args, "group_sort_direction") ?? GetOptionalString(args, "group-sort-direction"));
+        int? groupMinCount = GetOptionalNonNegativeInt(args, "group_min_count") ?? GetOptionalNonNegativeInt(args, "group-min-count");
+        int? groupMaxCount = GetOptionalNonNegativeInt(args, "group_max_count") ?? GetOptionalNonNegativeInt(args, "group-max-count");
 
         return new DiagnosticQueryOptions(
             chunkSize,
@@ -582,7 +631,12 @@ public sealed class DiagnosticQueryOptions(
             NullIfWhiteSpace(GetOptionalString(args, "project")),
             NullIfWhiteSpace(GetOptionalString(args, "path")),
             NullIfWhiteSpace(GetOptionalString(args, "text")),
-            groupBy);
+            groupBy,
+            file,
+            groupSortBy,
+            groupSortDescending,
+            groupMinCount,
+            groupMaxCount);
     }
 
     public static string? NormalizeSortField(string? sortBy)
@@ -653,6 +707,26 @@ public sealed class DiagnosticQueryOptions(
     private static bool IsDescendingSort(string? sortDirection)
         => string.Equals(sortDirection, "desc", StringComparison.OrdinalIgnoreCase)
             || string.Equals(sortDirection, "descending", StringComparison.OrdinalIgnoreCase);
+
+    private static string? NormalizeGroupSortBy(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            "count" => "count",
+            "key" or "name" => "key",
+            _ => null,
+        };
+    }
+
+    private static bool? ParseGroupSortDescending(string? sortDirection)
+    {
+        if (string.IsNullOrWhiteSpace(sortDirection))
+        {
+            return null;
+        }
+
+        return IsDescendingSort(sortDirection);
+    }
 
     private static string? NullIfWhiteSpace(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value;

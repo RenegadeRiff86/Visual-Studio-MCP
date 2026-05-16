@@ -11,6 +11,7 @@ internal static partial class ToolCatalog
 {
     private const string BindSolutionToolName = "bind_solution";
     private const int DefaultBatchChunkSize = 10;
+    private const int DefaultBatchMaxSteps = 50;
     private const string ListInstancesToolName = "list_instances";
     private const string RecommendToolsToolName = "recommend_tools";
     private const string VsStateToolName = "vs_state";
@@ -19,7 +20,8 @@ internal static partial class ToolCatalog
     private static IEnumerable<ToolEntry> CoreTools() =>
         CoreBindingTools()
             .Concat(CoreRegistryTools())
-            .Concat(CoreSystemTools());
+            .Concat(CoreSystemTools())
+            .Concat(CoreHttpTools());
 
     private static IEnumerable<ToolEntry> CoreBindingTools()
     {
@@ -125,6 +127,7 @@ internal static partial class ToolCatalog
                 OptBool("success", "Optional success filter applied to batch step results."),
                 Opt("text", "Optional text filter applied to command, id, summary, and error text."),
                 Opt("group_by", "Optional grouping mode: command, success, or error."),
+                OptInt("max_steps", "Maximum number of batch steps to execute before returning partial results (default 50)."),
                 Opt("data_mode", "Nested step data mode: summary (default), full, or none. Use full only when you need each raw step payload.")),
             Core,
             ExecuteBatchToolAsync,
@@ -136,7 +139,8 @@ internal static partial class ToolCatalog
         JsonArray steps = ReadStepsArgument(id, args);
 
         bool stopOnError = args?["stop_on_error"]?.GetValue<bool>() ?? false;
-        JsonObject response = await ExecuteBatchLocallyAsync(id, steps, stopOnError, bridge).ConfigureAwait(false);
+        int maxSteps = Math.Max(1, args?["max_steps"]?.GetValue<int?>() ?? DefaultBatchMaxSteps);
+        JsonObject response = await ExecuteBatchLocallyAsync(id, steps, stopOnError, maxSteps, bridge).ConfigureAwait(false);
         response = CompactBatchResponse(response, args);
         return ToolResultFormatter.StructuredToolResult(
             response,
@@ -199,14 +203,16 @@ internal static partial class ToolCatalog
         JsonNode? id,
         JsonArray steps,
         bool stopOnError,
+        int maxSteps,
         BridgeConnection bridge)
     {
         JsonArray results = [];
         int successCount = 0;
         int failureCount = 0;
         bool stoppedEarly = false;
+        int stepLimit = Math.Min(steps.Count, maxSteps);
 
-        for (int i = 0; i < steps.Count; i++)
+        for (int i = 0; i < stepLimit; i++)
         {
             (JsonObject stepResult, bool succeeded) = await ExecuteBatchStepLocallyAsync(id, steps[i], i, bridge).ConfigureAwait(false);
             if (succeeded)
@@ -227,22 +233,35 @@ internal static partial class ToolCatalog
             }
         }
 
+        bool truncated = results.Count < steps.Count && !stoppedEarly;
+        JsonArray warnings = [];
+        if (truncated)
+        {
+            warnings.Add($"Batch stopped after {results.Count} of {steps.Count} steps because max_steps was {maxSteps}. Re-run with a higher max_steps value to continue.");
+        }
+
         JsonObject data = new()
         {
             ["batchCount"] = steps.Count,
+            ["executedCount"] = results.Count,
             ["successCount"] = successCount,
             ["failureCount"] = failureCount,
-            ["stoppedEarly"] = stoppedEarly,
+            ["stoppedEarly"] = stoppedEarly || truncated,
+            ["truncated"] = truncated,
             ["results"] = results,
         };
+
+        string summary = truncated
+            ? $"Batch: {successCount}/{results.Count} executed steps succeeded, {failureCount} failed, {steps.Count - results.Count} skipped by max_steps."
+            : $"Batch: {successCount}/{steps.Count} succeeded, {failureCount} failed.";
 
         return new JsonObject
         {
             ["SchemaVersion"] = 1,
             ["Command"] = "batch",
             ["Success"] = true,
-            ["Summary"] = $"Batch: {successCount}/{steps.Count} succeeded, {failureCount} failed.",
-            ["Warnings"] = new JsonArray(),
+            ["Summary"] = summary,
+            ["Warnings"] = warnings,
             ["Error"] = null,
             ["Data"] = data,
         };
@@ -391,6 +410,25 @@ internal static partial class ToolCatalog
     private static IEnumerable<ToolEntry> CoreRegistryTools()
     {
         yield return new(
+            ToolDefinitionCatalog.CallTool(
+                ObjectSchema(
+                    Req("name", "Catalog tool name to invoke, for example read_file, find_text, apply_diff, or git_status. Use recommend_tools, list_tools, or tool_help before calling an unfamiliar tool."),
+                    ("arguments", new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["description"] =
+                            "Arguments object for the target catalog tool. " +
+                            "Example wrapper: call_tool with { name: \"read_file\", arguments: { file: \"h:2\", start_line: 260, end_line: 360 } }. " +
+                            "Use handles returned by bridge results as file/path values instead of copying full paths. " +
+                            "Call tool_help with the same name to inspect its schema first.",
+                        ["additionalProperties"] = true,
+                    }, false)))
+                .WithSearchHints(BuildSearchHints(
+                    workflow: [(RecommendToolsToolName, "Find tools for a task"), ("tool_help", "Inspect the target tool schema before dispatch")],
+                    related: [("list_tools", "Browse all known tool names"), ("list_tool_categories", "Browse tool groups")])),
+            async (id, args, bridge) => await ExecuteCallToolAsync(id, args, bridge).ConfigureAwait(false));
+
+        yield return new(
             ToolDefinitionCatalog.ListTools(EmptySchema())
                 .WithSearchHints(BuildSearchHints(
                     workflow: [("list_tools_by_category", "Get a focused list of tools for a specific category"), (RecommendToolsToolName, "Get personalized tool recommendations for a task")],
@@ -460,6 +498,28 @@ internal static partial class ToolCatalog
             });
     }
 
+    private static async Task<JsonNode> ExecuteCallToolAsync(JsonNode? id, JsonObject? args, BridgeConnection bridge)
+    {
+        string targetTool = RequiredString(id, args, "name");
+        if (string.Equals(targetTool, "call_tool", StringComparison.Ordinal))
+        {
+            throw new McpRequestException(id, McpErrorCodes.InvalidParams, "call_tool cannot dispatch to itself.");
+        }
+
+        JsonObject? targetArgs = null;
+        JsonNode? rawArguments = args?["arguments"];
+        if (rawArguments is JsonObject argumentObject)
+        {
+            targetArgs = (JsonObject)argumentObject.DeepClone();
+        }
+        else if (rawArguments is not null)
+        {
+            throw new McpRequestException(id, McpErrorCodes.InvalidParams, "Argument 'arguments' must be a JSON object when provided.");
+        }
+
+        return await Registry.DispatchAsync(id, targetTool, targetArgs, bridge).ConfigureAwait(false);
+    }
+
     private static IEnumerable<ToolEntry> CoreSystemTools()
     {
         // yield return new("vs_open",
@@ -527,30 +587,59 @@ internal static partial class ToolCatalog
                 workflow: [("vs_state", "Confirm the bound instance before capture")],
                 related: [("activate_window", "Bring a specific tool window forward first"), ("list_windows", "Inspect current VS windows")]));
 
+    }
+
+    private static IEnumerable<ToolEntry> CoreHttpTools()
+    {
         yield return new("http_enable",
-            "Enable the shared HTTP MCP endpoint on localhost:8080. " +
-            "Enables Ollama and other local LLM clients to connect directly to the bridge. " +
+            $"Enable the legacy shared HTTP MCP endpoint on localhost:{HttpServerDefaults.HttpPort}. " +
+            "Enables local clients that still expect direct JSON-RPC POST bodies to connect to the bridge. " +
             "The enabled state persists across restarts and, when the Windows service is installed, reconciles the service-owned listener instead of only the current process. " +
-            "Clients send POST requests with JSON-RPC 2.0 bodies to http://localhost:8080/.",
+            $"Clients send POST requests with JSON-RPC 2.0 bodies to {HttpServerDefaults.HttpUrl}.",
             EmptySchema(), Core,
             (_, _, _) => Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(HttpServerController.Enable())),
             searchHints: BuildSearchHints(
-                workflow: [("http_status", "Verify the server is running")],
-                related: [("http_disable", "Stop the HTTP server"), ("http_status", "Check server status")]));
+                workflow: [("http_status", "Verify the legacy server is running")],
+                related: [("http_disable", "Stop the legacy HTTP server"), ("streamable_http_enable", "Start the preferred HTTP MCP server")]));
 
         yield return new("http_disable",
-            "Disable the shared HTTP MCP endpoint and persist the disabled state across restarts. " +
+            "Disable the legacy shared HTTP MCP endpoint and persist the disabled state across restarts. " +
             "When the Windows service is installed, this reconciles the service-owned listener so the port is actually released.",
             EmptySchema(), Core,
             (_, _, _) => Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(HttpServerController.Disable())),
             searchHints: BuildSearchHints(
-                related: [("http_enable", "Start the HTTP server"), ("http_status", "Check server status")]));
+                related: [("http_enable", "Start the legacy HTTP server"), ("http_status", "Check legacy server status")]));
 
         yield return new("http_status",
-            "Show the persisted HTTP MCP state, the actual listener status on localhost:8080, and whether the shared enable flag is in sync with the live port probe.",
+            $"Show the persisted legacy HTTP MCP state, the actual listener status on localhost:{HttpServerDefaults.HttpPort}, and whether the shared enable flag is in sync with the live port probe.",
             EmptySchema(), Core,
             (_, _, _) => Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(HttpServerController.GetStatus())),
             searchHints: BuildSearchHints(
-                related: [("http_enable", "Start the HTTP server"), ("http_disable", "Stop the HTTP server")]));
+                related: [("http_enable", "Start the legacy HTTP server"), ("http_disable", "Stop the legacy HTTP server"), ("streamable_http_status", "Check preferred HTTP MCP server status")]));
+
+        yield return new("streamable_http_enable",
+            $"Enable the preferred Streamable HTTP MCP endpoint at {HttpServerDefaults.StreamableHttpUrl}. " +
+            "This listener also serves 2024-11-05-compatible /sse and /messages endpoints on the same port. " +
+            "The enabled state persists across restarts and reconciles the service-owned listener when the Windows service is installed.",
+            EmptySchema(), Core,
+            (_, _, _) => Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(StreamableHttpServerController.Enable())),
+            searchHints: BuildSearchHints(
+                workflow: [("streamable_http_status", "Verify the Streamable HTTP server is running")],
+                related: [("streamable_http_disable", "Stop the Streamable HTTP server"), ("http_enable", "Start the legacy HTTP server")]));
+
+        yield return new("streamable_http_disable",
+            "Disable the preferred Streamable HTTP MCP endpoint and persist the disabled state across restarts. " +
+            "When the Windows service is installed, this reconciles the service-owned listener so the port is actually released.",
+            EmptySchema(), Core,
+            (_, _, _) => Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(StreamableHttpServerController.Disable())),
+            searchHints: BuildSearchHints(
+                related: [("streamable_http_enable", "Start the Streamable HTTP server"), ("streamable_http_status", "Check Streamable HTTP server status")]));
+
+        yield return new("streamable_http_status",
+            $"Show the persisted Streamable HTTP MCP state, the actual listener status on localhost:{HttpServerDefaults.StreamableHttpPort}, and whether the streamable enable flag is in sync with the live port probe.",
+            EmptySchema(), Core,
+            (_, _, _) => Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(StreamableHttpServerController.GetStatus())),
+            searchHints: BuildSearchHints(
+                related: [("streamable_http_enable", "Start the Streamable HTTP server"), ("streamable_http_disable", "Stop the Streamable HTTP server"), ("http_status", "Check legacy server status")]));
     }
 }
