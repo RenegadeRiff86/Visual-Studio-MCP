@@ -32,15 +32,25 @@ internal static class GhRunner
 
     private static ProcessStartInfo CreateStartInfo(string ghExe, string workingDirectory)
     {
-        return new ProcessStartInfo
+        ProcessStartInfo psi = new()
         {
             FileName = ghExe,
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            RedirectStandardInput = true,   // closed immediately after start; tells gh stdin is non-interactive
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+
+        // Suppress interactive behaviours that would cause the process to hang
+        // when spawned from a service / background host with no console or desktop.
+        psi.EnvironmentVariables["GH_NO_UPDATE_NOTIFIER"] = "1";
+        psi.EnvironmentVariables["GH_PROMPT_DISABLED"]    = "1";
+        psi.EnvironmentVariables["NO_COLOR"]              = "1";
+        psi.EnvironmentVariables["BROWSER"]               = "";   // prevent gh from opening a browser for auth
+
+        return psi;
     }
 
     private static async Task<JsonNode> RunProcessAsync(
@@ -52,6 +62,9 @@ internal static class GhRunner
         using Process process = Process.Start(psi)
             ?? throw new McpRequestException(id, McpErrorCodes.BridgeError,
                 $"Failed to start gh process at '{psi.FileName}'.");
+
+        // Close stdin immediately so gh receives EOF and knows it is non-interactive.
+        process.StandardInput.Close();
 
         Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
         Task<string> stderrTask = process.StandardError.ReadToEndAsync();
