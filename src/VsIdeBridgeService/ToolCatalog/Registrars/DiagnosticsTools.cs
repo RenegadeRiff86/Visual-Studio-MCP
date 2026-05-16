@@ -155,29 +155,11 @@ internal static partial class ToolCatalog
             if (bridge.DocumentDiagnostics.TryGetCached(cacheSeverity, args, out JsonObject cachedDiagnostics))
             {
                 CompactDiagnosticsResponse(cachedDiagnostics, args);
+                PatchFilterEcho(cachedDiagnostics, args);
                 return BridgeResult(cachedDiagnostics);
             }
 
-            string diagnosticsArgs = Build(
-                (Severity, OptionalString(args, Severity) ?? defaultSeverity),
-                BoolArg(WaitForIntellisenseHyphen, args, WaitForIntellisense, false, true),
-                BoolArg(Quick, args, Quick, ShouldUsePassiveDiagnosticsRead(args), true),
-                BoolArg(Refresh, args, Refresh, false, true),
-                (Max, GetBridgeDiagnosticsMax(args)),
-                (Code, OptionalString(args, Code)),
-                (Project, OptionalString(args, Project)),
-                (Path, OptionalString(args, Path)),
-                (FileArg, OptionalString(args, FileArg)),
-                (Text, OptionalString(args, Text)),
-                ("group-by",       OptionalString(args, GroupBy)),
-                ("sort-by",        OptionalString(args, SortBy)),
-                ("sort-direction",      OptionalString(args, SortDirection)),
-                ("group-sort-by",       OptionalString(args, GroupSortBy)),
-                ("group-sort-direction", OptionalString(args, GroupSortDirection)),
-                ("group-min-count",      OptionalText(args, GroupMinCount)),
-                ("group-max-count",      OptionalText(args, GroupMaxCount)),
-                ("chunk-size",           OptionalText(args, ChunkSize)),
-                ("chunk-index",    OptionalText(args, ChunkIndex)));
+            string diagnosticsArgs = BuildDiagnosticRowsCommandArgs(args, defaultSeverity);
             JsonObject response = await SendDiagnosticsCommandWithSnapshotFallbackAsync(
                     bridge,
                     id,
@@ -186,6 +168,7 @@ internal static partial class ToolCatalog
                     args)
                 .ConfigureAwait(false);
             CompactDiagnosticsResponse(response, args);
+            PatchFilterEcho(response, args);
             return BridgeResult(response);
         }
     }
@@ -205,7 +188,10 @@ internal static partial class ToolCatalog
             "One-shot snapshot combining IDE state, build status, debugger mode, and error/warning counts. " +
             "Use at the start of a session or after a build instead of calling errors + vs_state separately. " +
             "This is a passive snapshot and may be stale relative to the current Error List. " +
-            "With wait_for_intellisense=false it prefers the fast current snapshot; true is slower but fresher.",
+            "With wait_for_intellisense=false it prefers the fast current snapshot; true is slower but fresher. " +
+            "Each row in the errors, warnings, and messages buckets includes a handle field " +
+            "(e:N for errors, w:N for warnings, m:N for messages) — pass it directly as the " +
+            "file argument to read_file, open_file, or apply_diff instead of copying the full path.",
             ObjectSchema(
                 OptBool(WaitForIntellisense, "Wait for IntelliSense readiness (default false)."),
                 OptInt(Max, "Legacy alias for chunk_size. Defaults to 10 when chunk_size is omitted."),
@@ -274,6 +260,28 @@ internal static partial class ToolCatalog
         DiagnosticQueryOptions paging = CreateDiagnosticQueryOptions(args);
         CompactDiagnosticsNode(data, paging);
         AddSuppressionRepairPrompt(response, suppressionWarningCount);
+    }
+
+    // The VSIX only receives severity/quick/max — content filters (code, project, path,
+    // file, text, sort, group_by, pagination) are applied service-side by DiagnosticCollection.
+    // Patch the filter echo so it reflects what was actually applied.
+    private static void PatchFilterEcho(JsonObject response, JsonObject? args)
+    {
+        if (args is null) return;
+        if (response["Data"] is not JsonObject data) return;
+        if (data["filter"] is not JsonObject filter) return;
+
+        DiagnosticQueryOptions opts = CreateDiagnosticQueryOptions(args);
+        if (!string.IsNullOrWhiteSpace(opts.Code))    filter["code"]          = opts.Code;
+        if (!string.IsNullOrWhiteSpace(opts.Project)) filter["project"]       = opts.Project;
+        if (!string.IsNullOrWhiteSpace(opts.Path))    filter["path"]          = opts.Path;
+        if (!string.IsNullOrWhiteSpace(opts.File))    filter["file"]          = opts.File;
+        if (!string.IsNullOrWhiteSpace(opts.Text))    filter["text"]          = opts.Text;
+        if (!string.IsNullOrWhiteSpace(opts.GroupBy)) filter["groupBy"]       = opts.GroupBy;
+        if (!string.IsNullOrWhiteSpace(opts.SortBy))  filter["sortBy"]        = opts.SortBy;
+        if (opts.SortDescending)                       filter["sortDirection"]  = "desc";
+        if (opts.ChunkSize > 0)                        filter["chunkSize"]     = opts.ChunkSize;
+        if (opts.ChunkIndex > 0)                       filter["chunkIndex"]    = opts.ChunkIndex;
     }
 
     private static void AddSuppressionRepairPrompt(JsonObject response, int suppressionWarningCount)
@@ -496,18 +504,7 @@ internal static partial class ToolCatalog
                 || message.Contains("Visual Studio may be blocked", StringComparison.OrdinalIgnoreCase));
 
     private static string BuildQuickDiagnosticsArgs(JsonObject? args)
-        => Build(
-            (Severity, OptionalString(args, Severity)),
-            (Code, OptionalString(args, Code)),
-            (Project, OptionalString(args, Project)),
-            (Path, OptionalString(args, Path)),
-            (FileArg, OptionalString(args, FileArg)),
-            (Text, OptionalString(args, Text)),
-            ("group-by", OptionalString(args, GroupBy)),
-            (Max, GetBridgeDiagnosticsMax(args)),
-            (Quick, "true"),
-            (Refresh, "false"),
-            (WaitForIntellisenseHyphen, "false"));
+        => BuildQuickDiagnosticRowsCommandArgs(args);
 
     private static string BuildDiagnosticsSnapshotArgs(JsonObject? args)
     {

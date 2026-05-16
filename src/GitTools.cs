@@ -69,14 +69,18 @@ internal static partial class ToolCatalog
                 related: [("git_current_branch", "Get only the active branch"), ("git_create_branch", "Create a new branch")]));
 
         yield return new("git_log",
-            "Show the commit history. Defaults to the last 20 commits in ISO date format.",
-            ObjectSchema(OptInt("max_count", "Max number of commits to show (default 20).")),
+            "Show the commit history. Defaults to the last 20 commits in ISO date format. " +
+            "Pass path to limit history to commits that touched a specific file or directory.",
+            ObjectSchema(
+                OptInt("max_count", "Max number of commits to show (default 20)."),
+                Opt("path", "Optional file or directory path; limits results to commits that touched it (equivalent to git log -- <path>).")),
             Git,
             async (id, args, bridge) =>
             {
                 string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
                 int max = args?["max_count"]?.GetValue<int?>() ?? 20;
-                return await GitSdkReader.GetLogAsync(id, repo, max).ConfigureAwait(false);
+                string? path = args?["path"]?.GetValue<string>();
+                return await GitSdkReader.GetLogAsync(id, repo, max, path).ConfigureAwait(false);
             },
             searchHints: BuildSearchHints(
                 workflow: [("git_show", "Inspect a specific commit from the log")],
@@ -100,14 +104,18 @@ internal static partial class ToolCatalog
     private static IEnumerable<ToolEntry> GitDiffAndMetaTools()
     {
         yield return new(GitDiffUnstagedTool,
-            "Show unstaged changes in the working tree (not yet git-added).",
-            ObjectSchema(OptInt("context", "Lines of context around each hunk (default 3).")),
+            "Show unstaged changes in the working tree (not yet git-added). " +
+            "Pass paths to scope the diff to specific files.",
+            ObjectSchema(
+                OptInt("context", "Lines of context around each hunk (default 3)."),
+                OptArr(Paths, "Optional list of file paths to scope the diff, e.g. [\"src/Foo.cs\"].")),
             Git,
             async (id, args, bridge) =>
             {
                 string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
                 int ctx = args?["context"]?.GetValue<int?>() ?? DefaultDiffContext;
-                return await GitSdkReader.GetUnstagedDiffAsync(id, repo, ctx)
+                IEnumerable<string>? paths = GetPathListOrNull(args, Paths);
+                return await GitSdkReader.GetUnstagedDiffAsync(id, repo, ctx, paths)
                     .ConfigureAwait(false);
             },
             searchHints: BuildSearchHints(
@@ -115,14 +123,20 @@ internal static partial class ToolCatalog
                 related: [(GitDiffStagedTool, "See already-staged changes"), (GitStatusTool, "See which files changed")]));
 
         yield return new(GitDiffStagedTool,
-            "Show staged changes ready to commit (git-added but not yet committed).",
-            ObjectSchema(OptInt("context", "Lines of context around each hunk (default 3).")),
+            "Show staged changes ready to commit (git-added but not yet committed). " +
+            "Pass paths to scope the diff to specific files.",
+            ObjectSchema(
+                OptInt("context", "Lines of context around each hunk (default 3)."),
+                OptArr(Paths, "Optional list of file paths to scope the diff, e.g. [\"src/Foo.cs\"].")),
             Git,
             async (id, args, bridge) =>
             {
                 string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
                 int ctx = args?["context"]?.GetValue<int?>() ?? DefaultDiffContext;
-                return await GitRunner.RunArgumentsAsync(id, repo, ["diff", "--cached", "--no-color", $"--unified={ctx}"])
+                List<string> gitArgs = ["diff", "--cached", "--no-color", $"--unified={ctx}"];
+                IEnumerable<string>? paths = GetPathListOrNull(args, Paths);
+                if (paths is not null) { gitArgs.Add("--"); gitArgs.AddRange(paths); }
+                return await GitRunner.RunArgumentsAsync(id, repo, gitArgs)
                     .ConfigureAwait(false);
             },
             searchHints: BuildSearchHints(
@@ -152,17 +166,6 @@ internal static partial class ToolCatalog
             searchHints: BuildSearchHints(
                 related: [("git_log", "Browse commit history"), ("git_show", "Inspect a tag's commit")]));
 
-        yield return new("git_stash_list",
-            "List stash entries.",
-            EmptySchema(), Git,
-            async (id, _, bridge) =>
-            {
-                string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
-                return await GitRunner.RunArgumentsAsync(id, repo, ["stash", "list"]).ConfigureAwait(false);
-            },
-            searchHints: BuildSearchHints(
-                workflow: [("git_stash_pop", "Apply the most recent stash entry")],
-                related: [("git_stash_push", "Save changes to a new stash")]));
     }
 
     private static IEnumerable<ToolEntry> GitStagingCommitTools()
@@ -319,7 +322,7 @@ internal static partial class ToolCatalog
                 string remoteArg = string.IsNullOrWhiteSpace(remote) ? string.Empty : EscapeArg(remote);
                 string branchArg = string.IsNullOrWhiteSpace(branch) ? string.Empty : EscapeArg(branch);
                 return await GitRunner.RunNetworkAsync(id, repo,
-                    $"pull {remoteArg} {branchArg}".TrimEnd())
+                    string.Join(" ", new[] { "pull", remoteArg, branchArg }.Where(s => !string.IsNullOrEmpty(s))))
                     .ConfigureAwait(false);
             },
             searchHints: BuildSearchHints(
@@ -345,7 +348,7 @@ internal static partial class ToolCatalog
                 string remoteArg = string.IsNullOrWhiteSpace(remote) ? string.Empty : EscapeArg(remote);
                 string branchArg = string.IsNullOrWhiteSpace(branch) ? string.Empty : EscapeArg(branch);
                 return await GitRunner.RunNetworkAsync(id, repo,
-                    $"push {uFlag} {remoteArg} {branchArg}".TrimEnd().Replace("  ", " "))
+                    string.Join(" ", new[] { "push", uFlag, remoteArg, branchArg }.Where(s => !string.IsNullOrEmpty(s))))
                     .ConfigureAwait(false);
             },
             searchHints: BuildSearchHints(
@@ -390,6 +393,18 @@ internal static partial class ToolCatalog
 
     private static IEnumerable<ToolEntry> GitStashTools()
     {
+        yield return new("git_stash_list",
+            "List stash entries.",
+            EmptySchema(), Git,
+            async (id, _, bridge) =>
+            {
+                string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
+                return await GitRunner.RunArgumentsAsync(id, repo, ["stash", "list"]).ConfigureAwait(false);
+            },
+            searchHints: BuildSearchHints(
+                workflow: [("git_stash_pop", "Apply the most recent stash entry")],
+                related: [("git_stash_push", "Save changes to a new stash")]));
+
         yield return new("git_stash_push",
             "Stash current working-tree and index changes.",
             ObjectSchema(
@@ -431,19 +446,6 @@ internal static partial class ToolCatalog
     /// </summary>
     private static string EscapeArg(string value)
         => "\"" + value.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
-
-    /// <summary>
-    /// Build a space-separated quoted path list from a JSON array arg.
-    /// </summary>
-    private static string BuildPathList(JsonObject? args, string argName)
-    {
-        if (args?[argName] is JsonArray arr)
-            return string.Join(" ", arr.Select(n => EscapeArg(n?.GetValue<string>() ?? string.Empty)));
-
-        // Fallback: single string value.
-        string? single = args?[argName]?.GetValue<string>();
-        return string.IsNullOrWhiteSpace(single) ? "." : EscapeArg(single);
-    }
 
     /// <summary>
     /// Extract path strings from a JSON array arg for use with LibGit2Sharp.

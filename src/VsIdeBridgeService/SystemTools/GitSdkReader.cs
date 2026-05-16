@@ -78,7 +78,11 @@ internal static class GitSdkReader
             successText: $"Git status completed with {entries.Count} changed path(s)."));
     }
 
-    public static Task<JsonNode> GetUnstagedDiffAsync(JsonNode? id, string repoDirectory, int contextLines)
+    public static Task<JsonNode> GetUnstagedDiffAsync(
+        JsonNode? id,
+        string repoDirectory,
+        int contextLines,
+        IEnumerable<string>? filterPaths = null)
     {
         using Repository repo = OpenRepository(id, repoDirectory);
         string[] changedPaths =
@@ -94,6 +98,14 @@ internal static class GitSdkReader
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase),
         ];
+
+        // Narrow to caller-requested paths when provided (case-insensitive substring match).
+        if (filterPaths is not null)
+        {
+            string[] filters = [.. filterPaths.Select(NormalizeGitPath)];
+            changedPaths = [.. changedPaths.Where(p =>
+                filters.Any(f => p.Contains(f, StringComparison.OrdinalIgnoreCase)))];
+        }
 
         JsonArray entries = [];
         string stdout = string.Empty;
@@ -208,23 +220,47 @@ internal static class GitSdkReader
         }
     }
 
-    public static Task<JsonNode> GetLogAsync(JsonNode? id, string repoDirectory, int maxCount)
+    public static Task<JsonNode> GetLogAsync(JsonNode? id, string repoDirectory, int maxCount, string? path = null)
     {
         using Repository repo = OpenRepository(id, repoDirectory);
 
         JsonArray commits = [];
-        foreach (Commit commit in repo.Commits.Take(Math.Max(1, maxCount)))
+
+        // When a path is given, use LibGit2Sharp's file-history walk so only commits
+        // that touched that path are returned (equivalent to git log -- <path>).
+        if (!string.IsNullOrWhiteSpace(path))
         {
-            commits.Add(new JsonObject
+            string normalizedPath = NormalizeGitPath(path);
+            foreach (LogEntry entry in repo.Commits.QueryBy(normalizedPath).Take(Math.Max(1, maxCount)))
             {
-                ["sha"] = commit.Sha,
-                ["shortSha"] = ShortSha(commit.Sha),
-                ["authorName"] = commit.Author.Name,
-                ["authorEmail"] = commit.Author.Email,
-                ["authorWhen"] = commit.Author.When.ToString("O", CultureInfo.InvariantCulture),
-                ["messageShort"] = commit.MessageShort,
-                ["message"] = commit.Message,
-            });
+                Commit commit = entry.Commit;
+                commits.Add(new JsonObject
+                {
+                    ["sha"]         = commit.Sha,
+                    ["shortSha"]    = ShortSha(commit.Sha),
+                    ["authorName"]  = commit.Author.Name,
+                    ["authorEmail"] = commit.Author.Email,
+                    ["authorWhen"]  = commit.Author.When.ToString("O", CultureInfo.InvariantCulture),
+                    ["messageShort"] = commit.MessageShort,
+                    ["message"]     = commit.Message,
+                });
+            }
+        }
+        else
+        {
+            foreach (Commit commit in repo.Commits.Take(Math.Max(1, maxCount)))
+            {
+                commits.Add(new JsonObject
+                {
+                    ["sha"]         = commit.Sha,
+                    ["shortSha"]    = ShortSha(commit.Sha),
+                    ["authorName"]  = commit.Author.Name,
+                    ["authorEmail"] = commit.Author.Email,
+                    ["authorWhen"]  = commit.Author.When.ToString("O", CultureInfo.InvariantCulture),
+                    ["messageShort"] = commit.MessageShort,
+                    ["message"]     = commit.Message,
+                });
+            }
         }
 
         JsonObject payload = new()
@@ -234,6 +270,9 @@ internal static class GitSdkReader
             ["commits"] = commits,
             [RepositoryPathProperty] = repo.Info.WorkingDirectory,
         };
+
+        if (!string.IsNullOrWhiteSpace(path))
+            payload["pathFilter"] = path;
 
         return Task.FromResult<JsonNode>(ToolResultFormatter.StructuredToolResult(
             payload,
@@ -374,10 +413,13 @@ internal static class GitSdkReader
     public static Task<JsonNode> StageAsync(JsonNode? id, string repoDirectory, IEnumerable<string> paths)
     {
         using Repository repo = OpenRepository(id, repoDirectory);
-        List<string> normalized = [.. paths.Select(NormalizeGitPath)];
+        List<string> normalized = ResolveStageTargets(repo, paths);
         try
         {
-            Commands.Stage(repo, normalized);
+            if (normalized.Count > 0)
+            {
+                Commands.Stage(repo, normalized);
+            }
         }
         catch (LibGit2SharpException ex)
         {
@@ -385,11 +427,14 @@ internal static class GitSdkReader
                 $"git add failed: {ex.Message}");
         }
 
+        string stdout = normalized.Count == 0
+            ? string.Empty
+            : string.Join(Environment.NewLine, normalized.Select(p => $"staged: {p}")) + Environment.NewLine;
         JsonObject payload = new()
         {
             ["success"] = true,
             [ExitCodeProperty] = 0,
-            ["stdout"] = string.Join(Environment.NewLine, normalized.Select(p => $"staged: {p}")) + Environment.NewLine,
+            ["stdout"] = stdout,
             ["stderr"] = string.Empty,
             ["count"] = normalized.Count,
         };
@@ -568,6 +613,44 @@ internal static class GitSdkReader
                 "Git user.name or user.email is not configured. " +
                 "Run 'git config user.name \"Your Name\"' and 'git config user.email \"you@example.com\"'.");
         return new Signature(name, email, DateTimeOffset.Now);
+    }
+
+    private static List<string> ResolveStageTargets(Repository repo, IEnumerable<string> paths)
+    {
+        List<string> normalized =
+        [
+            .. paths
+                .Select(NormalizeGitPath)
+                .Select(static path => path.Trim())
+                .Where(static path => !string.IsNullOrWhiteSpace(path)),
+        ];
+
+        if (normalized.Count == 0 || normalized.Any(IsWholeRepositoryPathSpec))
+        {
+            RepositoryStatus status = repo.RetrieveStatus(new StatusOptions
+            {
+                IncludeIgnored = false,
+                IncludeUntracked = true,
+                RecurseUntrackedDirs = true,
+            });
+
+            return
+            [
+                .. status
+                    .Where(static entry => ShouldIncludeStatus(entry.State))
+                    .Select(static entry => NormalizeGitPath(entry.FilePath))
+                    .Distinct(StringComparer.Ordinal)
+                    .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase),
+            ];
+        }
+
+        return normalized;
+    }
+
+    private static bool IsWholeRepositoryPathSpec(string path)
+    {
+        string normalized = NormalizeGitPath(path).Trim().TrimEnd('/');
+        return normalized is "." or "./.";
     }
 
     private static string NormalizeGitPath(string path)
