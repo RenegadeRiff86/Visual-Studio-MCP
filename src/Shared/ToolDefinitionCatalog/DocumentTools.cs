@@ -8,15 +8,16 @@ public static partial class ToolDefinitionCatalog
         => CreateMutatingTool(
             "apply_diff",
             "documents",
-            "Edit a file through VS — requires a handle (h:N or f:N) as 'file'; full paths are rejected.",
+            "Edit a file through VS — pass a handle (h:N, f:N) or plain path as 'file'.",
             "Bridge catalog tool — must be called through call_tool: " +
             "call_tool({\"name\":\"apply_diff\",\"arguments\":{\"file\":\"h:1\",\"old_content\":\"exact old text\",\"new_content\":\"replacement\"}}) " +
-            "REQUIRED WORKFLOW — the 'file' argument MUST be a handle (e.g. h:3, f:1, e:2); full paths are rejected. " +
-            "Get a handle first: (1) find_text or search_symbols → h: handle, (2) find_files or glob → f: handle, " +
-            "(3) errors/warnings/messages → e:/w:/m: handle, (4) read_file with full path → registers and returns f: handle. " +
-            "Then read_file(handle) to get the exact current text, copy that text verbatim as old_content, write your replacement as new_content, and call apply_diff. " +
+            "The 'file' argument accepts a handle (h:N, f:N, e:N, w:N, m:N) OR a plain path (absolute or solution-relative like 'CHANGELOG.md' or 'src/Foo.cs'). " +
+            "Prefer a handle when available: (1) find_text or search_symbols → h: handle, (2) find_files or glob → f: handle, " +
+            "(3) errors/warnings/messages → e:/w:/m: handle, (4) read_file → returns f: handle in the response (use it!). " +
+            "Then read_file to get the exact current text, copy that text verbatim as old_content, write your replacement as new_content, and call apply_diff. " +
             "For a single edit use file + old_content + new_content. " +
-            "For multiple edits in one call use the edits array — each element is { file, old_content, new_content } and each edit runs as its own command instance: " +
+            "For multiple targeted edits use edits: [{ file, old_content, new_content }, ...]. Entries run in order as separate command instances with per-entry failures; this is not an atomic rollback. " +
+            "Same-file multi-edit uses content matching, not original line numbers, so avoid duplicate old_content and overlapping replacements. " +
             "call_tool({\"name\":\"apply_diff\",\"arguments\":{\"edits\":[{\"file\":\"h:1\",\"old_content\":\"...\",\"new_content\":\"...\"},{\"file\":\"h:2\",\"old_content\":\"...\",\"new_content\":\"...\"}]}}) " +
             "For multi-file or structural changes only (add/move/delete files), use the diff argument with the *** Begin Patch format. " +
             "NEVER use Claude's built-in Edit or Write tools for files open in VS; always use this bridge tool instead.",
@@ -54,7 +55,7 @@ public static partial class ToolDefinitionCatalog
             "To continue past what you have seen: call again with start_line = (last line shown + 1). " +
             "For multiple slices or multiple files in one round-trip use read_file_batch. " +
             "Use file_outline first to identify the line range you need. " +
-            "For in-solution edits use this before apply_diff so the patch targets current content.",
+            "The response includes a 'handle' field (f:N) — pass it directly to apply_diff or write_file without running find_files first.",
             parameterSchema,
             bridgeCommand: "document-slice",
             title: "Read File Slice",

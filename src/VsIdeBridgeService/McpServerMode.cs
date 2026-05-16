@@ -252,9 +252,19 @@ internal static class McpServerMode
             "including apply_diff, read_file, read_file_batch, write_file, find_text, find_text_batch, search_symbols, file_outline, errors, build, build_solution, rebuild_solution, build_errors, and git_status. " +
             "Use the wrapper shape " + CallToolPrefix + "\"name\":\"read_file\",\"arguments\":{\"file\":\"h:2\",\"start_line\":260,\"end_line\":360}}); " +
             "never pass raw strings as arguments. " +
+            "Exact parameter names for the most-used tools (do NOT guess — use tool_help if unsure): " +
+            "find_text: required=query, optional=path,scope,regex,whole_word,match_case,chunk_size; " +
+            "find_files/glob: required=query, optional=path; " +
+            "search_symbols: required=query, optional=kind,scope,path,project; " +
+            "read_file: required=file, optional=start_line,end_line; " +
+            "apply_diff (single edit): required=file,old_content,new_content, optional=replace_all(bool — replaces every occurrence atomically, one undo reverts all); " +
+            "errors/warnings/messages: all optional: code,file,path,text,project,quick,refresh,group_by,sort_by,chunk_size. " +
             "When results include handle fields such as h:2, f:1, e:1, w:1, or m:1, " +
             "use the handle as the next file/path value instead of copying full paths. " +
-            "For single-file edits, call apply_diff with file + old_content + new_content after read_file; " +
+            "Handles are in the JSON data rows (match.handle, row.handle) — they do NOT appear in the Summary string. " +
+            "Always read the structured data fields, not just the Summary text. " +
+            "For single-file edits: call read_file first (the response Data.handle field is an f:N handle), " +
+            "then call apply_diff with that handle as file, the exact current text as old_content, and your replacement as new_content. " +
             "reserve diff for multi-file or structural patches. " +
             "Examples: " +
             CallToolPrefix + "\"name\":\"apply_diff\",\"arguments\":{\"file\":\"h:2\",\"old_content\":\"exact old text\",\"new_content\":\"replacement\"}}) " +
@@ -273,13 +283,14 @@ internal static class McpServerMode
             "(4) Use read_file_batch to read multiple slices across files in one call instead of repeated read_file calls. " +
             "(5) Use find_text_batch to search multiple patterns at once instead of repeated find_text calls. " +
             "Handle prefixes — always pass the handle as the file: value, never copy the full path: " +
-            "h: is produced by find_text, search_symbols, find_references, call_hierarchy; " +
-            "f: is produced by find_files, glob; " +
+            "h: is produced by find_text, find_text_batch, smart_context, search_symbols, find_references, goto_definition, goto_implementation, peek_definition, symbol_info; " +
+            "f: is produced by find_files, glob, read_file, file_outline, file_symbols; " +
             "e:/w:/m: are produced by errors, warnings, messages, diagnostics_snapshot. " +
             "Use recommend_tools for task-based discovery and tool_help with name=<tool> for the full schema. " +
             "If you get an unknown-tool error, use recommend_tools or list_tools_by_category to find the right tool — do not guess tool names. " +
             "apply_diff failure rule: If apply_diff returns a content-mismatch error, NEVER fall back to write_file — that overwrites the entire file and destroys unrelated content. " +
-            "Instead: call read_file on the same file handle, copy the exact current text verbatim into old_content, and retry apply_diff. " +
+            "Instead: call read_file on the same file (handle or path), use the f:N handle from the response Data.handle field, " +
+            "copy the exact current text verbatim into old_content, and retry apply_diff with that handle. " +
             "Multi-instance: If more than one Visual Studio window is open and you get a binding error or are asked which solution to use, " +
             "call list_instances to see all running VS instances, then call bind_instance with the chosen instance_id (or bind_solution with a solution name hint). " +
             "You can switch to a different VS instance at any point mid-session by calling bind_instance again — " +
@@ -291,6 +302,12 @@ internal static class McpServerMode
             "(a) open it in a new VS window — both solutions stay open and you can switch between them at any time using bind_instance, or " +
             "(b) swap it into the current VS window using open_solution — this closes the current solution in that window. " +
             "Once the target solution is open in VS, call list_instances to confirm it appeared, then bind_instance with the new instance_id. " +
+            "Diagnostics rule: After making any code edits, call warnings({ refresh=true, file=<edited file> }) and errors({ refresh=true, file=<edited file> }) " +
+            "to get a fresh live read — the default cache is stale after edits, so always pass refresh=true when checking post-edit diagnostics. " +
+            "Errors you introduced must always be fixed immediately — do not ask the user, just fix them. " +
+            "Warnings and messages you introduced (in files you touched): fix them immediately without asking — they are your responsibility. " +
+            "Warnings and messages in files you did not edit (pre-existing): show a summary to the user and ask if they want them addressed — do not auto-fix. " +
+            "To distinguish new from pre-existing: any diagnostic in a file you edited that appears after your change is yours; if you cannot tell, note it and ask. " +
             "Math rule: NEVER compute non-trivial arithmetic mentally or guess at a numeric result. " +
             "Always call python_eval with the expression — it runs real Python and returns the exact answer. " +
             "Pre-imported in both python_eval and python_exec (no import statement needed): math, statistics, decimal, fractions. " +

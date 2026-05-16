@@ -8,16 +8,14 @@ internal static partial class ToolCatalog
         "PathResolver resolves it through IdeBridgeRuntime.HandleService.";
 
     /// <summary>
-    /// File argument description for apply_diff and write_file — handles are required,
-    /// full paths are rejected.
+    /// File argument description for apply_diff — accepts handles (preferred) or plain paths.
     /// </summary>
     private const string ApplyDiffFileDesc =
-        "REQUIRED: a handle ID (e.g. h:3 or f:1) returned by a prior bridge result — NOT a full path. " +
-        "Full paths are rejected. To get a handle: " +
-        "(1) run find_text or search_symbols to get h: handles, " +
-        "(2) run find_files or glob to get f: handles, " +
-        "(3) run errors, warnings, or messages to get e:/w:/m: handles, or " +
-        "(4) run read_file with the full path once — it registers and returns an f: handle you can then pass here.";
+        "File to edit: a handle (h:N, f:N, e:N, w:N, m:N) from a prior bridge result, " +
+        "or a plain path (absolute or solution-relative). " +
+        "Prefer a handle — pass the h:/f: handle returned by find_text, find_files, errors, or read_file " +
+        "so the bridge resolves the file without ambiguity. " +
+        "Plain paths work too: 'CHANGELOG.md', 'src/Foo.cs', or a full absolute path.";
 
     private const string LineDesc = "1-based line number.";
     private const string ColumnDesc = "1-based column number.";

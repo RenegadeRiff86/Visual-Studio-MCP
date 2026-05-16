@@ -71,7 +71,8 @@ internal static partial class ToolCatalog
         return Build(
             ("patch-text-base64", request.EncodedDiff),
             ("open-changed-files", "true"),
-            ("save-changed-files", "true"));
+            ("save-changed-files", "true"),
+            ("replace-all", request.ReplaceAll ? "true" : null));
     }
 
     private static string BuildWriteFileArgs(JsonObject? args)
@@ -104,17 +105,6 @@ internal static partial class ToolCatalog
         {
             if (editNode is not JsonObject edit) continue;
             string? editFileArg = edit["file"]?.GetValue<string>();
-            if (editFileArg is not null && !HandleRegistry.IsHandle(editFileArg))
-            {
-                editResults.Add(new JsonObject
-                {
-                    ["file"] = editFileArg,
-                    ["success"] = false,
-                    ["error"] = "'file' must be a handle (e.g. h:3 or f:1) — not a full path.",
-                });
-                failed++;
-                continue;
-            }
 
             ApplyDiffRequest editRequest;
             try
@@ -162,7 +152,9 @@ internal static partial class ToolCatalog
             },
         };
         if (ArgBuilder.OptionalBool(args, PostCheck, false))
-            combined["postCheck"] = RunDocumentPostCheck(bridge, ApplyDiffTool);
+        {
+            combined["postCheck"] = await RunDocumentPostCheckAsync(bridge, ApplyDiffTool).ConfigureAwait(false);
+        }
         return combined;
     }
 
@@ -182,11 +174,12 @@ internal static partial class ToolCatalog
                         ["type"] = "array",
                         ["description"] =
                             "Apply multiple targeted edits in one call. Each element is an independent edit object with its own " +
-                            "file (handle), old_content, and new_content. Each edit is dispatched as a separate command instance — " +
-                            "use this instead of calling apply_diff repeatedly. Edits are applied in order; failures are reported " +
-                            "per-entry without aborting the rest.",
+                            "file (handle), old_content, and new_content. Each edit is dispatched as a separate command instance " +
+                            "and applied in order; failures are reported per-entry without aborting the rest. For same-file edits, " +
+                            "old_content is matched by content rather than original line number. Avoid duplicate old_content and " +
+                            "overlapping replacements; entries already applied are not rolled back if a later entry fails.",
                         ["items"] = ObjectSchema(
-                            Req(FileArg, "Handle (h:N or f:N) for the file to edit."),
+                            Req(FileArg, "Handle (h:N, f:N) or plain path for the file to edit."),
                             Req("old_content", "Exact text block to replace — copy verbatim from read_file."),
                             Req("new_content", "Replacement text.")),
                         ["minItems"] = 1,
@@ -213,54 +206,61 @@ internal static partial class ToolCatalog
                         "Structural patches may use *** Add File, *** Delete File, or *** Move to.\n" +
                         "Do not send unified diff headers like --- / +++."),
                     OptBool(PostCheck,
-                        "Queue a quick diagnostics refresh after applying (default false).")))
+                        "Queue a quick diagnostics refresh after applying (default false)."),
+                    OptBool("replace_all",
+                        "When true, replace EVERY non-overlapping occurrence of old_content in the file instead of just the first. " +
+                        "All replacements are grouped into a single VS undo transaction — one Ctrl+Z reverts all of them. " +
+                        "Only valid with file + old_content + new_content (not with the edits array or diff). " +
+                        "Errors if old_content is not found at least once. " +
+                         "IMPORTANT: after all edits are complete, call errors(), warnings(), and messages() with refresh=true for current diagnostics — do not leave diagnostics behind.")))
                 .WithSearchHints(BuildSearchHints(
-                    workflow: [("reload_document", "Reload the file so VS picks up the changes"), ("errors", "Check for diagnostics after applying")],
+                    workflow:
+                    [
+                        ("errors", "Check current errors after edits; use refresh=true when you need a fresh UI read"),
+                        ("warnings", "Check current warnings after edits; use refresh=true when you need a fresh UI read"),
+                        ("messages", "Check current messages after edits; use refresh=true when you need a fresh UI read"),
+                        ("reload_document", "Reload the file so VS picks up the changes"),
+                    ],
                     related: [("write_file", "Overwrite the full file instead"), (ReadFileTool, "Read the file first to understand its current state")])),
-            async (id, args, bridge) =>
-            {
-                // Multi-edit form: edits array — each element is its own command instance.
-                if (args?["edits"] is JsonArray editsArray)
-                    return BridgeResult(await ApplyMultipleEditsAsync(id, args, editsArray, bridge).ConfigureAwait(false));
+            (id, args, bridge) => ExecuteApplyDiffAsync(id, args, bridge));
+    }
 
-                // Single-edit form.
-                string? fileArg = args?["file"]?.GetValue<string>();
-                if (fileArg is not null && !HandleRegistry.IsHandle(fileArg))
-                    throw new McpRequestException(
-                        id,
-                        McpErrorCodes.InvalidParams,
-                        $"apply_diff requires a handle (e.g. h:3 or f:1) as the 'file' argument — not a full path. " +
-                        $"Run find_text, find_files, errors, or warnings first to get a handle for '{System.IO.Path.GetFileName(fileArg)}', " +
-                        $"or call read_file with the full path once to register a new f: handle, then retry apply_diff with that handle.");
+    private static async Task<JsonNode> ExecuteApplyDiffAsync(JsonNode? id, JsonObject? args, BridgeConnection bridge)
+    {
+        // Multi-edit form: edits array — each element is its own command instance.
+        if (args?["edits"] is JsonArray editsArray)
+            return BridgeResult(await ApplyMultipleEditsAsync(id, args, editsArray, bridge).ConfigureAwait(false));
 
-                ApplyDiffRequest request;
-                try
-                {
-                    request = ApplyDiffRequest.FromJsonObject(args);
-                }
-                catch (ApplyDiffValidationException ex)
-                {
-                    throw new McpRequestException(id, McpErrorCodes.InvalidParams, ex.Message);
-                }
+        // Single-edit form.
+        string? fileArg = args?["file"]?.GetValue<string>();
 
-                JsonObject result = await bridge.SendAsync(
-                    id,
-                    "apply-diff",
-                    BuildApplyDiffArgs(request))
-                    .ConfigureAwait(false);
+        ApplyDiffRequest request;
+        try
+        {
+            request = ApplyDiffRequest.FromJsonObject(args);
+        }
+        catch (ApplyDiffValidationException ex)
+        {
+            throw new McpRequestException(id, McpErrorCodes.InvalidParams, ex.Message);
+        }
 
-                if (result["Data"] is JsonObject data)
-                {
-                    data["validatedPatch"] = request.ToJsonObject();
-                }
+        JsonObject result = await bridge.SendAsync(
+            id,
+            "apply-diff",
+            BuildApplyDiffArgs(request))
+            .ConfigureAwait(false);
 
-                if (ArgBuilder.OptionalBool(args, PostCheck, false))
-                {
-                    result["postCheck"] = RunDocumentPostCheck(bridge, ApplyDiffTool);
-                }
+        if (result["Data"] is JsonObject data)
+        {
+            data["validatedPatch"] = request.ToJsonObject();
+        }
 
-                return BridgeResult(result);
-            });
+        if (ArgBuilder.OptionalBool(args, PostCheck, false))
+        {
+            result["postCheck"] = await RunDocumentPostCheckAsync(bridge, ApplyDiffTool).ConfigureAwait(false);
+        }
+
+        return BridgeResult(result);
     }
 
     private static IEnumerable<ToolEntry> WriteFileTools()
@@ -281,7 +281,7 @@ internal static partial class ToolCatalog
 
                 if (ArgBuilder.OptionalBool(args, PostCheck, false))
                 {
-                    result["postCheck"] = RunDocumentPostCheck(bridge, "write_file");
+                    result["postCheck"] = await RunDocumentPostCheckAsync(bridge, "write_file").ConfigureAwait(false);
                 }
 
                 return BridgeResult(result);
@@ -397,7 +397,9 @@ internal static partial class ToolCatalog
                 related: [("list_windows", "List available windows"), ("execute_command", "Run a VS command")]));
 
         yield return BridgeTool("execute_command",
-            "Execute an arbitrary Visual Studio command with optional arguments.",
+            "Execute an arbitrary Visual Studio command with optional arguments. Commands that may open or activate visible IDE " +
+            "tool windows, such as TestExplorer.*, return visibleWindowSideEffect guidance so the model prompts the user before " +
+            "closing or otherwise changing that window.",
             ObjectSchema(
                 Req("command", "Visual Studio command name (e.g. Edit.FormatDocument)."),
                 Opt("args", "Optional command arguments string."),
@@ -571,10 +573,42 @@ internal static partial class ToolCatalog
             searchHints: BuildSearchHints(
                 related: [("vs_open", "Launch a VS instance"), ("bridge_health", "Check binding health")]));
 
+        yield return new("run_tests",
+            "Run .NET tests through dotnet test from the bound solution directory and return structured pass/fail counts plus output. " +
+            "Use this for xUnit, NUnit, and MSTest projects before falling back to shell_exec. Supports project selection, " +
+            "configuration, framework, runtime, VSTest filter expressions, loggers such as trx, results directories, and blame.",
+            ObjectSchema(
+                Opt("project", "Optional test project name or path. Omit to run the active solution with dotnet test."),
+                Opt("configuration", "Optional build configuration passed to dotnet test (e.g. Release)."),
+                Opt("framework", "Optional target framework passed with --framework."),
+                Opt("runtime", "Optional runtime identifier passed with --runtime."),
+                Opt("settings", "Optional .runsettings file passed with --settings."),
+                Opt("filter", "Optional VSTest filter expression passed with --filter, e.g. FullyQualifiedName~MyTests."),
+                Opt("logger", "Optional logger passed with --logger, e.g. trx or trx;LogFilePrefix=testResults."),
+                Opt("results_directory", "Optional results directory passed with --results-directory."),
+                Opt("collect", "Optional data collector passed with --collect, e.g. XPlat Code Coverage."),
+                Opt("verbosity", "Optional dotnet test verbosity: quiet, minimal, normal, detailed, or diagnostic."),
+                OptBool("no_restore", "Pass --no-restore (default true). Set false to allow restore."),
+                OptBool("no_build", "Pass --no-build (default false)."),
+                OptBool("blame", "Pass --blame to report tests in progress when the test host crashes (default false)."),
+                OptInt("timeout_ms", "Timeout in milliseconds (default 120000)."),
+                OptInt("head_lines", "If set, include only the first N lines of stdout and stderr."),
+                OptInt("tail_lines", "If set, include only the last N lines of stdout and stderr. Combine with head_lines to see both ends of long output."),
+                OptInt("max_lines", "Max total lines per stream when head_lines/tail_lines are not set (default 200).")),
+            "test",
+            (id, args, bridge) => RunTestsTool.ExecuteAsync(id, args, bridge),
+            mutating: true,
+            aliases: ["test", "dotnet_test", "unit_tests", "run_unit_tests", "vstest"],
+            tags: ["test", "tests", "dotnet", "vstest", "xunit", "nunit", "mstest"],
+            summary: "Run .NET tests through dotnet test and return structured results.",
+            searchHints: BuildSearchHints(
+                workflow: [("errors", "Check compile errors if tests fail before execution"), ("read_output", "Inspect VS output when a test run is linked to build output")],
+                related: [("build_errors", "Build and return compiler errors"), ("shell_exec", "Run non-.NET test runners or custom scripts")]));
+
         yield return new("shell_exec",
             "Execute an arbitrary external process and capture stdout, stderr, and exit code. " +
-            "Use for build scripts, test runners, package tools, and CLI utilities. " +
-            "Prefer named tools for common operations: git_* for version control, " +
+            "Use for build scripts, package tools, non-.NET test runners, and CLI utilities. " +
+            "Prefer named tools for common operations: git_* for version control, run_tests for .NET tests, " +
             "build / build_errors for compilation, delete_file / copy_file for FileArg operations. " +
             "Working directory defaults to the directory containing the .sln file. " +
             "For files in subdirectories use paths relative to that root (e.g. 'src/Foo/Bar.cs'), or pass cwd explicitly.",
@@ -588,11 +622,11 @@ internal static partial class ToolCatalog
                 OptInt("max_lines", "Max total lines per stream when head_lines/tail_lines are not set (default 200).")),
             "system",
             (id, args, bridge) => ShellExecTool.ExecuteAsync(id, args, bridge),
-            aliases: ["bash", "shell", "run", "run_command", "run_shell_command", "terminal_command", "cmd", "powershell", "run_tests", "test", "lint"],
+            aliases: ["bash", "shell", "run", "run_command", "run_shell_command", "terminal_command", "cmd", "powershell", "lint"],
             tags: ["shell", "bash", "run", "execute", "command", "test", "lint", "terminal"],
-            summary: "Run shell commands, scripts, tests, and lint/build helpers.",
+            summary: "Run shell commands, scripts, and lint/build helpers.",
             searchHints: BuildSearchHints(
-                related: [("execute_command", "Run a VS command instead"), ("build", "Use the build tool for compilation"), ("git_status", "Use git tools for version control")]));
+                related: [("execute_command", "Run a VS command instead"), ("run_tests", "Run .NET tests"), ("build", "Use the build tool for compilation"), ("git_status", "Use git tools for version control")]));
 
     }
 
@@ -652,21 +686,54 @@ internal static partial class ToolCatalog
         return BridgeResult(response);
     }
 
-    private static JsonObject RunDocumentPostCheck(BridgeConnection bridge, string sourceTool)
+    private static async Task<JsonObject> RunDocumentPostCheckAsync(BridgeConnection bridge, string sourceTool)
     {
-        JsonObject snapshot = bridge.DocumentDiagnostics.QueueRefreshAndGetSnapshot(sourceTool);
+        JsonObject snapshot = await bridge.DocumentDiagnostics
+            .QueueRefreshAndWaitForSnapshotAsync(sourceTool, clearCached: true)
+            .ConfigureAwait(false);
+        string status = snapshot["status"]?.GetValue<string>() ?? "unknown";
         JsonObject? errorsData = snapshot["errors"]?["Data"]?.AsObject();
-        bool hasErrors = errorsData?["hasErrors"]?.GetValue<bool>() ?? false;
-        int errorCount   = errorsData?["totalSeverityCounts"]?["Error"]?.GetValue<int>()   ?? 0;
-        int warningCount = errorsData?["totalSeverityCounts"]?["Warning"]?.GetValue<int>() ?? 0;
-        int messageCount = errorsData?["totalSeverityCounts"]?["Message"]?.GetValue<int>() ?? 0;
+        JsonObject? warningsData = snapshot["warnings"]?["Data"]?.AsObject();
+        JsonObject? messagesData = snapshot["messages"]?["Data"]?.AsObject();
+        bool completed = string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase);
+        bool hasCompleteCounts = completed
+            && errorsData is not null
+            && warningsData is not null
+            && messagesData is not null;
+        if (!hasCompleteCounts)
+        {
+            bool failed = string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase);
+            JsonObject pending = new()
+            {
+                ["mode"] = "refresh-and-wait",
+                ["status"] = status,
+                ["pending"] = !completed && !failed,
+                ["summary"] = failed
+                    ? "Diagnostics refresh failed; run errors, warnings, or messages with refresh=true for current counts."
+                    : "Diagnostics refresh did not produce complete counts; run errors, warnings, or messages with refresh=true for current counts.",
+                ["snapshot"] = snapshot.DeepClone(),
+            };
+            if (snapshot["lastError"] is JsonNode lastError)
+            {
+                pending["lastError"] = lastError.DeepClone();
+            }
+
+            return pending;
+        }
+
+        int errorCount   = GetSeverityCount(errorsData, "Error");
+        int warningCount = GetSeverityCount(errorsData, "Warning");
+        int messageCount = GetSeverityCount(errorsData, "Message");
+        bool hasErrors = errorCount > 0 || (errorsData?["hasErrors"]?.GetValue<bool>() ?? false);
         bool anyIssues = errorCount + warningCount + messageCount > 0;
         string summary = anyIssues
             ? $"{errorCount} error(s) · {warningCount} warning(s) · {messageCount} message(s) — fix all before building."
             : $"0 errors · 0 warnings · 0 messages — clean.";
         JsonObject result = new()
         {
-            ["mode"] = "background-refresh",
+            ["mode"] = "refresh-and-wait",
+            ["status"] = status,
+            ["pending"] = false,
             ["hasErrors"] = hasErrors,
             ["errorCount"] = errorCount,
             ["warningCount"] = warningCount,
@@ -674,8 +741,14 @@ internal static partial class ToolCatalog
             ["summary"] = summary,
         };
         if (hasErrors)
+        {
             result["errors"] = errorsData?["rows"]?.DeepClone();
+        }
+
         return result;
     }
+
+    private static int GetSeverityCount(JsonObject? diagnosticsData, string severity)
+        => diagnosticsData?["totalSeverityCounts"]?[severity]?.GetValue<int>() ?? 0;
 
 }

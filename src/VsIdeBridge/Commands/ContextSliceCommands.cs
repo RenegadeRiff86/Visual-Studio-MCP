@@ -6,6 +6,7 @@ using System.IO;
 using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 using VsIdeBridge.Services;
+using VsIdeBridge.Tooling.Handles;
 
 namespace VsIdeBridge.Commands;
 
@@ -41,6 +42,15 @@ internal static partial class SearchNavigationCommands
                 revealLine)
                 .ConfigureAwait(true);
 
+            // Register a file handle so callers can immediately pass it to apply_diff
+            // without needing a separate find_files or find_text call first.
+            string? resolvedPath = (string?)documentSlice["resolvedPath"];
+            if (!string.IsNullOrEmpty(resolvedPath))
+            {
+                FileMatchHandle fileHandle = context.Handles.RegisterFileRead(resolvedPath!);
+                documentSlice["handle"] = fileHandle.Id;
+            }
+
             string documentText = (string?)documentSlice["text"] ?? string.Empty;
             string documentSummary = string.IsNullOrWhiteSpace(documentText)
                 ? $"Captured lines {documentSlice["actualStartLine"]}-{documentSlice["actualEndLine"]}."
@@ -69,6 +79,9 @@ internal static partial class SearchNavigationCommands
                 args.GetInt32("context-after", 10),
                 args.GetBoolean("populate-results-window", false),
                 args.GetInt32("results-window", 1)).ConfigureAwait(true);
+
+            if (smartContextResult["matches"] is JArray smartMatches)
+                context.Handles.RegisterSearchHits(smartMatches);
 
             return new CommandExecutionResult(
                 $"Captured {smartContextResult["contextCount"]} smart context(s) from {smartContextResult["totalMatchCount"]} match(es). See Data.contexts and Data.matches for details.",
