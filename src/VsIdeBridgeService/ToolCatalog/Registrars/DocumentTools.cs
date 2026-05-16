@@ -71,8 +71,7 @@ internal static partial class ToolCatalog
         return Build(
             ("patch-text-base64", request.EncodedDiff),
             ("open-changed-files", "true"),
-            ("save-changed-files", "true"),
-            ("replace-all", request.ReplaceAll ? "true" : null));
+            ("save-changed-files", "true"));
     }
 
     private static string BuildWriteFileArgs(JsonObject? args)

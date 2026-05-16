@@ -503,6 +503,35 @@ internal static partial class ToolCatalog
             && (message.Contains("Timed out waiting for VS bridge response", StringComparison.OrdinalIgnoreCase)
                 || message.Contains("Visual Studio may be blocked", StringComparison.OrdinalIgnoreCase));
 
+    private static string BuildDiagnosticRowsCommandArgs(JsonObject? args, string? defaultSeverity)
+        => Build(
+            (Severity, OptionalString(args, Severity) ?? defaultSeverity),
+            BoolArg(WaitForIntellisenseHyphen, args, WaitForIntellisense, false, true),
+            BoolArg(Quick, args, Quick, ShouldUsePassiveDiagnosticsRead(args), true),
+            BoolArg(Refresh, args, Refresh, false, true),
+            (Max, GetBridgeDiagnosticsMax(args)),
+            (Code, OptionalString(args, Code)),
+            (Project, OptionalString(args, Project)),
+            (Path, OptionalString(args, Path)),
+            (FileArg, OptionalString(args, FileArg)),
+            (Text, OptionalString(args, Text)),
+            ("group-by",             OptionalString(args, GroupBy)),
+            ("sort-by",              OptionalString(args, SortBy)),
+            ("sort-direction",       OptionalString(args, SortDirection)),
+            ("group-sort-by",        OptionalString(args, GroupSortBy)),
+            ("group-sort-direction", OptionalString(args, GroupSortDirection)),
+            ("group-min-count",      OptionalText(args, GroupMinCount)),
+            ("group-max-count",      OptionalText(args, GroupMaxCount)),
+            ("chunk-size",           OptionalText(args, ChunkSize)),
+            ("chunk-index",          OptionalText(args, ChunkIndex)));
+
+    private static string BuildQuickDiagnosticRowsCommandArgs(JsonObject? args)
+        => Build(
+            BoolArg(Quick, args, Quick, true, true),
+            (Max, GetBridgeDiagnosticsMax(args)),
+            ("chunk-size", OptionalText(args, ChunkSize)),
+            ("chunk-index", OptionalText(args, ChunkIndex)));
+
     private static string BuildQuickDiagnosticsArgs(JsonObject? args)
         => BuildQuickDiagnosticRowsCommandArgs(args);
 
