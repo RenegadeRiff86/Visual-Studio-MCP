@@ -680,17 +680,22 @@ internal static class GitSdkReader
         // ancestor repo (a parent mega-repo).  If the working directory doesn't match what
         // the caller expected, dispose and throw a clear error rather than silently operating
         // on the wrong repository.
+        //
+        // We allow the solution directory to be a subdirectory of the repo root — this is the
+        // normal case when a CMake-generated solution lives in a build/ subfolder inside the repo.
         string foundRoot = repo.Info.WorkingDirectory
             .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         string expectedRoot = repoDirectory
             .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        if (!string.Equals(foundRoot, expectedRoot, StringComparison.OrdinalIgnoreCase))
+        bool isInsideRepo = string.Equals(foundRoot, expectedRoot, StringComparison.OrdinalIgnoreCase)
+            || expectedRoot.StartsWith(foundRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        if (!isInsideRepo)
         {
             repo.Dispose();
             throw new McpRequestException(id, McpErrorCodes.BridgeError,
-                $"No Git repository found at '{expectedRoot}'. " +
-                $"The nearest repository is at '{foundRoot}', but the solution directory does not appear to have any committed files there. " +
-                $"Ensure the solution files are committed to a Git repository.");
+                $"No Git repository found at or above '{expectedRoot}'. " +
+                $"The nearest repository is at '{foundRoot}', which is not a parent of the solution directory. " +
+                $"Ensure the solution files are inside a Git repository.");
         }
 
         return repo;
