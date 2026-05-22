@@ -15,8 +15,10 @@ internal static partial class ToolCatalog
     private const string DevenvExe = "devenv.exe";
     private const string DevenvPathKey = "devenv_path";
     private const string InstanceIdKey = "instanceId";
+    private const string PipeNameKey = "pipeName";
     private const string ProcessIdKey = "processId";
     private const string SolutionKey = "solution";
+    private const string SolutionPathKey = "solutionPath";
     private const string PendingLaunchFlagDirectoryName = "vs-ide-bridge";
     private const string ServiceName = "VsIdeBridgeService";
     private const int VsCloseWaitTimeoutMilliseconds = 10_000;
@@ -38,8 +40,9 @@ internal static partial class ToolCatalog
 
     private static async Task<JsonNode> BridgeHealthAsync(JsonNode? id, BridgeConnection bridge)
     {
-        BridgeInstance? instance = bridge.CurrentInstance;
         IReadOnlyList<BridgeInstance> visibleInstances = await VsDiscovery.ListAsync(bridge.Mode).ConfigureAwait(false);
+        BridgeInstance? staleInstance = bridge.DropCachedInstanceIfStale(visibleInstances);
+        BridgeInstance? instance = bridge.CurrentInstance;
         JsonArray visibleInstanceItems = [];
         foreach (BridgeInstance visibleInstance in visibleInstances)
         {
@@ -47,9 +50,9 @@ internal static partial class ToolCatalog
             {
                 ["instanceId"] = visibleInstance.InstanceId,
                 ["label"] = visibleInstance.Label,
-                ["pipeName"] = visibleInstance.PipeName,
+                [PipeNameKey] = visibleInstance.PipeName,
                 [ProcessIdKey] = visibleInstance.ProcessId,
-                ["solutionPath"] = visibleInstance.SolutionPath ?? string.Empty,
+                [SolutionPathKey] = visibleInstance.SolutionPath ?? string.Empty,
                 ["solutionName"] = visibleInstance.SolutionName ?? string.Empty,
                 ["source"] = visibleInstance.Source,
             });
@@ -66,6 +69,30 @@ internal static partial class ToolCatalog
             ["toolDiscovery"] = BuildToolDiscoveryGuidance(),
         };
 
+        if (staleInstance is not null)
+        {
+            health["staleBindingDropped"] = BridgeInstanceToHealthJson(staleInstance);
+            health["BindingNotice"] = $"Dropped stale binding to {staleInstance.Label}; call bind_solution or bind_instance to choose a visible instance.";
+        }
+
+        if (visibleInstances.Count > 1)
+        {
+            string instanceList = string.Join(", ", visibleInstances.Select(i => i.Label));
+            string boundNotice = instance is not null
+                ? $"Bound to: {instance.Label}."
+                : "No instance currently bound.";
+            string others = instance is not null
+                ? string.Join(", ", visibleInstances
+                    .Where(i => !string.Equals(i.InstanceId, instance.InstanceId, StringComparison.OrdinalIgnoreCase))
+                    .Select(i => i.Label))
+                : instanceList;
+            health["multipleInstancesWarning"] =
+                $"⚠ {visibleInstances.Count} VS instances are open ({instanceList}). " +
+                boundNotice +
+                $" Other open: {others}. " +
+                "Use bind_instance (by pid or instance_id) or bind_solution to target a specific instance.";
+        }
+
         if (instance is not null)
         {
             health["modelGuidance"] = BoundSessionHint;
@@ -74,15 +101,26 @@ internal static partial class ToolCatalog
             {
                 [InstanceIdKey] = instance.InstanceId,
                 ["label"] = instance.Label,
-                ["pipeName"] = instance.PipeName,
+                [PipeNameKey] = instance.PipeName,
                 [ProcessIdKey] = instance.ProcessId,
-                ["solutionPath"] = instance.SolutionPath ?? string.Empty,
+                [SolutionPathKey] = instance.SolutionPath ?? string.Empty,
                 ["source"] = instance.Source,
             };
         }
 
         return BridgeResult(health);
     }
+
+    private static JsonObject BridgeInstanceToHealthJson(BridgeInstance instance) => new()
+    {
+        [InstanceIdKey] = instance.InstanceId,
+        ["label"] = instance.Label,
+        [PipeNameKey] = instance.PipeName,
+        [ProcessIdKey] = instance.ProcessId,
+        [SolutionPathKey] = instance.SolutionPath ?? string.Empty,
+        ["solutionName"] = instance.SolutionName ?? string.Empty,
+        ["source"] = instance.Source,
+    };
 
     private static async Task<JsonNode> VsOpenAsync(JsonNode? id, JsonObject? args, BridgeConnection bridge)
     {
@@ -346,9 +384,9 @@ internal static partial class ToolCatalog
                     ["Success"] = true,
                     ["instanceId"] = found.InstanceId,
                     ["label"] = found.Label,
-                    ["pipeName"] = found.PipeName,
+                    [PipeNameKey] = found.PipeName,
                     ["processId"] = found.ProcessId,
-                    ["solutionPath"] = found.SolutionPath ?? string.Empty,
+                    [SolutionPathKey] = found.SolutionPath ?? string.Empty,
                 });
             }
 
@@ -598,9 +636,9 @@ internal static partial class ToolCatalog
             {
                 ["instanceId"] = instance.InstanceId,
                 ["label"] = instance.Label,
-                ["pipeName"] = instance.PipeName,
+                [PipeNameKey] = instance.PipeName,
                 ["processId"] = instance.ProcessId,
-                ["solutionPath"] = instance.SolutionPath ?? string.Empty,
+                [SolutionPathKey] = instance.SolutionPath ?? string.Empty,
                 ["solutionName"] = instance.SolutionName ?? string.Empty,
                 ["source"] = instance.Source,
             });
