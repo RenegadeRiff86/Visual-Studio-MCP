@@ -38,6 +38,8 @@ internal static partial class ToolCatalog
     private const string FileArg = "file";
     private const string Line = "line";
     private const string BuildSolutionTool = "build_solution";
+    private const string BuildErrorsTool = "build_errors";
+    private const string CompileFileTool = "compile_file";
     private const string Column = "column";
     private const string Query = "query";
     private const string Documents = "documents";
@@ -67,7 +69,10 @@ internal static partial class ToolCatalog
     private const string ResponseWarningsProperty = "Warnings";
     private const string PassiveDiagnosticsReadDescription = "Read the current passive diagnostics snapshot immediately. This may be stale relative to the live Error List.";
     private const string RefreshDiagnosticsDescription = "Force the Error List to refresh before reading when you need a fresh UI read (default false).";
-    private const string PassiveSnapshotStaleWarning = "Using the passive diagnostics snapshot. This list may be stale relative to the current Visual Studio Error List. Use refresh=true for a fresh UI read.";
+    private const string PassiveSnapshotStaleWarning =
+        "Using the passive diagnostics snapshot. This list may be stale relative to the current Visual Studio Error List. " +
+        "Use refresh=true for a fresh UI read; if counts still look wrong, run a build because Visual Studio may not " +
+        "repopulate every diagnostics provider until then.";
     private const string TimedOutDirectReadWarning = "The direct Error List read timed out, so the bridge fell back to diagnostics_snapshot instead of failing outright.";
     private const string QuickFallbackStaleWarning = "The live Error List read was interrupted, so the bridge fell back to a quick diagnostics read. This result may be slightly stale relative to the current UI.";
     private const string SuppressedWarningCode = "BP1044";
@@ -83,7 +88,7 @@ internal static partial class ToolCatalog
             groupByDescription: "Optional grouping mode (e.g. file, code). Returns compact group summaries (key, count, sample) without individual rows. Use path/code/project filters without group_by to drill into a specific group.",
             searchHints: BuildSearchHints(
                 workflow: [(ReadFileTool, "Read the file containing the error"), ("goto_definition", "Navigate to the error location"), ("apply_diff", "Fix the error")],
-                related: [(Warnings, "Check warnings instead"), ("diagnostics_snapshot", "Get a combined IDE + error snapshot"), ("build_errors", "Run MSBuild directly for a definitive build result")]))
+                related: [(Warnings, "Check warnings instead"), ("diagnostics_snapshot", "Get a combined IDE + error snapshot"), (BuildErrorsTool, "Run MSBuild directly for a definitive build result")]))
         .Create();
 
     private static ToolEntry CreateWarningsTool()
@@ -188,6 +193,8 @@ internal static partial class ToolCatalog
             "One-shot snapshot combining IDE state, build status, debugger mode, and error/warning counts. " +
             "Use at the start of a session or after a build instead of calling errors + vs_state separately. " +
             "This is a passive snapshot and may be stale relative to the current Error List. " +
+            "Visual Studio may not repopulate every diagnostics provider until a build runs, so use build or build_errors " +
+            "when counts look stale or incomplete. " +
             "With wait_for_intellisense=false it prefers the fast current snapshot; true is slower but fresher. " +
             "Each row in the errors, warnings, and messages buckets includes a handle field " +
             "(e:N for errors, w:N for warnings, m:N for messages) — pass it directly as the " +
@@ -346,13 +353,19 @@ internal static partial class ToolCatalog
 
     private static int CountDiagnosticCode(JsonObject obj, string code)
     {
-        int count = string.Equals(obj[Code]?.GetValue<string>(), code, StringComparison.Ordinal)
-            ? 1
+        int count = obj["rows"] is JsonArray rows
+            ? rows.OfType<JsonObject>().Count(row => string.Equals(
+                row[Code]?.GetValue<string>(),
+                code,
+                StringComparison.Ordinal))
             : 0;
 
-        foreach ((string _, JsonNode? child) in obj)
+        foreach ((string propertyName, JsonNode? child) in obj)
         {
-            count += CountDiagnosticCode(child, code);
+            if (!string.Equals(propertyName, "rows", StringComparison.Ordinal))
+            {
+                count += CountDiagnosticCode(child, code);
+            }
         }
 
         return count;
@@ -442,6 +455,11 @@ internal static partial class ToolCatalog
         string command,
         JsonObject? args)
     {
+        if (!CanUseQuickDiagnosticsFallback(args))
+        {
+            return null;
+        }
+
         try
         {
             JsonObject quickResponse = await bridge.SendAsync(id, command, BuildQuickDiagnosticsArgs(args)).ConfigureAwait(false);
@@ -710,8 +728,10 @@ internal static partial class ToolCatalog
             includeProject: true,
             defaultWaitForCompletion: true,
             searchHints: BuildSearchHints(
-                workflow: [("errors", "Check errors after building"), ("build_errors", "Run MSBuild directly for a definitive result")],
-                related: [("rebuild", "Clean then build"), (BuildSolutionTool, "Build the solution explicitly")]));
+                workflow: [("errors", "Check errors after building"), (BuildErrorsTool, "Run MSBuild directly for a definitive result")],
+                related: [(CompileFileTool, "Compile one C/C++ source file"), ("rebuild", "Clean then build"), (BuildSolutionTool, "Build the solution explicitly")]));
+
+        yield return CreateCompileFileTool();
 
         yield return CreateBuildTool(
             "rebuild",
@@ -749,7 +769,7 @@ internal static partial class ToolCatalog
                 workflow: [("errors", "Check errors after rebuilding")],
                 related: [("rebuild", "Generic rebuild"), (BuildSolutionTool, "Build without cleaning")]));
 
-        yield return new("build_errors",
+        yield return new(BuildErrorsTool,
             "Build the active solution through Visual Studio and return only compiler errors as structured JSON. " +
             "Equivalent to build_solution with errors_only=true. " +
             "Use build/build_solution for the full build response including warnings and messages.",
@@ -790,6 +810,136 @@ internal static partial class ToolCatalog
                 related: [("errors", "Check IDE error list instead"), (BuildSolutionTool, "Build solution with full output")]));
     }
 
+    private static ToolEntry CreateCompileFileTool()
+        => new(CompileFileTool,
+            "Compile a single source file through Visual Studio's Build.Compile command. " +
+            "Use this for C/C++ file-level compiles, similar to selecting Compile or pressing Ctrl+F7 in Solution Explorer. " +
+            "By default waits for the compile to finish and captures a fresh diagnostics snapshot inline. " +
+            "Set wait_for_completion=false to fire and return immediately without waiting. " +
+            "Headers are not compiled directly by Visual Studio; pass the owning .cpp/.c/.cxx source file or use build/build_errors for the project. " +
+            "Requires the debugger to be stopped — if the debugger is active (debugMode is not dbgDesignMode), this tool returns an error; call debug_stop first. " +
+            "For several files, use the batch tool with one compile_file step per file, set max_steps under 5, and avoid parallel compile_file calls so each result stays visible.",
+            ObjectSchema(
+                Req(FileArg, "File path or bridge handle to compile. Prefer handles returned by find_files, find_text, or read_file."),
+                OptInt(Line, "Optional 1-based line used when activating the file before compiling (default 1)."),
+                OptInt(Column, "Optional 1-based column used when activating the file before compiling (default 1)."),
+                OptBool(WaitForCompletion, "Wait for the compile to finish and capture a fresh diagnostics snapshot (default true). Set false to fire and return immediately."),
+                OptBool(ErrorsOnly, "When true and wait_for_completion is true, error rows are captured inline so you can read results without a separate errors call (default false)."),
+                OptInt(Max, $"Max error rows when errors_only is true (default {DefaultMaxRows}).")),
+            Diagnostics,
+            async (id, args, bridge) =>
+            {
+                JsonObject stateResponse = await bridge.SendAsync(id, "state", "").ConfigureAwait(false);
+                string? debugMode = stateResponse["Data"]?["debugMode"]?.GetValue<string>();
+                if (!string.Equals(debugMode, "dbgDesignMode", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new BridgeException(
+                        $"Debugger is active (mode: {debugMode ?? "unknown"}). " +
+                        "Visual Studio shows a 'Stop debugging?' dialog when Build.Compile runs while the debugger is active — the bridge cannot dismiss it. " +
+                        "Call debug_stop first to stop the debugger, then retry compile_file.");
+                }
+
+                bool waitForCompletion = OptionalBool(args, WaitForCompletion, true);
+                string executeArgs = Build(
+                    ("command", "Build.Compile"),
+                    (FileArg, OptionalString(args, FileArg)),
+                    (Line, OptionalText(args, Line) ?? "1"),
+                    (Column, OptionalText(args, Column) ?? "1"),
+                    BoolArg("wait-for-build", args, WaitForCompletion, waitForCompletion, true));
+
+                JsonObject response = await bridge.SendAsync(id, "execute-command", executeArgs).ConfigureAwait(false);
+                response = EnrichCompileFileResponse(response, args);
+
+                if (!waitForCompletion)
+                {
+                    return BridgeResult(response);
+                }
+
+                JsonObject diagnosticsSnapshot = await bridge.DocumentDiagnostics
+                    .QueueRefreshAndWaitForSnapshotAsync("compile-file-post-build", clearCached: true)
+                    .ConfigureAwait(false);
+                response["diagnosticsSnapshot"] = diagnosticsSnapshot;
+
+                bool errorsOnly = args?[ErrorsOnly]?.GetValue<bool>() ?? false;
+                if (errorsOnly)
+                {
+                    JsonObject? errorDiagnostics = await TryCaptureErrorDiagnosticsAsync(id, args, bridge).ConfigureAwait(false);
+                    if (errorDiagnostics is not null)
+                    {
+                        response["errorDiagnostics"] = errorDiagnostics;
+                    }
+                    response["errorsOnly"] = true;
+                }
+
+                return BridgeResult(response);
+            },
+            aliases: ["build_file", "compile_selected_file", "single_file_build", "compile_current_file"],
+            bridgeCommand: "execute-command",
+            summary: "Compile one file through Visual Studio (Ctrl+F7 / Build.Compile).",
+            searchHints: BuildSearchHints(
+                workflow: [("find_files", "Find the source file to compile"), ("debug_stop", "Stop the debugger first if it is running"), ("errors", "Check compile errors after the command")],
+                related: [("build", "Build a project or solution"), (BuildErrorsTool, "Build and return compiler errors"), ("batch", "Compile several files by batching compile_file steps")]));
+
+    private static JsonObject EnrichCompileFileResponse(JsonObject response, JsonObject? args)
+    {
+        bool success = (response["Success"] ?? response["success"])?.GetValue<bool>() ?? false;
+        if (success)
+            return response;
+
+        string? targetPath =
+            response["Data"]?["location"]?["resolvedPath"]?.GetValue<string>() ??
+            response["Data"]?["state"]?["activeDocument"]?.GetValue<string>() ??
+            OptionalString(args, FileArg);
+
+        if (!IsHeaderCompileTarget(targetPath))
+            return response;
+
+        const string message = "Visual Studio cannot compile header files directly with Build.Compile. Pass the .cpp/.c/.cxx source file that includes this header, or use build/build_errors for the owning project.";
+        response["Summary"] = message;
+
+        if (response["Error"] is JsonObject error)
+        {
+            error["code"] = "unsupported_compile_target";
+            error["message"] = message;
+        }
+        else
+        {
+            response["Error"] = new JsonObject
+            {
+                ["code"] = "unsupported_compile_target",
+                ["message"] = message,
+            };
+        }
+
+        JsonObject data = response["Data"] as JsonObject ?? [];
+        data["compileFileHint"] = message;
+        data["targetKind"] = "header";
+
+        if (!string.IsNullOrWhiteSpace(targetPath))
+            data["resolvedTarget"] = targetPath;
+
+        JsonNode? requestedFile = args?[FileArg];
+        if (requestedFile is not null)
+            data["requestedFile"] = requestedFile.DeepClone();
+
+        response["Data"] = data;
+        return response;
+    }
+
+    private static bool IsHeaderCompileTarget(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+
+        string extension = System.IO.Path.GetExtension(path);
+        return string.Equals(extension, ".h", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".hh", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".hpp", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".hxx", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".inl", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(extension, ".ipp", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static ToolEntry CreateRunCodeAnalysisTool()
     {
         const string TimeoutMs = "timeout_ms";
@@ -828,7 +978,7 @@ internal static partial class ToolCatalog
             },
             searchHints: BuildSearchHints(
                 workflow: [(ReadFileTool, "Read the file with the analysis finding")],
-                related: [(BuildSolutionTool, "Build instead of analysing"), ("build_errors", "Build and return errors only")]));
+                related: [(BuildSolutionTool, "Build instead of analysing"), (BuildErrorsTool, "Build and return errors only")]));
     }
 
     private static async Task<JsonObject?> TryCaptureAnalysisDiagnosticsAsync(JsonNode? id, JsonObject? args, BridgeConnection bridge)
