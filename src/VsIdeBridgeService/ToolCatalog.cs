@@ -43,6 +43,8 @@ internal static partial class ToolCatalog
             .. PythonNativeTools(),
             // ── nuget package management (service-native subprocess) ───────────
             .. NugetTools(),
+            // ── cmake project configuration (service-native subprocess) ─────────
+            .. CmakeTools(),
             // ── bridge development / release maintenance ───────────────────────
             .. DeveloperTools(),
         ];
