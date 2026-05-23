@@ -159,6 +159,7 @@ internal sealed class IdeBridgeRuntime
         // resolved transparently without any individual consuming command changes.
         patchService.HandleService = runtime.HandleService;
         documentService.HandleService = runtime.HandleService;
+        runtime.BreakpointService.HandleService = runtime.HandleService;
 
         return Task.FromResult(runtime);
     }

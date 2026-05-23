@@ -122,7 +122,8 @@ internal sealed partial class PatchService
 
     private static bool IsPatchContentMismatch(CommandErrorException ex)
         => string.Equals(ex.Code, InvalidArgumentsCode, StringComparison.Ordinal)
-            && ex.Message.Contains("mismatch", StringComparison.OrdinalIgnoreCase);
+            && (ex.Message.Contains("mismatch", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("was not found", StringComparison.OrdinalIgnoreCase));
 
     private static ApplyFilePatchResult CreateAlreadySatisfiedResult(string content, ApplyFilePatchResult reverseResult)
         => new()

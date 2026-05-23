@@ -316,6 +316,7 @@ internal static class BuildServiceHelpers
         private uint _cookie;
 
         internal Task CompletionTask => _tcs.Task;
+        internal bool IsCompleted => _tcs.Task.IsCompleted;
 
         internal int LastBuildInfo { get; private set; }
 

@@ -52,6 +52,7 @@ internal static class BridgeConnectionArgs
 
             "errors" or
             "warnings" or
+            "messages" or
             "diagnostics-snapshot" or
             "apply-diff" or
             "write-file" or

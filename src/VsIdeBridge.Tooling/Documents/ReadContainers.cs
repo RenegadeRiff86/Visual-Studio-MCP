@@ -477,6 +477,7 @@ public sealed class ReadQueryOptions(
         return normalized switch
         {
             "" => "index",
+            "path" => "path",
             "file" => "path",
             "resolvedpath" => "path",
             "requestedstart" => ReadJsonNames.RequestedStartLineSort,

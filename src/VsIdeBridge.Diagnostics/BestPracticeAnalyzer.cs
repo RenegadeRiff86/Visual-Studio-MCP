@@ -149,9 +149,11 @@ internal static partial class BestPracticeAnalyzer
             yield break;
         }
 
+        CodeLanguage language = GetLanguage(file);
         IEnumerable<IGrouping<string, Match>> occurrences = StringLiteralPattern().Matches(content)
             .Cast<Match>()
             .Where(m => !IsInsideStringLiteral(content, m.Index))
+            .Where(m => !IsInsideComment(content, m.Index, language))
             .Where(m => !ConstStringDeclPattern().IsMatch(GetLineAt(content, m.Index)))
             .GroupBy(match => match.Groups[1].Value)
             .Where(group => group.Count() >= RepeatedStringThreshold)

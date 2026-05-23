@@ -92,10 +92,82 @@ public sealed class McpToolSurfaceTests
         JsonObject handleGuide = Assert.IsType<JsonObject>(help["handleGuide"]);
         Assert.Contains("HandleService", handleGuide["runtime"]!.GetValue<string>());
         Assert.Contains("canonical file reference", handleGuide["summary"]!.GetValue<string>());
+        Assert.Contains("find_files", handleGuide["create"]!.GetValue<string>());
+        Assert.Contains("4 or fewer", handleGuide["batchingPolicy"]!.GetValue<string>());
         JsonArray examples = Assert.IsType<JsonArray>(handleGuide["callToolExamples"]);
         Assert.Contains(examples, example => example?.GetValue<string>().Contains("\"file\":\"h:2\"") == true);
         JsonObject invocation = Assert.IsType<JsonObject>(help["invocation"]);
         Assert.Equal("read_file", invocation["name"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void CallHierarchyHelpExposesNativeOptionsAndCorrectAliases()
+    {
+        JsonObject help = ToolCatalog.CreateRegistry().Definitions.BuildToolHelp("call_hierarchy");
+        JsonObject tool = Assert.IsType<JsonObject>(help["tool"]);
+        string description = tool["description"]!.GetValue<string>();
+        JsonObject schema = Assert.IsType<JsonObject>(tool["inputSchema"]);
+        JsonObject properties = Assert.IsType<JsonObject>(schema["properties"]);
+        JsonObject annotations = Assert.IsType<JsonObject>(tool["annotations"]);
+        JsonArray aliases = Assert.IsType<JsonArray>(annotations["aliases"]);
+
+        Assert.Contains("C/C++", description);
+        Assert.Contains("activate_window", properties.Select(property => property.Key));
+        Assert.Contains("select_word", properties.Select(property => property.Key));
+        Assert.Contains("timeout_ms", properties.Select(property => property.Key));
+        Assert.Equal("call_hierarchy", tool["name"]!.GetValue<string>());
+        Assert.Contains(aliases, alias => alias?.GetValue<string>() == "caller_hierarchy");
+        Assert.DoesNotContain(aliases, alias => alias?.GetValue<string>() == "call_hierachy");
+    }
+
+    [Fact]
+    public void ApplyDiffEditsSchemaAllowsPerEditReplaceAll()
+    {
+        JsonObject help = ToolCatalog.CreateRegistry().Definitions.BuildToolHelp("apply_diff");
+        JsonObject tool = Assert.IsType<JsonObject>(help["tool"]);
+        JsonObject schema = Assert.IsType<JsonObject>(tool["inputSchema"]);
+        JsonObject properties = Assert.IsType<JsonObject>(schema["properties"]);
+        JsonObject edits = Assert.IsType<JsonObject>(properties["edits"]);
+        JsonObject items = Assert.IsType<JsonObject>(edits["items"]);
+        JsonObject editProperties = Assert.IsType<JsonObject>(items["properties"]);
+        JsonObject replaceAll = Assert.IsType<JsonObject>(editProperties["replace_all"]);
+        JsonArray required = Assert.IsType<JsonArray>(items["required"]);
+
+        Assert.Equal("boolean", replaceAll["type"]!.GetValue<string>());
+        Assert.Contains("explicit file", replaceAll["description"]!.GetValue<string>());
+        Assert.Contains("4 or fewer", edits["description"]!.GetValue<string>());
+        Assert.DoesNotContain(required, item => item?.GetValue<string>() == "replace_all");
+    }
+
+    [Fact]
+    public void BatchHelpWarnsForSmallMutatingBatches()
+    {
+        JsonObject help = ToolCatalog.CreateRegistry().Definitions.BuildToolHelp("batch");
+        JsonObject tool = Assert.IsType<JsonObject>(help["tool"]);
+        string description = tool["description"]!.GetValue<string>();
+        JsonObject schema = Assert.IsType<JsonObject>(tool["inputSchema"]);
+        JsonObject properties = Assert.IsType<JsonObject>(schema["properties"]);
+        JsonObject maxSteps = Assert.IsType<JsonObject>(properties["max_steps"]);
+
+        Assert.Contains("instead of launching parallel tool calls", description);
+        Assert.Contains("max_steps under 5", description);
+        Assert.Contains("set this under 5", maxSteps["description"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void CompileFileHelpExplainsHeaderCompileLimitation()
+    {
+        JsonObject help = ToolCatalog.CreateRegistry().Definitions.BuildToolHelp("compile_file");
+        JsonObject tool = Assert.IsType<JsonObject>(help["tool"]);
+        string description = tool["description"]!.GetValue<string>();
+        JsonObject annotations = Assert.IsType<JsonObject>(tool["annotations"]);
+
+        Assert.Contains("Build.Compile", description);
+        Assert.Contains("Headers are not compiled directly", description);
+        Assert.Contains(".cpp", description);
+        Assert.Contains("max_steps under 5", description);
+        Assert.Contains("avoid parallel compile_file calls", description);
+        Assert.Equal("execute-command", annotations["bridgeCommand"]!.GetValue<string>());
     }
 
     [Fact]
@@ -111,7 +183,9 @@ public sealed class McpToolSurfaceTests
             && item["prefix"]?.GetValue<string>() == "h"
             && item["kind"]?.GetValue<string>() == "SearchHit");
         Assert.Contains("handle directly", handleGuide["policy"]!.GetValue<string>());
+        Assert.Contains("find_text/search_symbols", handleGuide["create"]!.GetValue<string>());
         Assert.Contains("file + old_content + new_content", handleGuide["applyDiffPolicy"]!.GetValue<string>());
+        Assert.Contains("4 or fewer", handleGuide["applyDiffPolicy"]!.GetValue<string>());
     }
 
     [Fact]
@@ -201,6 +275,7 @@ public sealed class McpToolSurfaceTests
 
     [Theory]
     [InlineData("write_file", "write-file")]
+    [InlineData("compile_file", "execute-command")]
     [InlineData("python_set_startup_file", "set-python-startup-file")]
     [InlineData("python_get_startup_file", "get-python-startup-file")]
     public void CatalogToolsUseExpectedPipeCommandNames(string toolName, string expectedBridgeCommand)

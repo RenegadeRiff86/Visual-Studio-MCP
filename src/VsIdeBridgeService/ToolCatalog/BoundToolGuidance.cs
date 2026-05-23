@@ -27,6 +27,7 @@ internal static partial class ToolCatalog
         return
         [
             RecommendedTool("recommend_tools", "Ask the bridge which tools fit the current task � narrower and faster than list_tools."),
+            RecommendedTool("list_tools", "List every available bridge tool when focused discovery is not enough."),
             RecommendedTool("list_tools_by_category", "Load a focused group of tools (search, git, project, debug, etc.) instead of the full catalog."),
             RecommendedTool("bridge_health", "Confirm the bound instance and rediscover bridge guidance."),
             RecommendedTool("vs_state", "Inspect the active solution, document, build state, and debugger state."),

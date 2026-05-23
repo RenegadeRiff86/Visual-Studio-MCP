@@ -71,7 +71,8 @@ internal static partial class ToolCatalog
         return Build(
             ("patch-text-base64", request.EncodedDiff),
             ("open-changed-files", "true"),
-            ("save-changed-files", "true"));
+            ("save-changed-files", "true"),
+            ("replace-all", request.ReplaceAll ? "true" : null));
     }
 
     private static string BuildWriteFileArgs(JsonObject? args)
@@ -97,6 +98,14 @@ internal static partial class ToolCatalog
     private static async Task<JsonObject> ApplyMultipleEditsAsync(
         JsonNode? id, JsonObject? args, JsonArray editsArray, BridgeConnection bridge)
     {
+        if (args?.ContainsKey("replace_all") == true)
+        {
+            throw new McpRequestException(id, McpErrorCodes.InvalidParams,
+                "apply_diff top-level 'replace_all' is only valid with a single 'file' + 'old_content' + " +
+                "'new_content' edit. For batches, set 'replace_all' inside each edits[] item so it stays scoped " +
+                "to that item's explicit file.");
+        }
+
         JsonArray editResults = [];
         int applied = 0;
         int failed = 0;
@@ -125,12 +134,20 @@ internal static partial class ToolCatalog
             JsonObject editResult = await bridge.SendAsync(id, "apply-diff", BuildApplyDiffArgs(editRequest))
                 .ConfigureAwait(false);
             bool success = editResult["Success"]?.GetValue<bool>() ?? false;
+            bool alreadySatisfied = success &&
+                editResult["Data"]?["items"] is JsonArray editItems &&
+                editItems.Count > 0 &&
+                editItems[0]?["alreadySatisfied"]?.GetValue<bool?>() == true;
             if (success) applied++; else failed++;
             JsonObject entry = new()
             {
                 ["file"] = editFileArg,
                 ["success"] = success,
             };
+            if (alreadySatisfied)
+                entry["alreadySatisfied"] = true;
+            if (editRequest.ReplaceAll)
+                entry["replaceAll"] = true;
             if (!success)
                 entry["error"] = editResult["Summary"]?.GetValue<string>();
             editResults.Add(entry);
@@ -173,14 +190,20 @@ internal static partial class ToolCatalog
                         ["type"] = "array",
                         ["description"] =
                             "Apply multiple targeted edits in one call. Each element is an independent edit object with its own " +
-                            "file (handle), old_content, and new_content. Each edit is dispatched as a separate command instance " +
-                            "and applied in order; failures are reported per-entry without aborting the rest. For same-file edits, " +
-                            "old_content is matched by content rather than original line number. Avoid duplicate old_content and " +
-                            "overlapping replacements; entries already applied are not rolled back if a later entry fails.",
+                            "file (handle), old_content, and new_content. Keep this array to 4 or fewer entries per call; " +
+                            "split larger changes and re-check results between calls so Visual Studio is not overloaded. Each edit " +
+                            "is dispatched as a separate command instance and applied in order; failures are reported per-entry " +
+                            "without aborting the rest. Set replace_all on an individual edit only when every matching occurrence " +
+                            "in that edit's explicit file should be replaced. For same-file edits, old_content is matched by " +
+                            "content rather than original line number. Avoid duplicate old_content and overlapping replacements; " +
+                            "entries already applied are not rolled back if a later entry fails.",
                         ["items"] = ObjectSchema(
                             Req(FileArg, "Handle (h:N, f:N) or plain path for the file to edit."),
                             Req("old_content", "Exact text block to replace — copy verbatim from read_file."),
-                            Req("new_content", "Replacement text.")),
+                            Req("new_content", "Replacement text."),
+                            OptBool("replace_all",
+                                "When true, replace every non-overlapping occurrence of old_content, but only inside this " +
+                                "edit item's explicit file or handle.")),
                         ["minItems"] = 1,
                     }, false),
                     Opt("diff",
@@ -209,9 +232,11 @@ internal static partial class ToolCatalog
                     OptBool("replace_all",
                         "When true, replace EVERY non-overlapping occurrence of old_content in the file instead of just the first. " +
                         "All replacements are grouped into a single VS undo transaction — one Ctrl+Z reverts all of them. " +
-                        "Only valid with file + old_content + new_content (not with the edits array or diff). " +
-                        "Errors if old_content is not found at least once. " +
-                         "IMPORTANT: after all edits are complete, call errors(), warnings(), and messages() with refresh=true for current diagnostics — do not leave diagnostics behind.")))
+                        "Valid with a single file + old_content + new_content request, or inside an individual edits[] item. " +
+                        "For batches, each replace_all applies only to that edit item's explicit file or handle; top-level " +
+                        "replace_all is rejected with the edits array. Errors if old_content is not found at least once. " +
+                        "IMPORTANT: after all edits are complete, call errors(), warnings(), and messages() with refresh=true " +
+                        "for current diagnostics — do not leave diagnostics behind.")))
                 .WithSearchHints(BuildSearchHints(
                     workflow:
                     [
@@ -315,8 +340,8 @@ internal static partial class ToolCatalog
                 related: [("close_document", "Close by caption query"), ("close_others", "Close all except active"), (ListTabsTool, "List open tabs first")]));
 
         yield return BridgeTool("close_document",
-            "Close editor tabs matching a caption/name query. Use all: true to close all matching tabs (e.g. all .json files).",
-            ObjectSchema(Req(Query, "Tab caption query."), OptBool("all", "Close all matching tabs.")),
+            "Close editor tabs matching a caption/name query. Omit query with all: true to close every open tab.",
+            ObjectSchema(Opt(Query, "Tab caption or name fragment. Omit with all: true to close all open tabs."), OptBool("all", "Close all matching tabs, or all open tabs when query is omitted.")),
             "close-document",
             a => Build(
                 (Query, OptionalString(a, Query)),

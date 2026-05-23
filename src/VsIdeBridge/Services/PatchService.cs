@@ -31,7 +31,8 @@ internal sealed partial class PatchService
         string? baseDirectory,
         bool openChangedFiles,
         bool saveChangedFiles,
-        bool includeBestPracticeWarnings = false)
+        bool includeBestPracticeWarnings = false,
+        bool replaceAll = false)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
@@ -65,6 +66,14 @@ internal sealed partial class PatchService
         if (filePatches.Count == 0)
         {
             throw new CommandErrorException(InvalidArgumentsCode, BuildMissingPatchFormatMessage(patchText));
+        }
+
+        if (replaceAll)
+        {
+            foreach (FilePatch filePatch in filePatches)
+            {
+                filePatch.ReplaceAll = true;
+            }
         }
 
         string resolvedBaseDirectory = ResolveBaseDirectory(dte, baseDirectory);

@@ -18,11 +18,12 @@ public sealed class ApplyDiffRequest
     private const string UpdateFilePrefix = "*** Update File: ";
     private const string MoveToPrefix = "*** Move to: ";
 
-    private ApplyDiffRequest(string diff, IReadOnlyList<ApplyDiffFileOperation> operations, int mutationLineCount)
+    private ApplyDiffRequest(string diff, IReadOnlyList<ApplyDiffFileOperation> operations, int mutationLineCount, bool replaceAll = false)
     {
         Diff = diff;
         Operations = operations;
         MutationLineCount = mutationLineCount;
+        ReplaceAll = replaceAll;
     }
 
     public string Diff { get; }
@@ -32,6 +33,8 @@ public sealed class ApplyDiffRequest
     public int FileCount => Operations.Count;
 
     public int MutationLineCount { get; }
+
+    public bool ReplaceAll { get; }
 
     public string EncodedDiff => Convert.ToBase64String(Encoding.UTF8.GetBytes(Diff));
 
@@ -43,6 +46,7 @@ public sealed class ApplyDiffRequest
         bool hasFile = args.ContainsKey("file");
         bool hasTargetedReplace = hasFile && args.ContainsKey("old_content") && args.ContainsKey("new_content");
         bool hasDiff = args.ContainsKey("diff");
+        bool hasReplaceAll = args.ContainsKey("replace_all");
 
         if (hasFile && args.ContainsKey("content"))
         {
@@ -56,12 +60,19 @@ public sealed class ApplyDiffRequest
                 "apply_diff received both targeted replacement fields and 'diff'. Use exactly one shape: preferred 'file' + 'old_content' + 'new_content' for a single-file edit, or 'diff' only for multi-file or structural patches.");
         }
 
+        if (hasReplaceAll && !hasTargetedReplace)
+        {
+            throw new ApplyDiffValidationException(
+                "apply_diff 'replace_all' is only valid with 'file' + 'old_content' + 'new_content', not with 'diff' or other shapes.");
+        }
+
         if (hasTargetedReplace)
         {
             string path = args["file"]!.GetValue<string>();
             string oldContent = args["old_content"]!.GetValue<string>();
             string newContent = args["new_content"]!.GetValue<string>();
-            return FromSimpleReplace(path, oldContent, newContent);
+            bool replaceAll = args["replace_all"]?.GetValue<bool>() ?? false;
+            return FromSimpleReplace(path, oldContent, newContent, replaceAll);
         }
 
         if (hasDiff)
@@ -145,12 +156,18 @@ public sealed class ApplyDiffRequest
     public JsonObject ToJsonObject()
     {
         JsonArray files = [.. Operations.Select(operation => operation.ToJsonObject())];
-        return new JsonObject
+        JsonObject obj = new()
         {
             ["fileCount"] = FileCount,
             ["mutationLineCount"] = MutationLineCount,
             ["files"] = files,
         };
+        if (ReplaceAll)
+        {
+            obj["replaceAll"] = true;
+        }
+
+        return obj;
     }
 
     private static void ValidateEnvelope(string[] lines)
@@ -353,7 +370,7 @@ public sealed class ApplyDiffRequest
         throw new ApplyDiffValidationException($"Unsupported editor patch directive: {line}.");
     }
 
-    private static ApplyDiffRequest FromSimpleReplace(string path, string oldContent, string newContent)
+    private static ApplyDiffRequest FromSimpleReplace(string path, string oldContent, string newContent, bool replaceAll)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -378,7 +395,7 @@ public sealed class ApplyDiffRequest
         AppendPatchLines(diffBuilder, '+', newLines);
         diffBuilder.Append("*** End Patch");
         string diffText = diffBuilder.ToString();
-        return new ApplyDiffRequest(diffText, [operation], mutationLineCount);
+        return new ApplyDiffRequest(diffText, [operation], mutationLineCount, replaceAll);
     }
 
     private static string[] SplitPatchContentLines(string content)

@@ -377,8 +377,8 @@ internal static partial class ToolCatalog
                         new JsonObject
                         {
                             ["type"] = "array",
-                            ["description"] = "Queries to search for in order.",
-                            ["items"] = new JsonObject { ["type"] = "string" },
+                            ["description"] = "Queries to search for in order. Each item is a string pattern or an object with a 'query' field.",
+                            ["items"] = BuildBatchQueryItemSchema(),
                             ["minItems"] = 1,
                         },
                         true)),
@@ -401,7 +401,7 @@ internal static partial class ToolCatalog
                 }
 
                 JsonObject response = await bridge.SendAsync(id, "find-text-batch", Build(
-                    ("queries", args?["queries"]?.ToJsonString()),
+                    ("queries", NormalizeBatchQueryList(args?["queries"])),
                     (Scope, OptionalString(args, Scope)),
                     (Project, OptionalString(args, Project)),
                     (Path, OptionalString(args, Path)),
@@ -413,6 +413,49 @@ internal static partial class ToolCatalog
                 response = CompactSearchResponse(response, args, includePathFilter: true, SearchJsonNames.Matches);
                 return BridgeResult(response, args);
             });
+    }
+
+    private static JsonObject BuildBatchQueryItemSchema() =>
+        new()
+        {
+            ["oneOf"] = new JsonArray
+            {
+                new JsonObject { ["type"] = "string" },
+                new JsonObject
+                {
+                    ["type"] = "object",
+                    ["properties"] = new JsonObject
+                    {
+                        ["query"] = new JsonObject { ["type"] = "string", ["description"] = "The search pattern." },
+                        ["path"] = new JsonObject { ["type"] = "string", ["description"] = "Optional path hint (informational; use the top-level path parameter to filter results)." },
+                    },
+                    ["required"] = new JsonArray { "query" },
+                },
+            }
+        };
+
+    private static string? NormalizeBatchQueryList(JsonNode? node)
+    {
+        if (node is not JsonArray arr)
+        {
+            return null;
+        }
+
+        // Accept both string[] and {query, path}[] — normalize objects to extract just the query string.
+        JsonArray normalized = [];
+        foreach (JsonNode? item in arr)
+        {
+            if (item is JsonValue v && v.TryGetValue<string>(out string? s))
+            {
+                normalized.Add(s);
+            }
+            else if (item is JsonObject obj && obj.TryGetPropertyValue("query", out JsonNode? q) && q is not null)
+            {
+                normalized.Add(q.GetValue<string>());
+            }
+        }
+
+        return normalized.Count > 0 ? normalized.ToJsonString() : null;
     }
 
     internal static bool TryGetDiagnosticSearchCode(JsonObject? args, out string code)

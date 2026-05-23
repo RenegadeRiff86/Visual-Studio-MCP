@@ -43,10 +43,24 @@ public sealed partial class ToolRegistry
     {
         return new JsonObject
         {
-            ["summary"] = "Bridge result rows may include handle IDs. Treat those handles as the canonical file reference for this session.",
+            ["summary"] =
+                "Bridge result rows may include handle IDs. To create a handle, call a producer tool such as " +
+                "find_files, find_text, search_symbols, read_file, errors, warnings, or messages, then use the " +
+                "returned handle value as the canonical file reference for this session.",
+            ["create"] =
+                "Create handles by calling a producing tool: find_text/search_symbols return h:N, " +
+                "find_files/glob/read_file return f:N, errors/warnings/messages return e:/w:/m:. Pass the " +
+                "handle directly as any file/path value for follow-up bridge calls.",
             ["policy"] = "If a result row has a handle, pass that handle directly as any file/path value for follow-up bridge calls. Do not copy the row's full path unless no handle exists.",
             ["format"] = "{prefix}:{n}; n is a per-kind sequence.",
-            ["applyDiffPolicy"] = "For single-file replacements, call apply_diff with file + old_content + new_content. Reserve the diff argument for multi-file or structural patches.",
+            ["batchingPolicy"] =
+                "For VS-mutating, build, compile, or edit work, do not run parallel bridge calls. Use batch " +
+                "only to sequence steps; keep max_steps under 5 for those operations, and keep apply_diff " +
+                "edits to 4 or fewer entries per call.",
+            ["applyDiffPolicy"] =
+                "For single-file replacements, call apply_diff with file + old_content + new_content. Keep " +
+                "edits[] to 4 or fewer entries per call and split larger changes. Reserve the diff argument " +
+                "for multi-file or structural patches.",
             ["callToolExamples"] = new JsonArray
             {
                 "call_tool({\"name\":\"read_file\",\"arguments\":{\"file\":\"h:2\",\"start_line\":260,\"end_line\":360}})",

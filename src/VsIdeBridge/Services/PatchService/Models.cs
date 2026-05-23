@@ -56,6 +56,8 @@ internal sealed partial class PatchService
         public List<SearchBlock> SearchBlocks { get; set; } = [];
 
         public string Format { get; set; } = "unified-diff";
+
+        public bool ReplaceAll { get; set; }
     }
 
     private sealed class SearchBlock

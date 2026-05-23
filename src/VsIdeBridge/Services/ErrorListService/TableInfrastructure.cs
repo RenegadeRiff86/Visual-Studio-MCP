@@ -282,19 +282,19 @@ internal sealed partial class ErrorListService
     private async Task<IReadOnlyList<JObject>> ReadRowsAsync(IdeCommandContext context, bool includeDteRows = true)
     {
         IReadOnlyList<JObject> tableRows = await TryReadTableRowsAsync(context.CancellationToken).ConfigureAwait(false);
-        if (!includeDteRows)
+
+        // Skip the DTE fallback when table rows are already present — the DTE path
+        // iterates every ErrorItem via COM on the UI thread (O(n) dispatches) and is
+        // only useful for Miscellaneous Files diagnostics that have no table source.
+        // Merging thousands of DTE rows with an already-populated table result is
+        // expensive and adds no value for tracked project files.
+        if (!includeDteRows || tableRows.Count > 0)
         {
             return tableRows;
         }
 
-        IReadOnlyList<JObject> dteRows = await ReadDteRowsAsync(context, tableRows).ConfigureAwait(false);
-
-        // Table rows are preferred (richer data); merge DTE rows to fill gaps
-        // such as language-service diagnostics on Miscellaneous Files.
-        if (tableRows.Count == 0)
-            return dteRows;
-
-        return MergeRows(tableRows, dteRows);
+        // Table is empty: fall back to DTE to catch Miscellaneous Files diagnostics.
+        return await ReadDteRowsAsync(context, tableRows).ConfigureAwait(false);
     }
 
     private async Task<IReadOnlyList<JObject>> TryReadTableRowsAsync(CancellationToken cancellationToken)

@@ -12,6 +12,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 using VsIdeBridge.Diagnostics;
@@ -28,6 +29,8 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
     private readonly VsIdeBridgePackage _package = package;
     private BestPracticeTableDataSource? _bestPracticeTableSource;
     private bool _bestPracticeTableSourceRegistered;
+    private readonly object _bestPracticeCacheGate = new();
+    private readonly Dictionary<string, BestPracticeFileCacheEntry> _bestPracticeCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ReadinessService _readinessService = readinessService;
     private readonly BridgeUiSettingsService _uiSettings = uiSettings;
 
@@ -43,7 +46,8 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
 
-        if (!quickSnapshot)
+        bool refreshBestPracticeDiagnostics = ShouldRefreshBestPracticeDiagnostics(query);
+        if (!quickSnapshot && refreshBestPracticeDiagnostics)
         {
             PublishBestPracticeRows(context.Dte, []);
         }
@@ -82,7 +86,7 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
             rows = ExcludeBuildOutputRows(rows);
         }
 
-        if (!quickSnapshot)
+        if (!quickSnapshot && refreshBestPracticeDiagnostics)
         {
             IReadOnlyList<JObject> bestPracticeRows = await RefreshBestPracticeDiagnosticsAsync(context, rows).ConfigureAwait(true);
             if (bestPracticeRows.Count > 0)
@@ -149,6 +153,14 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
         };
     }
 
+    private static bool ShouldRefreshBestPracticeDiagnostics(ErrorListQuery? query)
+    {
+        string severity = NormalizeSeverity(query?.Severity);
+        return string.IsNullOrWhiteSpace(severity)
+            || string.Equals(severity, "all", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(severity, "Warning", StringComparison.OrdinalIgnoreCase);
+    }
+
     internal async Task<IReadOnlyList<JObject>> RefreshBestPracticeDiagnosticsAsync(IdeCommandContext context, IReadOnlyList<JObject>? rows = null)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
@@ -160,8 +172,9 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
 
         IReadOnlyList<string> bestPracticeCandidateFiles = GetBestPracticeCandidateFiles(context.Dte, rows ?? []);
         IReadOnlyDictionary<string, string> bestPracticeProjectLookup = CreateBestPracticeProjectLookup(context.Dte, bestPracticeCandidateFiles);
+        PruneBestPracticeCache(bestPracticeCandidateFiles);
         IReadOnlyList<JObject> bestPracticeRows = await Task.Run(
-            () => AnalyzeBestPracticeFindings(bestPracticeCandidateFiles, bestPracticeProjectLookup),
+            () => AnalyzeBestPracticeFindings(bestPracticeCandidateFiles, bestPracticeProjectLookup, cancellationToken: context.CancellationToken),
             context.CancellationToken).ConfigureAwait(false);
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
         PublishBestPracticeRows(context.Dte, bestPracticeRows);
@@ -308,40 +321,48 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
         return !string.IsNullOrWhiteSpace(extension) && BestPracticeCodeExtensions.Contains(extension);
     }
 
-    private static IReadOnlyList<JObject> AnalyzeBestPracticeFindings(
+    private IReadOnlyList<JObject> AnalyzeBestPracticeFindings(
         IReadOnlyList<string> files,
         IReadOnlyDictionary<string, string>? projectNamesByFile = null,
-        string? contentOverride = null)
+        string? contentOverride = null,
+        CancellationToken cancellationToken = default)
     {
-        List<JObject> findings = [];
         if (!BestPracticeStateManager.IsEnabled)
-            return findings;
-
-        foreach (string file in files)
         {
-            string content = contentOverride ?? SafeReadFile(file);
-            int perFileFindings = 0;
-            if (string.IsNullOrWhiteSpace(content))
-            {
-                continue;
-            }
+            return [];
+        }
 
-            string projectUniqueName = TryGetBestPracticeProjectUniqueName(projectNamesByFile, file);
-            IEnumerable<JObject> fileFindings = BestPracticeAnalyzer.AnalyzeFile(file, content);
-
-            foreach (JObject finding in fileFindings)
+        BestPracticeFileFindings[] fileFindings = new BestPracticeFileFindings[files.Count];
+        Parallel.For(
+            0,
+            files.Count,
+            new ParallelOptions
             {
+                CancellationToken = cancellationToken,
+                MaxDegreeOfParallelism = GetBestPracticeAnalysisDegreeOfParallelism(),
+            },
+            index =>
+            {
+                string file = files[index];
+                IReadOnlyList<JObject> findings = contentOverride is null
+                    ? AnalyzeBestPracticeFileWithCache(file)
+                    : AnalyzeBestPracticeFile(file, contentOverride);
+                fileFindings[index] = new BestPracticeFileFindings(file, findings);
+            });
+
+        List<JObject> findings = [];
+        foreach (BestPracticeFileFindings result in fileFindings)
+        {
+            string projectUniqueName = TryGetBestPracticeProjectUniqueName(projectNamesByFile, result.File);
+            foreach (JObject finding in result.Findings)
+            {
+                JObject row = (JObject)finding.DeepClone();
                 if (!string.IsNullOrWhiteSpace(projectUniqueName))
                 {
-                    finding[ProjectKey] = projectUniqueName;
+                    row[ProjectKey] = projectUniqueName;
                 }
 
-                findings.Add(finding);
-                perFileFindings++;
-                if (perFileFindings >= MaxBestPracticeFindingsPerFile)
-                {
-                    break;
-                }
+                findings.Add(row);
             }
         }
 
@@ -349,6 +370,103 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
             .GroupBy(CreateFindingIdentity, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())];
     }
+
+    private IReadOnlyList<JObject> AnalyzeBestPracticeFileWithCache(string file)
+    {
+        if (!TryGetFileStamp(file, out DateTime lastWriteTimeUtc, out long length))
+        {
+            return [];
+        }
+
+        lock (_bestPracticeCacheGate)
+        {
+            if (_bestPracticeCache.TryGetValue(file, out BestPracticeFileCacheEntry? cached) &&
+                cached.LastWriteTimeUtc == lastWriteTimeUtc &&
+                cached.Length == length)
+            {
+                return CloneFindings(cached.Findings);
+            }
+        }
+
+        IReadOnlyList<JObject> findings = AnalyzeBestPracticeFile(file, SafeReadFile(file));
+        lock (_bestPracticeCacheGate)
+        {
+            _bestPracticeCache[file] = new BestPracticeFileCacheEntry(lastWriteTimeUtc, length, CloneFindings(findings));
+        }
+
+        return findings;
+    }
+
+    private static IReadOnlyList<JObject> AnalyzeBestPracticeFile(string file, string content)
+    {
+        if (!BestPracticeStateManager.IsEnabled || string.IsNullOrWhiteSpace(content))
+        {
+            return [];
+        }
+
+        List<JObject> findings = [];
+        int perFileFindings = 0;
+        foreach (JObject finding in BestPracticeAnalyzer.AnalyzeFile(file, content))
+        {
+            findings.Add(finding);
+            perFileFindings++;
+            if (perFileFindings >= MaxBestPracticeFindingsPerFile)
+            {
+                break;
+            }
+        }
+
+        return findings;
+    }
+
+    private void PruneBestPracticeCache(IReadOnlyList<string> files)
+    {
+        HashSet<string> activeFiles = new(files, StringComparer.OrdinalIgnoreCase);
+        lock (_bestPracticeCacheGate)
+        {
+            foreach (string cachedFile in _bestPracticeCache.Keys.Where(file => !activeFiles.Contains(file)).ToArray())
+            {
+                _bestPracticeCache.Remove(cachedFile);
+            }
+        }
+    }
+
+    private static bool TryGetFileStamp(string file, out DateTime lastWriteTimeUtc, out long length)
+    {
+        try
+        {
+            FileInfo fileInfo = new(file);
+            if (!fileInfo.Exists)
+            {
+                lastWriteTimeUtc = default;
+                length = 0;
+                return false;
+            }
+
+            lastWriteTimeUtc = fileInfo.LastWriteTimeUtc;
+            length = fileInfo.Length;
+            return true;
+        }
+        catch
+        {
+            lastWriteTimeUtc = default;
+            length = 0;
+            return false;
+        }
+    }
+
+    private static int GetBestPracticeAnalysisDegreeOfParallelism()
+    {
+        if (Environment.ProcessorCount <= 2)
+        {
+            return 1;
+        }
+
+        return Math.Min(Environment.ProcessorCount - 1, 8);
+    }
+
+    private static IReadOnlyList<JObject> CloneFindings(IReadOnlyList<JObject> findings)
+        => [.. findings.Select(finding => (JObject)finding.DeepClone())];
 
     /// <summary>
     /// Pre-write analysis: scans content that is about to be written and returns best-practice
@@ -362,7 +480,23 @@ internal sealed partial class ErrorListService(VsIdeBridgePackage package, Readi
             return [];
         }
 
-        return AnalyzeBestPracticeFindings([filePath], contentOverride: content);
+        return AnalyzeBestPracticeFile(filePath, content);
+    }
+
+    private sealed class BestPracticeFileCacheEntry(DateTime lastWriteTimeUtc, long length, IReadOnlyList<JObject> findings)
+    {
+        public DateTime LastWriteTimeUtc { get; } = lastWriteTimeUtc;
+
+        public long Length { get; } = length;
+
+        public IReadOnlyList<JObject> Findings { get; } = findings;
+    }
+
+    private readonly struct BestPracticeFileFindings(string file, IReadOnlyList<JObject> findings)
+    {
+        public string File { get; } = file;
+
+        public IReadOnlyList<JObject> Findings { get; } = findings;
     }
 
     private static string SafeReadFile(string filePath)

@@ -80,6 +80,9 @@ internal static partial class ErrorListPatterns
     [GeneratedRegex(@"^[ \t]*#pragma\s+warning(?:\s+disable\b.*|\s*\(\s*disable\s*:\s*[^)]*\))$", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
     public static partial Regex PragmaWarningDisablePattern();
 
+    [GeneratedRegex(@"(?im)^[ \t]*(?:#\s*define\b.*__pragma\s*\(\s*warning\s*\(\s*disable\b.*|.*_Pragma\s*\(\s*""(?:[^""\\]|\\.)*diagnostic\s+ignored.*)$")]
+    public static partial Regex NativeDiagnosticSuppressionPattern();
+
     [GeneratedRegex(@"(?im)^[ \t]*dotnet_diagnostic\.(?<code>[A-Za-z0-9_.-]+)\.severity\s*=\s*(?<severity>none|silent)\b.*$")]
     public static partial Regex EditorConfigDiagnosticSuppressionPattern();
 

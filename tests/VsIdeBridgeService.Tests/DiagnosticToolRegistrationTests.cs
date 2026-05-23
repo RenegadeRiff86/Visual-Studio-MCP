@@ -58,6 +58,53 @@ public sealed class DiagnosticToolRegistrationTests
         Assert.NotNull(definition.SearchHints);
     }
 
+    [Fact]
+    public void DiagnosticTimeoutProfilesCoverAllErrorListCommands()
+    {
+        Assert.Equal(BridgeConnection.ToolTimeoutProfile.Interactive, BridgeConnectionArgs.SelectTimeoutProfile("errors"));
+        Assert.Equal(BridgeConnection.ToolTimeoutProfile.Interactive, BridgeConnectionArgs.SelectTimeoutProfile("warnings"));
+        Assert.Equal(BridgeConnection.ToolTimeoutProfile.Interactive, BridgeConnectionArgs.SelectTimeoutProfile("messages"));
+        Assert.Equal(BridgeConnection.ToolTimeoutProfile.Interactive, BridgeConnectionArgs.SelectTimeoutProfile("diagnostics-snapshot"));
+    }
+
+    [Fact]
+    public void QuickDiagnosticsFallbackAllowsPlainPaging()
+    {
+        JsonObject args = new()
+        {
+            ["chunk_size"] = 100,
+            ["chunk_index"] = 1,
+        };
+
+        Assert.True(ToolCatalog.CanUseQuickDiagnosticsFallback(args));
+    }
+
+    [Theory]
+    [InlineData("severity", "warning")]
+    [InlineData("code", "BP1044")]
+    [InlineData("project", "VsIdeBridgeService")]
+    [InlineData("path", "src")]
+    [InlineData("file", "DiagnosticsTools.cs")]
+    [InlineData("text", "suppression")]
+    [InlineData("sort_by", "file")]
+    [InlineData("group_by", "code")]
+    [InlineData("group_sort_by", "count")]
+    [InlineData("group_sort_direction", "desc")]
+    public void QuickDiagnosticsFallbackRejectsServiceSideQueries(string parameter, string value)
+    {
+        JsonObject args = new() { [parameter] = value };
+
+        Assert.False(ToolCatalog.CanUseQuickDiagnosticsFallback(args));
+    }
+
+    [Fact]
+    public void QuickDiagnosticsFallbackRejectsGroupCountFilters()
+    {
+        JsonObject args = new() { ["group_min_count"] = 2 };
+
+        Assert.False(ToolCatalog.CanUseQuickDiagnosticsFallback(args));
+    }
+
     [Theory]
     [InlineData(true, false, false, true)]
     [InlineData(true, true, false, false)]

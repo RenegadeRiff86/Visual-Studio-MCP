@@ -6,8 +6,8 @@ namespace VsIdeBridge.Diagnostics;
 
 internal static class ErrorListConstants
 {
-    public const int StableSampleCount = 3;
-    public const int PopulationPollIntervalMilliseconds = 2000;
+    public const int StableSampleCount = 2;
+    public const int PopulationPollIntervalMilliseconds = 500;
     public const int DefaultWaitTimeoutMilliseconds = 90_000;
     public const int BuildOutputReadAttemptCount = CoordinateSuffixTrimLength;
     public const int CoordinateSuffixTrimLength = 2;

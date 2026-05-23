@@ -122,19 +122,6 @@ internal static partial class SearchNavigationCommands
                     args.GetInt32("max-locations-per-caller", 5))
                 .ConfigureAwait(true);
 
-            if ((bool?)managedHierarchy["available"] != true)
-            {
-                JObject unavailableResult = new()
-                {
-                    ["managedHierarchy"] = managedHierarchy,
-                    ["nativeInvocationSkipped"] = true,
-                };
-
-                return new CommandExecutionResult(
-                    "Call Hierarchy skipped native invocation because no navigable symbol was found; see Data.managedHierarchy for status.",
-                    unavailableResult);
-            }
-
             JObject nativeInvocationLocation = ResolveNativeCallHierarchyLocation(managedHierarchy, args);
 
             JObject callHierarchyResult = await context.Runtime.VsCommandService.ExecuteSymbolCommandAsync(
@@ -155,18 +142,20 @@ internal static partial class SearchNavigationCommands
             // CallHierarchy native SDK population disabled for VS 2026 compatibility
             JObject nativeSdkPopulation = new() { ["available"] = false, ["reason"] = "CallHierarchy not available in VS 2026 build" };
 
+            bool managedAvailable = (bool?)managedHierarchy["available"] == true;
             callHierarchyResult["managedHierarchy"] = managedHierarchy;
             callHierarchyResult["nativeInvocationLocation"] = nativeInvocationLocation;
+            callHierarchyResult["nativeInvocationSkipped"] = false;
             callHierarchyResult["nativeSdkPopulation"] = nativeSdkPopulation;
-            if ((bool?)managedHierarchy["available"] == true)
+            if (managedAvailable)
             {
                 callHierarchyResult["hierarchy"] = managedHierarchy["root"];
             }
 
             int nodeCount = (int?)managedHierarchy["nodeCount"] ?? 0;
-            string summary = (bool?)managedHierarchy["available"] == true
+            string summary = managedAvailable
                 ? $"Call Hierarchy executed. Captured {nodeCount} hierarchy node(s). See Data.hierarchy for details."
-                : "Call Hierarchy executed. Managed hierarchy was unavailable; see Data.managedHierarchy for status.";
+                : "Call Hierarchy executed through Visual Studio's native command. Managed hierarchy was unavailable; see Data.managedHierarchy and Data.resultWindow for status.";
             return new CommandExecutionResult(summary, callHierarchyResult);
         }
 

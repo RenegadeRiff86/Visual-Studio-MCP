@@ -12,13 +12,14 @@ public static partial class ToolDefinitionCatalog
             "Bridge catalog tool — must be called through call_tool: " +
             "call_tool({\"name\":\"apply_diff\",\"arguments\":{\"file\":\"h:1\",\"old_content\":\"exact old text\",\"new_content\":\"replacement\"}}) " +
             "The 'file' argument accepts a handle (h:N, f:N, e:N, w:N, m:N) OR a plain path (absolute or solution-relative like 'CHANGELOG.md' or 'src/Foo.cs'). " +
-            "Prefer a handle when available: (1) find_text or search_symbols → h: handle, (2) find_files or glob → f: handle, " +
-            "(3) errors/warnings/messages → e:/w:/m: handle, (4) read_file → returns f: handle in the response (use it!). " +
-            "Then read_file to get the exact current text, copy that text verbatim as old_content, write your replacement as new_content, and call apply_diff. " +
-            "For a single edit use file + old_content + new_content. " +
-            "For multiple targeted edits use edits: [{ file, old_content, new_content }, ...]. Entries run in order as separate command instances with per-entry failures; this is not an atomic rollback. " +
+            "To create a handle first, call find_text or search_symbols for h:N, find_files or glob for f:N, read_file for f:N, or errors/warnings/messages for e:/w:/m:. " +
+            "Prefer a handle when available and pass it straight through. Then read_file to get the exact current text, copy that text verbatim as old_content, " +
+            "write your replacement as new_content, and call apply_diff. For a single edit use file + old_content + new_content. " +
+            "For multiple targeted edits use edits: [{ file, old_content, new_content, replace_all }, ...]. Keep edits[] to 4 or fewer entries per call; " +
+            "split larger changes into separate calls after re-reading or checking results. Entries run in order as separate command instances with per-entry failures; this is not an atomic rollback. " +
             "Same-file multi-edit uses content matching, not original line numbers, so avoid duplicate old_content and overlapping replacements. " +
-            "call_tool({\"name\":\"apply_diff\",\"arguments\":{\"edits\":[{\"file\":\"h:1\",\"old_content\":\"...\",\"new_content\":\"...\"},{\"file\":\"h:2\",\"old_content\":\"...\",\"new_content\":\"...\"}]}}) " +
+            "In a batch, set replace_all only inside the edit item that owns the explicit file or handle; it never applies outside that file. " +
+            "call_tool({\"name\":\"apply_diff\",\"arguments\":{\"edits\":[{\"file\":\"h:1\",\"old_content\":\"...\",\"new_content\":\"...\",\"replace_all\":true},{\"file\":\"h:2\",\"old_content\":\"...\",\"new_content\":\"...\"}]}}) " +
             "For multi-file or structural changes only (add/move/delete files), use the diff argument with the *** Begin Patch format. " +
             "NEVER use Claude's built-in Edit or Write tools for files open in VS; always use this bridge tool instead.",
             parameterSchema,
@@ -68,9 +69,9 @@ public static partial class ToolDefinitionCatalog
             "search",
             "Read multiple slices across one or more files.",
             "Read multiple slices in one call — each range item specifies its own file, so you can pull slices from different files simultaneously. " +
-            "Each range file may be a bridge handle such as h:2 or f:1; use handles from prior results instead of copying full paths. " +
+            "Each range file may be a bridge handle such as h:2 or f:1; create those handles with find_text, search_symbols, find_files, glob, or read_file, then use them instead of copying full paths. " +
             "Each item must include file plus one of: (a) start_line + end_line for a fixed range, or (b) line + context_before + context_after for an anchor-based slice. " +
-            "Use this whenever you need more than one slice, whether from the same file or different files — do not loop read_file.",
+            "Use this whenever you need more than one slice, whether from the same file or different files — do not loop read_file. Keep read batches modest, usually 5 ranges or fewer, when VS is busy.",
             parameterSchema,
             bridgeCommand: "document-slice",
             title: "Read File Slices",

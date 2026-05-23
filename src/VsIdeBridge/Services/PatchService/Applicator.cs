@@ -122,64 +122,19 @@ internal sealed partial class PatchService
 
         foreach (SearchBlock block in patch.SearchBlocks)
         {
-            int targetIndex = FindSearchBlockStart(path, existingLines, sourceIndex, block);
-            CopyLinesToTarget(existingLines, resultLines, ref sourceIndex, targetIndex);
-
-            int? blockStartLine = null;
-            int blockAddedLineCount = 0;
-            bool isPureContext = block.Lines.Count > 0 && block.Lines.All(line => line.Kind == ' ');
-
-            if (isPureContext)
-            {
-                for (int lineIndex = 0; lineIndex < block.Lines.Count; lineIndex++)
-                    EnsureLineMatches(path, existingLines, targetIndex + lineIndex, block.Lines[lineIndex].Text, "context");
-
-                matchedLineCount += block.Lines.Count;
-                continue;
-            }
-
-            foreach (HunkLine line in block.Lines)
-            {
-                switch (line.Kind)
-                {
-                    case ' ':
-                        EnsureLineMatches(path, existingLines, sourceIndex, line.Text, "context");
-                        matchedLineCount++;
-                        resultLines.Add(existingLines[sourceIndex]);
-                        sourceIndex++;
-                        break;
-                    case '-':
-                        EnsureLineMatches(path, existingLines, sourceIndex, line.Text, "deletion");
-                        matchedLineCount++;
-                        mutationLineCount++;
-                        if (!firstChangeCaptured)
-                        {
-                            firstChangedLine = Math.Max(1, resultLines.Count + 1);
-                            firstChangeCaptured = true;
-                        }
-
-                        blockStartLine ??= Math.Max(1, resultLines.Count + 1);
-                        deletedLineMarkers.Add(Math.Max(1, resultLines.Count + 1));
-                        sourceIndex++;
-                        break;
-                    case '+':
-                        mutationLineCount++;
-                        if (!firstChangeCaptured)
-                        {
-                            firstChangedLine = Math.Max(1, resultLines.Count + 1);
-                            firstChangeCaptured = true;
-                        }
-
-                        blockStartLine ??= Math.Max(1, resultLines.Count + 1);
-                        blockAddedLineCount++;
-                        resultLines.Add(line.Text);
-                        break;
-                    default:
-                        throw new CommandErrorException(InvalidArgumentsCode, $"Unsupported editor patch line prefix '{line.Kind}' in patch for {path}.");
-                }
-            }
-
-            AppendChangedRange(changedRanges, blockStartLine, blockAddedLineCount);
+            ApplySearchBlockMatches(
+                path,
+                existingLines,
+                resultLines,
+                ref sourceIndex,
+                block,
+                patch.ReplaceAll && CanRepeatSearchBlock(block),
+                ref firstChangedLine,
+                ref firstChangeCaptured,
+                changedRanges,
+                deletedLineMarkers,
+                ref matchedLineCount,
+                ref mutationLineCount);
         }
 
         CopyLinesToTarget(existingLines, resultLines, ref sourceIndex, existingLines.Count);
@@ -195,6 +150,137 @@ internal sealed partial class PatchService
             MatchedLineCount = matchedLineCount,
             MutationLineCount = mutationLineCount,
         };
+    }
+
+    private static void ApplySearchBlockMatches(
+        string path,
+        IReadOnlyList<string> existingLines,
+        List<string> resultLines,
+        ref int sourceIndex,
+        SearchBlock block,
+        bool repeatBlock,
+        ref int firstChangedLine,
+        ref bool firstChangeCaptured,
+        List<ChangedRange> changedRanges,
+        List<int> deletedLineMarkers,
+        ref int matchedLineCount,
+        ref int mutationLineCount)
+    {
+        bool matchedAtLeastOnce = false;
+        while (TryGetNextSearchBlockStart(path, existingLines, sourceIndex, block, matchedAtLeastOnce, out int targetIndex))
+        {
+            matchedAtLeastOnce = true;
+            CopyLinesToTarget(existingLines, resultLines, ref sourceIndex, targetIndex);
+
+            bool isPureContext = ApplySearchBlockOccurrence(
+                path,
+                existingLines,
+                resultLines,
+                ref sourceIndex,
+                block,
+                targetIndex,
+                ref firstChangedLine,
+                ref firstChangeCaptured,
+                changedRanges,
+                deletedLineMarkers,
+                ref matchedLineCount,
+                ref mutationLineCount);
+
+            if (isPureContext || !repeatBlock)
+            {
+                break;
+            }
+        }
+    }
+
+    private static bool TryGetNextSearchBlockStart(
+        string path,
+        IReadOnlyList<string> existingLines,
+        int sourceIndex,
+        SearchBlock block,
+        bool matchedAtLeastOnce,
+        out int targetIndex)
+    {
+        if (!matchedAtLeastOnce)
+        {
+            targetIndex = FindSearchBlockStart(path, existingLines, sourceIndex, block);
+            return true;
+        }
+
+        return TryFindSearchBlockStart(path, existingLines, sourceIndex, block, out targetIndex);
+    }
+
+    private static bool ApplySearchBlockOccurrence(
+        string path,
+        IReadOnlyList<string> existingLines,
+        List<string> resultLines,
+        ref int sourceIndex,
+        SearchBlock block,
+        int targetIndex,
+        ref int firstChangedLine,
+        ref bool firstChangeCaptured,
+        List<ChangedRange> changedRanges,
+        List<int> deletedLineMarkers,
+        ref int matchedLineCount,
+        ref int mutationLineCount)
+    {
+        int? blockStartLine = null;
+        int blockAddedLineCount = 0;
+        bool isPureContext = block.Lines.Count > 0 && block.Lines.All(line => line.Kind == ' ');
+        if (isPureContext)
+        {
+            for (int lineIndex = 0; lineIndex < block.Lines.Count; lineIndex++)
+                EnsureLineMatches(path, existingLines, targetIndex + lineIndex, block.Lines[lineIndex].Text, "context");
+
+            matchedLineCount += block.Lines.Count;
+            return true;
+        }
+
+        foreach (HunkLine line in block.Lines)
+        {
+            switch (line.Kind)
+            {
+                case ' ':
+                    EnsureLineMatches(path, existingLines, sourceIndex, line.Text, "context");
+                    matchedLineCount++;
+                    resultLines.Add(existingLines[sourceIndex]);
+                    sourceIndex++;
+                    break;
+                case '-':
+                    EnsureLineMatches(path, existingLines, sourceIndex, line.Text, "deletion");
+                    matchedLineCount++;
+                    mutationLineCount++;
+                    CaptureFirstSearchBlockChange(resultLines, ref firstChangedLine, ref firstChangeCaptured);
+                    blockStartLine ??= Math.Max(1, resultLines.Count + 1);
+                    deletedLineMarkers.Add(Math.Max(1, resultLines.Count + 1));
+                    sourceIndex++;
+                    break;
+                case '+':
+                    mutationLineCount++;
+                    CaptureFirstSearchBlockChange(resultLines, ref firstChangedLine, ref firstChangeCaptured);
+                    blockStartLine ??= Math.Max(1, resultLines.Count + 1);
+                    blockAddedLineCount++;
+                    resultLines.Add(line.Text);
+                    break;
+                default:
+                    throw new CommandErrorException(InvalidArgumentsCode, $"Unsupported editor patch line prefix '{line.Kind}' in patch for {path}.");
+            }
+        }
+
+        AppendChangedRange(changedRanges, blockStartLine, blockAddedLineCount);
+        return false;
+    }
+
+    private static void CaptureFirstSearchBlockChange(
+        List<string> resultLines,
+        ref int firstChangedLine,
+        ref bool firstChangeCaptured)
+    {
+        if (firstChangeCaptured)
+            return;
+
+        firstChangedLine = Math.Max(1, resultLines.Count + 1);
+        firstChangeCaptured = true;
     }
 
     private static IEnumerable<Hunk> GetOrderedHunks(IEnumerable<Hunk> hunks)
@@ -255,6 +341,28 @@ internal sealed partial class PatchService
             return;
         int endLine = addedLineCount > 0 ? startLine.Value + addedLineCount - 1 : startLine.Value;
         changedRanges.Add(new ChangedRange { StartLine = startLine.Value, EndLine = endLine });
+    }
+
+    private static bool CanRepeatSearchBlock(SearchBlock block)
+        => block.Lines.Any(line => line.Kind == '-');
+
+    private static bool TryFindSearchBlockStart(
+        string path,
+        IReadOnlyList<string> existingLines,
+        int sourceIndex,
+        SearchBlock block,
+        out int targetIndex)
+    {
+        try
+        {
+            targetIndex = FindSearchBlockStart(path, existingLines, sourceIndex, block);
+            return true;
+        }
+        catch (CommandErrorException)
+        {
+            targetIndex = -1;
+            return false;
+        }
     }
 
     private static int FindSearchBlockStart(string path, IReadOnlyList<string> existingLines, int sourceIndex, SearchBlock block)

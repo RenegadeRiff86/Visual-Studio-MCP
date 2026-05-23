@@ -1,5 +1,8 @@
 using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
 using Newtonsoft.Json.Linq;
+using System;
+using System.Threading;
 using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
 using VsIdeBridge.Services;
@@ -167,19 +170,83 @@ internal static partial class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            JObject commandData = await context.Runtime.VsCommandService
-                .ExecutePositionedCommandAsync(
-                    context.Dte,
-                    context.Runtime.DocumentService,
-                    args.GetRequiredString("command"),
-                    args.GetString("args"),
-                    args.GetString("file"),
-                    args.GetString(DocumentArgument),
-                    args.GetNullableInt32("line"),
-                    args.GetNullableInt32("column"),
-                    args.GetBoolean("select-word", false))
-                .ConfigureAwait(true);
-            return new CommandExecutionResult("Visual Studio command executed.", commandData);
+            bool waitForBuild = args.GetBoolean("wait-for-build", false);
+            int timeoutMs = args.GetInt32("timeout-ms", 120_000);
+
+            // GetServiceAsync is thread-safe — stay off the main thread until we actually need it.
+            object? svcObj = waitForBuild
+                ? await context.Package.GetServiceAsync(typeof(SVsSolutionBuildManager)).ConfigureAwait(false)
+                : null;
+
+            // Switch to the main thread only for the VS-requiring block: waiter creation (COM)
+            // and firing the command (DTE). ConfigureAwait(false) on the command releases it after fire.
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
+
+            // Subscribe BEFORE firing the command so UpdateSolution_Done cannot be missed.
+            BuildServiceHelpers.BuildCompletionWaiter? waiter = svcObj is IVsSolutionBuildManager2 bm
+                ? new BuildServiceHelpers.BuildCompletionWaiter(bm)
+                : null;
+
+            JObject commandData;
+            try
+            {
+                commandData = await context.Runtime.VsCommandService
+                    .ExecutePositionedCommandAsync(
+                        context.Dte,
+                        context.Runtime.DocumentService,
+                        args.GetRequiredString("command"),
+                        args.GetString("args"),
+                        args.GetString("file"),
+                        args.GetString(DocumentArgument),
+                        args.GetNullableInt32("line"),
+                        args.GetNullableInt32("column"),
+                        args.GetBoolean("select-word", false))
+                    .ConfigureAwait(false); // yield main thread after the command fires
+            }
+            catch
+            {
+                if (waiter is not null)
+                {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(CancellationToken.None);
+                    waiter.Unsubscribe();
+                }
+
+                throw;
+            }
+
+            if (waiter is null)
+            {
+                return new CommandExecutionResult("Visual Studio command executed.", commandData);
+            }
+
+            // Off the main thread: wait for the build event and shape results.
+            try
+            {
+                DateTimeOffset deadline = DateTimeOffset.UtcNow.AddMilliseconds(timeoutMs);
+                while (!waiter.IsCompleted)
+                {
+                    TimeSpan remaining = deadline - DateTimeOffset.UtcNow;
+                    if (remaining <= TimeSpan.Zero)
+                    {
+                        throw new CommandErrorException("timeout", "Timed out waiting for the compile to finish. Increase timeout-ms and retry.");
+                    }
+
+                    TimeSpan pollDelay = remaining < TimeSpan.FromMilliseconds(250) ? remaining : TimeSpan.FromMilliseconds(250);
+                    await Task.Delay(pollDelay, context.CancellationToken).ConfigureAwait(false);
+                }
+
+                commandData["buildSucceeded"] = waiter.LastBuildInfo == 0;
+                commandData["lastBuildInfo"] = waiter.LastBuildInfo;
+                string summary = waiter.LastBuildInfo == 0
+                    ? "Visual Studio command executed. Compile succeeded."
+                    : "Visual Studio command executed. Compile failed.";
+                return new CommandExecutionResult(summary, commandData);
+            }
+            finally
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(CancellationToken.None);
+                waiter.Unsubscribe();
+            }
         }
     }
 }

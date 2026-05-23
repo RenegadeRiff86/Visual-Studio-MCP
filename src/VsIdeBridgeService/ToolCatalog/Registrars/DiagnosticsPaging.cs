@@ -11,4 +11,16 @@ internal static partial class ToolCatalog
 
     private static DiagnosticQueryOptions CreateDiagnosticQueryOptions(JsonObject? args)
         => DiagnosticQueryOptions.FromJsonObject(args, DefaultCompactDiagnosticsRows);
+
+    internal static bool CanUseQuickDiagnosticsFallback(JsonObject? args)
+    {
+        DiagnosticQueryOptions options = CreateDiagnosticQueryOptions(args);
+        return !options.HasContentFilters
+            && string.IsNullOrWhiteSpace(options.SortBy)
+            && string.IsNullOrWhiteSpace(options.GroupBy)
+            && string.IsNullOrWhiteSpace(options.GroupSortBy)
+            && options.GroupSortDescending is null
+            && options.GroupMinCount is null
+            && options.GroupMaxCount is null;
+    }
 }

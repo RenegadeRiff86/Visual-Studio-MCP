@@ -16,6 +16,7 @@ internal static partial class ToolCatalog
     private const string GitPullTool = "git_pull";
     private const string GitPushTool = "git_push";
     private const string GitBranchListTool = "git_branch_list";
+    private const string PathSingleAliasDesc = "Single file path — shorthand for paths:[\"...\"].";
 
     private static IEnumerable<ToolEntry> GitTools()
         =>
@@ -105,16 +106,17 @@ internal static partial class ToolCatalog
     {
         yield return new(GitDiffUnstagedTool,
             "Show unstaged changes in the working tree (not yet git-added). " +
-            "Pass paths to scope the diff to specific files.",
+            "Pass paths or path to scope the diff to specific files.",
             ObjectSchema(
                 OptInt("context", "Lines of context around each hunk (default 3)."),
-                OptArr(Paths, "Optional list of file paths to scope the diff, e.g. [\"src/Foo.cs\"].")),
+                OptArr(Paths, "Optional list of file paths to scope the diff, e.g. [\"src/Foo.cs\"]."),
+                Opt("path", PathSingleAliasDesc)),
             Git,
             async (id, args, bridge) =>
             {
                 string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
                 int ctx = args?["context"]?.GetValue<int?>() ?? DefaultDiffContext;
-                IEnumerable<string>? paths = GetPathListOrNull(args, Paths);
+                IEnumerable<string>? paths = GetEffectivePathListOrNull(args);
                 return await GitSdkReader.GetUnstagedDiffAsync(id, repo, ctx, paths)
                     .ConfigureAwait(false);
             },
@@ -124,17 +126,18 @@ internal static partial class ToolCatalog
 
         yield return new(GitDiffStagedTool,
             "Show staged changes ready to commit (git-added but not yet committed). " +
-            "Pass paths to scope the diff to specific files.",
+            "Pass paths or path to scope the diff to specific files.",
             ObjectSchema(
                 OptInt("context", "Lines of context around each hunk (default 3)."),
-                OptArr(Paths, "Optional list of file paths to scope the diff, e.g. [\"src/Foo.cs\"].")),
+                OptArr(Paths, "Optional list of file paths to scope the diff, e.g. [\"src/Foo.cs\"]."),
+                Opt("path", PathSingleAliasDesc)),
             Git,
             async (id, args, bridge) =>
             {
                 string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
                 int ctx = args?["context"]?.GetValue<int?>() ?? DefaultDiffContext;
                 List<string> gitArgs = ["diff", "--cached", "--no-color", $"--unified={ctx}"];
-                IEnumerable<string>? paths = GetPathListOrNull(args, Paths);
+                IEnumerable<string>? paths = GetEffectivePathListOrNull(args);
                 if (paths is not null) { gitArgs.Add("--"); gitArgs.AddRange(paths); }
                 return await GitRunner.RunArgumentsAsync(id, repo, gitArgs)
                     .ConfigureAwait(false);
@@ -171,14 +174,16 @@ internal static partial class ToolCatalog
     private static IEnumerable<ToolEntry> GitStagingCommitTools()
     {
         yield return new("git_add",
-                "Stage files for the next commit. Pass an array of paths relative to the repo root, " +
+                "Stage files for the next commit. Pass paths array or path string, " +
                 "or [\".\" ] to stage everything.",
-                ObjectSchema(ReqArr(Paths, "Array of file paths or globs to stage, e.g. [\"src/Foo.cs\"] or [\".\"].")),
+                ObjectSchema(
+                    OptArr(Paths, "Array of file paths or globs to stage, e.g. [\"src/Foo.cs\"] or [\".\"]."),
+                    Opt("path", PathSingleAliasDesc)),
                 Git,
                  async (id, args, bridge) =>
                 {
                     string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
-                    return await GitSdkReader.StageAsync(id, repo, GetPathList(args, Paths))
+                    return await GitSdkReader.StageAsync(id, repo, GetEffectivePathList(args))
                         .ConfigureAwait(false);
                 },
                 searchHints: BuildSearchHints(
@@ -188,12 +193,14 @@ internal static partial class ToolCatalog
             yield return new("git_restore",
                 "Discard working-tree changes for the specified files, restoring them to HEAD. " +
                 "Does not touch the index.",
-                ObjectSchema(ReqArr(Paths, "Array of file paths to restore, e.g. [\"src/Foo.cs\"].")),
+                ObjectSchema(
+                    OptArr(Paths, "Array of file paths to restore, e.g. [\"src/Foo.cs\"]."),
+                    Opt("path", PathSingleAliasDesc)),
                 Git,
                  async (id, args, bridge) =>
                 {
                     string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
-                    return await GitSdkReader.RestoreAsync(id, repo, GetPathList(args, Paths))
+                    return await GitSdkReader.RestoreAsync(id, repo, GetEffectivePathList(args))
                         .ConfigureAwait(false);
                 },
                 searchHints: BuildSearchHints(
@@ -201,12 +208,14 @@ internal static partial class ToolCatalog
 
             yield return new("git_reset",
                 "Unstage files (mixed reset). If no paths are given, unstages everything.",
-                ObjectSchema(OptArr(Paths, "Array of paths to unstage, or omit for all.")),
+                ObjectSchema(
+                    OptArr(Paths, "Array of paths to unstage, or omit for all."),
+                    Opt("path", PathSingleAliasDesc)),
                 Git,
                  async (id, args, bridge) =>
                 {
                     string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
-                    return await GitSdkReader.UnstageAsync(id, repo, GetPathListOrNull(args, Paths))
+                    return await GitSdkReader.UnstageAsync(id, repo, GetEffectivePathListOrNull(args))
                         .ConfigureAwait(false);
                 },
                 searchHints: BuildSearchHints(
@@ -474,5 +483,27 @@ internal static partial class ToolCatalog
     /// </summary>
     private static IEnumerable<string>? GetPathListOrNull(JsonObject? args, string argName)
         => args?[argName] is null ? null : GetPathList(args, argName);
+
+    /// <summary>
+    /// Resolves paths from <c>paths</c> (array) if present, otherwise from the <c>path</c> singular
+    /// string alias if present, otherwise falls back to <c>["."]</c>.
+    /// </summary>
+    private static IEnumerable<string> GetEffectivePathList(JsonObject? args)
+    {
+        if (args?[Paths] is not null) return GetPathList(args, Paths);
+        if (args?["path"] is not null) return GetPathList(args, "path");
+        return ["."];
+    }
+
+    /// <summary>
+    /// Like <see cref="GetEffectivePathList"/> but returns <see langword="null"/> when both <c>paths</c>
+    /// and <c>path</c> are absent, signalling "all paths" to operations like unstage.
+    /// </summary>
+    private static IEnumerable<string>? GetEffectivePathListOrNull(JsonObject? args)
+    {
+        if (args?[Paths] is not null) return GetPathListOrNull(args, Paths);
+        if (args?["path"] is not null) return GetPathList(args, "path");
+        return null;
+    }
 
 }

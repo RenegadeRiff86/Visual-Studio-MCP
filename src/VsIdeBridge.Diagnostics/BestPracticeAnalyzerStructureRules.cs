@@ -17,17 +17,16 @@ internal static partial class BestPracticeAnalyzer
     {
         int findingCount = 0;
 
-        foreach (Match match in PragmaWarningDisablePattern().Matches(content))
+        foreach (JObject finding in FindPragmaWarningSuppressions(file, content))
         {
-            string pragmaText = GetLineAt(content, match.Index).Trim();
-            yield return DiagnosticRowFactory.CreateBestPracticeRow(
-                code: "BP1044",
-                message: $"In-source warning suppression '{pragmaText}' hides diagnostics instead of fixing the root cause. Remove the pragma and address the underlying warning.",
-                file: file,
-                line: GetLineNumber(content, match.Index),
-                symbol: pragmaText,
-                helpUri: BP1044HelpUri);
+            yield return finding;
+            findingCount++;
+            if (findingCount >= MaxSuppressionFindingsPerFile) { yield break; }
+        }
 
+        foreach (JObject finding in FindNativeDiagnosticSuppressions(file, content))
+        {
+            yield return finding;
             findingCount++;
             if (findingCount >= MaxSuppressionFindingsPerFile) { yield break; }
         }
@@ -111,6 +110,36 @@ internal static partial class BestPracticeAnalyzer
 
             findingCount++;
             if (findingCount >= MaxSuppressionFindingsPerFile) { yield break; }
+        }
+    }
+
+    private static IEnumerable<JObject> FindPragmaWarningSuppressions(string file, string content)
+    {
+        foreach (Match match in PragmaWarningDisablePattern().Matches(content))
+        {
+            string pragmaText = GetLineAt(content, match.Index).Trim();
+            yield return DiagnosticRowFactory.CreateBestPracticeRow(
+                code: "BP1044",
+                message: $"In-source warning suppression '{pragmaText}' hides diagnostics instead of fixing the root cause. Remove the pragma and address the underlying warning.",
+                file: file,
+                line: GetLineNumber(content, match.Index),
+                symbol: pragmaText,
+                helpUri: BP1044HelpUri);
+        }
+    }
+
+    private static IEnumerable<JObject> FindNativeDiagnosticSuppressions(string file, string content)
+    {
+        foreach (Match match in NativeDiagnosticSuppressionPattern().Matches(content))
+        {
+            string suppressionText = GetLineAt(content, match.Index).Trim();
+            yield return DiagnosticRowFactory.CreateBestPracticeRow(
+                code: "BP1044",
+                message: $"Native diagnostic suppression '{Truncate(suppressionText, 96)}' hides compiler output instead of fixing the root cause. Remove the suppression and address the underlying warning.",
+                file: file,
+                line: GetLineNumber(content, match.Index),
+                symbol: suppressionText,
+                helpUri: BP1044HelpUri);
         }
     }
 
@@ -318,6 +347,8 @@ internal static partial class BestPracticeAnalyzer
         foreach (Match match in new Regex(@"\b(?:std::(?:string|vector|map|unordered_map|set|list|deque|array)|string|vector|map)\s+(\w+)\s*[,)]", RegexOptions.Compiled).Matches(content))
 #endif
         {
+            if (IsInsideCppLineComment(content, match.Index)) continue;
+            if (!IsInsideFunctionParams(content, match.Index)) continue;
             string paramName = match.Groups[1].Value;
             yield return DiagnosticRowFactory.CreateBestPracticeRow(
                 code: "BP1025",
@@ -488,6 +519,30 @@ internal static partial class BestPracticeAnalyzer
 #else
         return lineNumber <= 100 && content.IndexOf("static void Main", StringComparison.Ordinal) >= 0;
 #endif
+    }
+
+    // Returns true when matchIndex falls inside a C/C++ line comment (// ...).
+    // Used by BP1025 to avoid flagging identifiers that appear in comment text.
+    private static bool IsInsideCppLineComment(string content, int matchIndex)
+    {
+        int lineStart = matchIndex > 0 ? content.LastIndexOf('\n', matchIndex - 1) + 1 : 0;
+        return content.IndexOf("//", lineStart, matchIndex - lineStart, StringComparison.Ordinal) >= 0;
+    }
+
+    // Returns true when matchIndex is inside a function parameter list.
+    // Walk backwards: an unmatched '(' before any statement boundary (';', '{', '}')  
+    // means we are in params; hitting a boundary first means it is a local declaration.
+    private static bool IsInsideFunctionParams(string content, int matchIndex)
+    {
+        int depth = 0;
+        for (int i = matchIndex - 1; i >= 0; i--)
+        {
+            char ch = content[i];
+            if      (ch == ')')  { depth++; }
+            else if (ch == '(')  { if (depth == 0) return true; depth--; }
+            else if (ch == ';' || ch == '{' || ch == '}') { return false; }
+        }
+        return false;
     }
 
     // ── BP1027: Property bag class (C#) ───────────────────────────────────────

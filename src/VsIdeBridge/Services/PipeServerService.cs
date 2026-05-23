@@ -539,16 +539,27 @@ internal sealed class PipeServerService : IDisposable
             return batchResult;
         }
 
+        CommandArguments args = CommandArgumentParser.Parse(request.Args);
+        if (IsWriteFileCommand(commandName))
+        {
+            CommandExecutionResult writeResult = await PatchCommands.ExecuteWriteFileAsync(ctx, args).ConfigureAwait(false);
+            await _discovery.RefreshAfterCommandAsync(dte!, solutionPath, commandToken).ConfigureAwait(false);
+            return writeResult;
+        }
+
         if (!_runtime.TryGetCommand(commandName, out IdeCommandBase cmd))
         {
             throw new CommandErrorException("command_not_found", $"Unknown command: '{commandName}'. Call tool_help with no arguments to see all available tool names and their parameters, then retry with a valid command name.");
         }
 
-        CommandArguments args = CommandArgumentParser.Parse(request.Args);
         CommandExecutionResult result = await cmd.ExecuteDirectAsync(ctx, args).ConfigureAwait(false);
         await _discovery.RefreshAfterCommandAsync(dte!, solutionPath, commandToken).ConfigureAwait(false);
         return result;
     }
+
+    private static bool IsWriteFileCommand(string commandName)
+        => string.Equals(commandName, "write-file", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(commandName, "Tools.IdeWriteFile", StringComparison.OrdinalIgnoreCase);
 
     private static async Task<CommandExecutionResult> AwaitCommandExecutionAsync(
         JoinableTask<CommandExecutionResult> executionTask,

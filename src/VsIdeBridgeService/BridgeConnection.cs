@@ -238,6 +238,34 @@ internal sealed class BridgeConnection
         return discovered;
     }
 
+    internal BridgeInstance? DropCachedInstanceIfStale(IReadOnlyList<BridgeInstance> visibleInstances)
+    {
+        lock (_gate)
+        {
+            BridgeInstance? cached = _state.Cached;
+            if (cached is null)
+            {
+                return null;
+            }
+
+            BridgeInstance? visibleMatch = visibleInstances.FirstOrDefault(visible =>
+                string.Equals(visible.InstanceId, cached.InstanceId, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(visible.PipeName, cached.PipeName, StringComparison.OrdinalIgnoreCase)
+                || visible.ProcessId == cached.ProcessId);
+            if (visibleMatch is not null)
+            {
+                _state.Cached = visibleMatch;
+                _state.LastSolutionPath = visibleMatch.SolutionPath;
+                return null;
+            }
+
+            _state.Cached = null;
+            _state.LastSolutionPath = string.Empty;
+            _state.PendingBindingNotice = null;
+            return cached;
+        }
+    }
+
     private BridgeInstance? ClearCached()
     {
         lock (_gate)

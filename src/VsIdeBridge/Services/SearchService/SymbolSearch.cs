@@ -3,6 +3,7 @@ using EnvDTE80;
 using Microsoft.VisualStudio.Shell;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using VsIdeBridge.Infrastructure;
@@ -11,6 +12,21 @@ namespace VsIdeBridge.Services;
 
 internal sealed partial class SearchService
 {
+    private static readonly HashSet<string> s_codeModelTextFallbackExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cxx",
+        ".h",
+        ".hh",
+        ".hpp",
+        ".hxx",
+        ".ipp",
+        ".inl",
+        ".ixx",
+    };
+
     private async Task<(string Path, string ProjectUniqueName)> GetDocumentTargetAsync(IdeCommandContext context, string? pathFilter = null)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(context.CancellationToken);
@@ -67,9 +83,15 @@ internal sealed partial class SearchService
             files = files.Where(item => MatchesPathFilter(item.Path, normalizedPathFilter));
         }
 
+        (string Path, string ProjectUniqueName)[] searchFiles = [.. files];
+        if (ShouldUseTextSymbolFallback(searchFiles))
+        {
+            return [];
+        }
+
         HashSet<string> seen = [];
         List<CodeModelHit> hits = [];
-        foreach ((string filePath, string fileProjectUniqueName) in files)
+        foreach ((string filePath, string fileProjectUniqueName) in searchFiles)
         {
             if (string.IsNullOrWhiteSpace(filePath))
             {
@@ -104,6 +126,18 @@ internal sealed partial class SearchService
             .ThenBy(hit => hit.Path, StringComparer.OrdinalIgnoreCase)
             .ThenBy(hit => hit.Line)
             .ThenBy(hit => hit.Name, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool ShouldUseTextSymbolFallback(IEnumerable<(string Path, string ProjectUniqueName)> files)
+    {
+        // VS CodeModel can block the UI thread on C/C++ files; text fallback stays responsive.
+        return files.Any(file => IsTextSymbolFallbackCandidate(file.Path));
+    }
+
+    private static bool IsTextSymbolFallbackCandidate(string path)
+    {
+        string extension = Path.GetExtension(path);
+        return s_codeModelTextFallbackExtensions.Contains(extension);
     }
 
     private static void CollectMatchingSymbols(

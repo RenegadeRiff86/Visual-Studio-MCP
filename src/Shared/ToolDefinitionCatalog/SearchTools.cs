@@ -12,8 +12,9 @@ public static partial class ToolDefinitionCatalog
             "search",
             "Find files by name — use instead of find/ls.",
             "Find files by name or path fragment across the solution. Faster and VS-aware — use this instead of filesystem find or ls " +
-            "when working in a VS solution. Returns ranked matches with project membership. Each match includes a \"handle\" field — " +
-            "pass it directly as the file argument to read_file, read_file_batch, file_outline, open_file, apply_diff, or write_file instead of copying the full path.",
+            "when working in a VS solution. This is the quickest way to create an f:N file handle. Returns ranked matches with " +
+            "project membership. Each match includes a \"handle\" field — pass it directly as the file argument to read_file, " +
+            "read_file_batch, file_outline, open_file, apply_diff, or write_file instead of copying the full path.",
             parameterSchema,
             bridgeCommand: "find-files",
             title: "Solution Explorer File Search",
@@ -24,11 +25,15 @@ public static partial class ToolDefinitionCatalog
         => CreateReadOnlyTool(
             "find_text",
             "search",
-            "Search code text — use instead of Grep.",
-            "Full-text search across the solution. Use this instead of Grep or rg — faster and VS-aware. Returns file, line, and " +
-            "match context. Use search_symbols when looking for a named definition. Use find_text_batch when you have multiple " +
-            "patterns to search. Each match includes a \"handle\" field — pass it directly as the file argument to read_file, " +
-            "read_file_batch, file_outline, apply_diff, write_file, or any other tool that accepts a file argument.",
+            "Search code text — use instead of Grep; see related search tools in the description.",
+            "Full-text search across the solution. Use this instead of Grep or rg for literal or regex text — faster and VS-aware. " +
+            "Before choosing this tool, consider the rest of the search family: find_files or glob for filenames, search_symbols for " +
+            "named types/members, file_outline or file_symbols for members in a known file, find_text_batch for multiple patterns, " +
+            "smart_context for open-ended exploration, and goto_definition, peek_definition, find_references, count_references, or " +
+            "call_hierarchy for symbol navigation. Call list_tools_by_category with category=search to see the full set. This is a " +
+            "direct way to create an h:N handle from a text match. Returns file, line, and match context. Each match includes a " +
+            "\"handle\" field — pass it directly as the file argument to read_file, read_file_batch, file_outline, apply_diff, " +
+            "write_file, or any other tool that accepts a file argument.",
             parameterSchema,
             bridgeCommand: "find-text",
             title: "Text Search",
@@ -42,8 +47,9 @@ public static partial class ToolDefinitionCatalog
             "Search multiple patterns at once — use instead of repeated Grep calls.",
             "Search for multiple text patterns in one call. Always prefer over repeated find_text or Grep calls — sends all queries " +
             "in one round-trip and returns all results. Ideal for mapping usages of several symbols or finding multiple strings " +
-            "before a refactor. Each match includes a \"handle\" field — pass it directly as the file argument to read_file, file_outline, " +
-            "apply_diff, or write_file instead of copying the full path.",
+            "before a refactor. This creates h:N handles for matched rows. Each match includes a \"handle\" field — pass it " +
+            "directly as the file argument to read_file, file_outline, apply_diff, or write_file instead of copying the full path. " +
+            "When the bridge is busy, keep max_queries_per_chunk at 5 or lower rather than running parallel searches.",
             parameterSchema,
             bridgeCommand: "find-text-batch",
             title: "Batched Text Search",

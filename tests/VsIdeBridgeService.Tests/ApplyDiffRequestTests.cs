@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text;
 using System.Text.Json.Nodes;
 using VsIdeBridge.Tooling.Patches;
@@ -58,6 +59,56 @@ public sealed class ApplyDiffRequestTests
         Assert.Contains("-" + OldContent + "\n", request.Diff);
         Assert.Contains("+" + NewContent + "\n", request.Diff);
         Assert.DoesNotContain("*** Replace in File:", request.Diff);
+    }
+
+    [Fact]
+    public void SimpleReplaceCapturesReplaceAllMetadata()
+    {
+        JsonObject args = new()
+        {
+            ["file"] = "src/Foo.cs",
+            ["old_content"] = "old",
+            ["new_content"] = "new",
+            ["replace_all"] = true,
+        };
+
+        ApplyDiffRequest request = ApplyDiffRequest.FromJsonObject(args);
+        JsonObject metadata = request.ToJsonObject();
+
+        Assert.True(request.ReplaceAll);
+        Assert.True(metadata["replaceAll"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void BuildApplyDiffArgsForwardsReplaceAllSwitch()
+    {
+        JsonObject args = new()
+        {
+            ["file"] = "src/Foo.cs",
+            ["old_content"] = "old",
+            ["new_content"] = "new",
+            ["replace_all"] = true,
+        };
+        ApplyDiffRequest request = ApplyDiffRequest.FromJsonObject(args);
+        MethodInfo? buildMethod = typeof(ToolCatalog).GetMethod("BuildApplyDiffArgs", BindingFlags.Static | BindingFlags.NonPublic);
+
+        string pipeArgs = Assert.IsType<string>(buildMethod!.Invoke(null, [request]));
+
+        Assert.Contains("--replace-all true", pipeArgs);
+    }
+
+    [Fact]
+    public void RejectsReplaceAllWithDiffShape()
+    {
+        JsonObject args = new()
+        {
+            ["diff"] = "*** Begin Patch\n*** Update File: src/Foo.cs\n@@\n context\n-old\n+new\n*** End Patch",
+            ["replace_all"] = true,
+        };
+
+        ApplyDiffValidationException exception = Assert.Throws<ApplyDiffValidationException>(() => ApplyDiffRequest.FromJsonObject(args));
+
+        Assert.Contains("replace_all", exception.Message);
     }
 
     [Fact]

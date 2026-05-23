@@ -92,6 +92,9 @@ internal static partial class ErrorListPatterns
     private static readonly Regex _pragmaWarningDisablePattern = new(@"^[ \t]*#pragma\s+warning(?:\s+disable\b.*|\s*\(\s*disable\s*:\s*[^)]*\))$", RegexOptions.Compiled | RegexOptions.Multiline | RegexOptions.IgnoreCase);
     public static Regex PragmaWarningDisablePattern() { return _pragmaWarningDisablePattern; }
 
+    private static readonly Regex _nativeDiagnosticSuppressionPattern = new(@"(?im)^[ \t]*(?:#\s*define\b.*__pragma\s*\(\s*warning\s*\(\s*disable\b.*|.*_Pragma\s*\(\s*""(?:[^""\\]|\\.)*diagnostic\s+ignored.*)$", RegexOptions.Compiled);
+    public static Regex NativeDiagnosticSuppressionPattern() { return _nativeDiagnosticSuppressionPattern; }
+
     private static readonly Regex _editorConfigDiagnosticSuppressionPattern = new(@"(?im)^[ \t]*dotnet_diagnostic\.(?<code>[A-Za-z0-9_.-]+)\.severity\s*=\s*(?<severity>none|silent)\b.*$", RegexOptions.Compiled);
     public static Regex EditorConfigDiagnosticSuppressionPattern() { return _editorConfigDiagnosticSuppressionPattern; }
 

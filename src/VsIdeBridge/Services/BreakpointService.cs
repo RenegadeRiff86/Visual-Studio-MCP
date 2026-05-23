@@ -11,6 +11,8 @@ namespace VsIdeBridge.Services;
 
 internal sealed class BreakpointService
 {
+    public HandleService? HandleService { get; set; }
+
     public async Task<JObject> SetBreakpointAsync(
         DTE2 dte,
         string filePath,
@@ -25,7 +27,7 @@ internal sealed class BreakpointService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
+        string normalizedPath = ResolveBreakpointPath(filePath);
         Breakpoint? existing = FindBreakpoint(dte, normalizedPath, line);
         existing?.Delete();
 
@@ -80,7 +82,7 @@ internal sealed class BreakpointService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
+        string normalizedPath = ResolveBreakpointPath(filePath);
         Breakpoint[] matches = [..dte.Debugger.Breakpoints
             .Cast<Breakpoint>()
             .Where(breakpoint => MatchesBreakpointLocation(breakpoint, normalizedPath, line))];
@@ -120,7 +122,7 @@ internal sealed class BreakpointService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
+        string normalizedPath = ResolveBreakpointPath(filePath);
         Breakpoint bp = FindBreakpoint(dte, normalizedPath, line)
             ?? throw CreateBreakpointNotFound(normalizedPath, line);
         bp.Enabled = true;
@@ -131,7 +133,7 @@ internal sealed class BreakpointService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
+        string normalizedPath = ResolveBreakpointPath(filePath);
         Breakpoint bp = FindBreakpoint(dte, normalizedPath, line)
             ?? throw CreateBreakpointNotFound(normalizedPath, line);
         bp.Enabled = false;
@@ -172,6 +174,16 @@ internal sealed class BreakpointService
             ["disabledCount"] = count,
             ["totalCount"] = dte.Debugger.Breakpoints.Count,
         };
+    }
+
+    private string ResolveBreakpointPath(string filePath)
+    {
+        if (HandleService is { } hs)
+        {
+            filePath = hs.ResolveFilePath(filePath);
+        }
+
+        return PathNormalization.NormalizeFilePath(filePath);
     }
 
     private static Breakpoint? FindBreakpoint(DTE2 dte, string normalizedPath, int line)

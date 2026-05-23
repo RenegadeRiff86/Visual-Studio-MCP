@@ -401,7 +401,7 @@ internal static partial class ToolCatalog
         JsonObject response;
         try
         {
-            response = await bridge.SendAsync(id, command, argsText).ConfigureAwait(false);
+            response = await bridge.SendAsync(id, command, argsText, SelectDiagnosticsTimeoutProfile(args)).ConfigureAwait(false);
         }
         catch (McpRequestException ex) when (IsInterruptedDiagnosticsException(ex))
         {
@@ -448,6 +448,11 @@ internal static partial class ToolCatalog
 
         return args?[Refresh]?.GetValue<bool>() != true;
     }
+
+    private static BridgeConnection.ToolTimeoutProfile SelectDiagnosticsTimeoutProfile(JsonObject? args)
+        => ShouldUsePassiveDiagnosticsRead(args)
+            ? BridgeConnection.ToolTimeoutProfile.Interactive
+            : BridgeConnection.ToolTimeoutProfile.Heavy;
 
     private static async Task<JsonObject?> TryGetQuickDiagnosticsFallbackAsync(
         BridgeConnection bridge,

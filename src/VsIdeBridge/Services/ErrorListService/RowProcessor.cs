@@ -144,8 +144,8 @@ internal sealed partial class ErrorListService
 
         if (!string.IsNullOrWhiteSpace(query.Path))
         {
-            filtered = filtered.Where(row => GetRowString(row, FileKey)
-                .IndexOf(query.Path, StringComparison.OrdinalIgnoreCase) >= 0);
+            filtered = filtered.Where(row => NormalizePath(GetRowString(row, FileKey))
+                .IndexOf(NormalizePath(query.Path!), StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         string fileFilter = (query.File ?? string.Empty).Trim();
@@ -206,8 +206,10 @@ internal sealed partial class ErrorListService
     private static bool MatchesFileFilter(JObject row, string file)
     {
         string value = GetRowString(row, FileKey);
-        return value.IndexOf(file, StringComparison.OrdinalIgnoreCase) >= 0;
+        return NormalizePath(value).IndexOf(NormalizePath(file), StringComparison.OrdinalIgnoreCase) >= 0;
     }
+
+    private static string NormalizePath(string path) => path.Replace('\\', '/');
 
     private delegate bool TableValueReader(string keyName, out object content);
 

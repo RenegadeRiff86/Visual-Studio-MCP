@@ -322,12 +322,17 @@ internal sealed partial class DocumentService
 
     // ── Extracted helpers ─────────────────────────────────────────────────────
 
-    private static Document ResolveDocumentForTextSelection(DTE2 dte, string? filePath, string? documentQuery)
+    private Document ResolveDocumentForTextSelection(DTE2 dte, string? filePath, string? documentQuery)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
         if (!string.IsNullOrWhiteSpace(filePath))
         {
+            if (HandleService is { } hs)
+            {
+                filePath = hs.ResolveFilePath(filePath!);
+            }
+
             string normalizedPath = PathNormalization.NormalizeFilePath(filePath);
             if (!File.Exists(normalizedPath))
             {

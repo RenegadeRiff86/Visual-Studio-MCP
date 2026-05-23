@@ -27,6 +27,8 @@ internal static partial class ToolCatalog
     {
         yield return new("bridge_health",
             "Get binding health, discovery source, and last round-trip metrics. " +
+            "When no selector is set, the first normal bridge command auto-binds to the first visible VS instance; " +
+            "use bind_solution or bind_instance if more than one instance is open. " +
             "Response includes a toolDiscovery hint — call list_tool_categories, list_tools, " +
             "list_tools_by_category, or recommend_tools to explore all available bridge capabilities.",
             EmptySchema(), Core,
@@ -93,9 +95,9 @@ internal static partial class ToolCatalog
 
     private static ToolEntry CreateBatchTool() =>
         new("batch",
-            "Execute multiple bridge or service tools in one MCP round-trip. Use when you need results from " +
-            "several tools together (e.g. vs_state + errors + list_projects or state + errors + list-projects). " +
-            "Steps format: [{\"command\":\"vs_state\"},{\"command\":\"errors\",\"args\":{\"max\":20}},{\"command\":\"list_tool_categories\"}]. " +
+            "Execute multiple bridge or service tools in one MCP round-trip. Use this to sequence dependent bridge calls instead of " +
+            "launching parallel tool calls. Keep VS-mutating, build, compile, or edit batches small: set max_steps under 5 and split " +
+            "larger work into another batch after reviewing results. Steps format: [{\"command\":\"vs_state\"},{\"command\":\"errors\",\"args\":{\"max\":20}},{\"command\":\"list_tool_categories\"}]. " +
             "Note: prefer read_file_batch for multiple file reads and find_text_batch for multiple searches.",
             ObjectSchema(
                 (("steps",
@@ -127,7 +129,7 @@ internal static partial class ToolCatalog
                 OptBool("success", "Optional success filter applied to batch step results."),
                 Opt("text", "Optional text filter applied to command, id, summary, and error text."),
                 Opt("group_by", "Optional grouping mode: command, success, or error."),
-                OptInt("max_steps", "Maximum number of batch steps to execute before returning partial results (default 50)."),
+                OptInt("max_steps", "Maximum number of batch steps to execute before returning partial results (default 50). For VS-mutating, build, compile, or edit steps, set this under 5 and run another batch only after reviewing results."),
                 Opt("data_mode", "Nested step data mode: summary (default), full, or none. Use full only when you need each raw step payload.")),
             Core,
             ExecuteBatchToolAsync,

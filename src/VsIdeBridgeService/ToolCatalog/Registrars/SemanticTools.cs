@@ -9,6 +9,7 @@ internal static partial class ToolCatalog
     private const string FindReferencesTool = "find_references";
     private const string GotoDefinitionTool = "goto_definition";
     private const string SemanticReadFileTool = "read_file";
+    private const string CallHierarchyTool = "call_hierarchy";
 
     private static IEnumerable<ToolEntry> SemanticTools()
         =>
@@ -50,7 +51,7 @@ internal static partial class ToolCatalog
                     related:
                     [
                         ("count_references", "Get the exact reference count"),
-                        ("call_hierarchy", "Explore the caller tree"),
+                        (CallHierarchyTool, "Explore the caller tree"),
                         (SearchSymbolsTool, "Search related symbol definitions"),
                     ])),
             "find-references",
@@ -76,20 +77,24 @@ internal static partial class ToolCatalog
                 ("timeout-ms", OptionalText(a, "timeout_ms"))),
             Search,
             searchHints: BuildSearchHints(
-                related: [(FindReferencesTool, "Get the full list of usages"), ("call_hierarchy", "Explore the caller tree"), (SearchSymbolsTool, "Search related symbol definitions")]));
+                related: [(FindReferencesTool, "Get the full list of usages"), (CallHierarchyTool, "Explore the caller tree"), (SearchSymbolsTool, "Search related symbol definitions")]));
 
-        yield return BridgeTool("call_hierarchy",
+        yield return BridgeTool(CallHierarchyTool,
             "Use this INSTEAD of looping find_text → read_file to trace call chains. Returns the full recursive caller tree in one " +
             "call — who calls this symbol, who calls those callers, and so on. Use when you need to understand propagation paths, " +
             "find all entry points that can reach a symbol, or know how far a change will ripple. For managed languages the tree is " +
-            "returned directly in the result. This can take longer than direct read/search tools.",
+            "returned directly in the result. For C/C++ and other native files, the tool invokes Visual Studio's native Call Hierarchy " +
+            "window and returns window/status metadata. This can take longer than direct read/search tools.",
             ObjectSchema(
                 Req(FileArg, FileDesc),
                 ReqInt(Line, LineDesc),
                 ReqInt(Column, ColumnDesc),
                 OptInt("max_depth", "Optional caller tree depth for managed-language hierarchy capture (default 2)."),
                 OptInt("max_children", "Optional max caller nodes per hierarchy level (default 20)."),
-                OptInt("max_locations_per_caller", "Optional max call-site locations to include per caller (default 5).")),
+                OptInt("max_locations_per_caller", "Optional max call-site locations to include per caller (default 5)."),
+                OptBool("activate_window", "Activate the Visual Studio Call Hierarchy window after invoking it (default true)."),
+                OptBool("select_word", "Select the symbol at the requested location before invoking Call Hierarchy (default true)."),
+                OptInt("timeout_ms", "Milliseconds to wait for the Visual Studio Call Hierarchy window (default 5000).")),
             "call-hierarchy",
             a => Build(
                 (FileArg, OptionalString(a, FileArg)),
@@ -97,8 +102,12 @@ internal static partial class ToolCatalog
                 (Column, OptionalText(a, Column)),
                 ("max-depth", OptionalText(a, "max_depth")),
                 ("max-children", OptionalText(a, "max_children")),
-                ("max-locations-per-caller", OptionalText(a, "max_locations_per_caller"))),
+                ("max-locations-per-caller", OptionalText(a, "max_locations_per_caller")),
+                BoolArg("activate-window", a, "activate_window", true, true),
+                BoolArg("select-word", a, "select_word", true, true),
+                ("timeout-ms", OptionalText(a, "timeout_ms"))),
             Search,
+aliases: ["caller_hierarchy", "call_tree"],
             summary: "Trace the full caller chain for a symbol — replaces manual find_text → read_file loops.",
             searchHints: BuildSearchHints(
                 workflow: [(FindReferencesTool, "Get all usages"), (SemanticReadFileTool, "Read a caller's implementation")],

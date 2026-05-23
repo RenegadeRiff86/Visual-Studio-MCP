@@ -134,13 +134,21 @@ public sealed class DiagnosticRow
     }
 
     private bool MatchesPath(string? path)
-        => Contains(DisplayPath, path) || Contains(Path, path) || Contains(File, path);
+        => ContainsPath(DisplayPath, path) || ContainsPath(Path, path) || ContainsPath(File, path);
 
     private static bool MatchesPrefix(string value, string? prefix)
         => string.IsNullOrWhiteSpace(prefix) || value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
 
     private static bool Contains(string value, string? text)
         => string.IsNullOrWhiteSpace(text) || value.Contains(text, StringComparison.OrdinalIgnoreCase);
+
+    // Path comparison normalises separators so callers can pass either '\' or '/'
+    // regardless of OS or how the path filter was typed.
+    private static bool ContainsPath(string value, string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return true;
+        return value.Replace('\\', '/').Contains(text!.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string NormalizeSeverity(string severity)
     {
@@ -439,10 +447,11 @@ public sealed class DiagnosticCollection
     {
         IReadOnlyList<DiagnosticRow> filteredRows = [.. Rows.Where(predicate)];
         bool sourceTruncated = SourceTruncated && SourceTotalCount > Rows.Count;
-        int sourceTotalCount = sourceTruncated
-            ? Math.Max(filteredRows.Count, SourceTotalCount)
-            : filteredRows.Count;
-        return new DiagnosticCollection(filteredRows, filteredRows.Count, sourceTotalCount, sourceTruncated);
+        return new DiagnosticCollection(
+            filteredRows,
+            filteredRows.Count,
+            filteredRows.Count,
+            sourceTruncated);
     }
 
     private IEnumerable<DiagnosticRow> SortByNumber(DiagnosticQueryOptions options)
@@ -800,4 +809,10 @@ public sealed class DiagnosticBucket
 
     public JsonObject ToDataJson()
         => Diagnostics.ToUnpagedJsonObject(_dataTemplate);
+
+    /// <summary>
+    /// Returns a compact summary with counts only — no rows — suitable for embedding in cache metadata.
+    /// </summary>
+    public JsonObject ToCountSummaryJson()
+        => _dataTemplate.DeepClone().AsObject();
 }

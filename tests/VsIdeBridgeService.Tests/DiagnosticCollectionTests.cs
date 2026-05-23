@@ -118,6 +118,32 @@ public sealed class DiagnosticCollectionTests
     }
 
     [Fact]
+    public void FilteringTruncatedSourceReportsKnownMatchesOnly()
+    {
+        JsonObject bucket = CreateBucket();
+        bucket[DiagnosticJsonNames.TotalCount] = 100;
+        bucket[DiagnosticJsonNames.Truncated] = true;
+        DiagnosticCollection collection = DiagnosticCollection.FromJsonObject(bucket);
+        DiagnosticQueryOptions options = new(
+            DefaultChunkSize,
+            FirstChunkIndex,
+            null,
+            false,
+            null,
+            "BP1044",
+            null,
+            null,
+            null,
+            null);
+
+        JsonObject result = collection.ToJsonObject(options, bucket);
+
+        Assert.Equal(SingleRowChunkSize, result[DiagnosticJsonNames.Count]!.GetValue<int>());
+        Assert.Equal(SingleRowChunkSize, result[DiagnosticJsonNames.FilteredCount]!.GetValue<int>());
+        Assert.True(result[DiagnosticJsonNames.Truncated]!.GetValue<bool>());
+    }
+
+    [Fact]
     public void ChunkSizeZeroReturnsAllRowsAsOneChunk()
     {
         DiagnosticCollection collection = DiagnosticCollection.FromJsonObject(CreateBucket());

@@ -49,17 +49,17 @@ internal sealed class DocumentDiagnosticsSnapshot
 
         if (Results.Errors is not null)
         {
-            json["errors"] = Results.Errors.ToDataJson();
+            json["errors"] = Results.Errors.ToCountSummaryJson();
         }
 
         if (Results.Warnings is not null)
         {
-            json["warnings"] = Results.Warnings.ToDataJson();
+            json["warnings"] = Results.Warnings.ToCountSummaryJson();
         }
 
         if (Results.Messages is not null)
         {
-            json["messages"] = Results.Messages.ToDataJson();
+            json["messages"] = Results.Messages.ToCountSummaryJson();
         }
 
         return json;
