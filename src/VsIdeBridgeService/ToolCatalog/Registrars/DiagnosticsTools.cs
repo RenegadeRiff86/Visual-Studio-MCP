@@ -762,56 +762,119 @@ internal static partial class ToolCatalog
                 workflow: [("errors", "Check errors after the user reports the build finished")],
                 related: [("build", "Build a specific project"), ("rebuild_solution", "Rebuild the solution")]));
 
-        yield return CreateBuildTool(
-            "rebuild_solution",
-            "Rebuild the active solution explicitly. Use this when you want the solution-wide rebuild command by name. By default it " +
-            "starts in the background and returns immediately. Set wait_for_completion=true to wait for completion. Set " +
-            "errors_only=true only when waiting.",
-            "rebuild-solution",
-            includeProject: false,
-            defaultWaitForCompletion: false,
+        yield return new("rebuild_solution",
+            "Rebuild the active solution explicitly. By default starts in the background and returns immediately. " +
+            "Set wait_for_completion=true to wait for completion; when a .iss installer script is detected in the " +
+            "solution directory the installer is compiled automatically after a successful rebuild. " +
+            "Set errors_only=true only when waiting.",
+            ObjectSchema(
+                Opt(Configuration, "Optional build configuration (e.g. Release)."),
+                Opt(Platform, "Optional build platform (e.g. x64)."),
+                OptBool(WaitForIntellisense, "Wait for IntelliSense readiness before building (default true)."),
+                OptBool(WaitForCompletion,
+                    $"When false, start the operation and return immediately (default false). When " +
+                    $"explicitly set to true, solution-wide builds wait up to {BuildExplicitWaitMilliseconds / 60_000} minutes for completion. " +
+                    $"When using the default value, they stop waiting after {BuildCourtesyWaitMilliseconds / 1_000} seconds and prompt the " +
+                    "model to ask the user before waiting longer."),
+                OptBool(RequireCleanDiagnostics, "When false, bypasses the pre-build dirty-diagnostics guard (default true)."),
+                OptBool(ErrorsOnly, "When true, return the build summary plus only error rows."),
+                OptInt(Max, "Max error rows to return when errors_only is true (default 50).")),
+            Diagnostics,
+            async (id, args, bridge) =>
+            {
+                JsonObject response = await ExecuteBuildToolAsync(
+                    id, args, bridge, "rebuild_solution", "rebuild-solution",
+                    includeProject: false, defaultWaitForCompletion: false).ConfigureAwait(false);
+
+                // After a successful, complete rebuild, auto-compile the Inno Setup installer
+                // if one is present relative to the solution root (bridge project only).
+                await TryAppendInstallerResultAsync(id, args, bridge, response).ConfigureAwait(false);
+
+                return BridgeResult(response);
+            },
             searchHints: BuildSearchHints(
                 workflow: [("errors", "Check errors after rebuilding")],
                 related: [("rebuild", "Generic rebuild"), (BuildSolutionTool, "Build without cleaning")]));
 
-        yield return new(BuildErrorsTool,
-            "Build the active solution through Visual Studio and return only compiler errors as structured JSON. " +
-            "Equivalent to build_solution with errors_only=true. " +
-            "Use build/build_solution for the full build response including warnings and messages.",
-            ObjectSchema(
-                Opt(Project, "Project name to build (e.g. VsIdeBridgeInstaller). Omit to build the entire solution."),
-                Opt(Configuration, "Optional build configuration (e.g. Release)."),
-                Opt(Platform, "Optional build platform (e.g. x64)."),
-                OptBool(RequireCleanDiagnostics, "When false, bypasses the pre-build dirty-diagnostics guard (default true)."),
-                OptInt(Max, "Max error rows to return (default 20).")),
-            Diagnostics,
-            async (id, args, bridge) =>
+        yield return CreateBuildErrorsTool();
+    }
+
+    private static ToolEntry CreateBuildErrorsTool() => new(BuildErrorsTool,
+        "Build the active solution through Visual Studio and return only compiler errors as structured JSON. " +
+        "Equivalent to build_solution with errors_only=true. " +
+        "Use build/build_solution for the full build response including warnings and messages.",
+        ObjectSchema(
+            Opt(Project, "Project name to build (e.g. VsIdeBridgeInstaller). Omit to build the entire solution."),
+            Opt(Configuration, "Optional build configuration (e.g. Release)."),
+            Opt(Platform, "Optional build platform (e.g. x64)."),
+            OptBool(RequireCleanDiagnostics, "When false, bypasses the pre-build dirty-diagnostics guard (default true)."),
+            OptInt(Max, "Max error rows to return (default 20).")),
+        Diagnostics,
+        async (id, args, bridge) =>
+        {
+            string buildArgs = Build(
+                (Project, OptionalString(args, Project)),
+                (Configuration, OptionalString(args, Configuration)),
+                (Platform, OptionalString(args, Platform)),
+                (WaitForCompletionHyphen, "true"),
+                BoolArg(WaitForIntellisenseHyphen, args, WaitForIntellisense, true, true),
+                BoolArg("require-clean-diagnostics", args, RequireCleanDiagnostics, true, true));
+
+            JsonObject response = await bridge.SendAsync(id, "build", buildArgs).ConfigureAwait(false);
+
+            JsonObject diagnosticsSnapshot = await bridge.DocumentDiagnostics
+                .QueueRefreshAndWaitForSnapshotAsync("build-errors-post-build", clearCached: true)
+                .ConfigureAwait(false);
+            response["diagnosticsSnapshot"] = diagnosticsSnapshot;
+
+            JsonObject? errorDiagnostics = await TryCaptureErrorDiagnosticsAsync(id, args, bridge).ConfigureAwait(false);
+            if (errorDiagnostics is not null)
             {
-                string buildArgs = Build(
-                    (Project, OptionalString(args, Project)),
-                    (Configuration, OptionalString(args, Configuration)),
-                    (Platform, OptionalString(args, Platform)),
-                    (WaitForCompletionHyphen, "true"),
-                    BoolArg(WaitForIntellisenseHyphen, args, WaitForIntellisense, true, true),
-                    BoolArg("require-clean-diagnostics", args, RequireCleanDiagnostics, true, true));
+                response["errorDiagnostics"] = errorDiagnostics;
+            }
+            response["errorsOnly"] = true;
+            return BridgeResult(response);
+        },
+        searchHints: BuildSearchHints(
+            workflow: [(ReadFileTool, "Read the file with the build error"), ("goto_definition", "Navigate to the error location"), ("apply_diff", "Fix the error")],
+            related: [("errors", "Check IDE error list instead"), (BuildSolutionTool, "Build solution with full output")]));
 
-                JsonObject response = await bridge.SendAsync(id, "build", buildArgs).ConfigureAwait(false);
+    /// <summary>
+    /// After a successful, waited rebuild, compiles the Inno Setup installer when a .iss file is
+    /// found relative to the solution root. Silently skips when the file does not exist (non-bridge
+    /// solutions). Appends <c>installerResult</c> or a warning to <paramref name="response"/>.
+    /// </summary>
+    private static async Task TryAppendInstallerResultAsync(
+        JsonNode? id,
+        JsonObject? args,
+        BridgeConnection bridge,
+        JsonObject response)
+    {
+        bool buildSucceeded = response["Success"]?.GetValue<bool>() ?? false;
+        bool courtesyWaitExceeded = response["Data"]?["courtesyWaitExceeded"]?.GetValue<bool>() ?? false;
+        bool waitForCompletion = OptionalBool(args, WaitForCompletion, false);
+        if (!waitForCompletion || !buildSucceeded || courtesyWaitExceeded)
+        {
+            return;
+        }
 
-                JsonObject diagnosticsSnapshot = await bridge.DocumentDiagnostics
-                    .QueueRefreshAndWaitForSnapshotAsync("build-errors-post-build", clearCached: true)
-                    .ConfigureAwait(false);
-                response["diagnosticsSnapshot"] = diagnosticsSnapshot;
+        string solutionDir = ServiceToolPaths.ResolveSolutionDirectory(bridge);
+        string issPath = System.IO.Path.Combine(solutionDir, "installer", "inno", "vs-ide-bridge.iss");
+        if (!System.IO.File.Exists(issPath))
+        {
+            return;
+        }
 
-                JsonObject? errorDiagnostics = await TryCaptureErrorDiagnosticsAsync(id, args, bridge).ConfigureAwait(false);
-                if (errorDiagnostics is not null)
-                {
-                    response["errorDiagnostics"] = errorDiagnostics;
-                }
-                response["errorsOnly"] = true;
-                return BridgeResult(response);
-            },
-            searchHints: BuildSearchHints(
-                workflow: [(ReadFileTool, "Read the file with the build error"), ("goto_definition", "Navigate to the error location"), ("apply_diff", "Fix the error")],
-                related: [("errors", "Check IDE error list instead"), (BuildSolutionTool, "Build solution with full output")]));
+        string? configuration = OptionalString(args, Configuration);
+        try
+        {
+            JsonNode installerResult = await InnoSetupRunner.RunAsync(id, issPath, configuration).ConfigureAwait(false);
+            response["installerResult"] = installerResult.DeepClone();
+            AppendSummaryPrompt(response, "Installer compiled successfully after rebuild.");
+        }
+        catch (McpRequestException ex)
+        {
+            AppendResponseWarning(response, $"Installer compilation failed after rebuild: {ex.Message}");
+        }
     }
 }

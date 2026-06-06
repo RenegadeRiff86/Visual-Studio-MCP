@@ -650,9 +650,22 @@ internal sealed partial class DocumentService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        PostGoToDefinitionOnMainThread();
-        // PostExecCommand is asynchronous — give VS a moment to navigate.
-        await Task.Delay(500).ConfigureAwait(false);
+        // Suppress the "Cannot navigate to the symbol under the caret" dialog that Roslyn
+        // shows via INotificationService when navigation fails (e.g. cursor is on a keyword).
+        // The suppressor must be constructed and disposed on the UI thread.
+        GoToDefinitionDialogSuppressor suppressor = new();
+        try
+        {
+            PostGoToDefinitionOnMainThread();
+            // PostExecCommand is asynchronous — give VS a moment to navigate.
+            await Task.Delay(500).ConfigureAwait(false);
+        }
+        finally
+        {
+            // UnhookWindowsHookEx must be called from the same thread that installed the hook.
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            suppressor.Dispose();
+        }
     }
 
     private static void PostGoToDefinitionOnMainThread()
@@ -760,5 +773,87 @@ internal sealed partial class DocumentService
             ?? range["end_line"]?.Value<int?>()
             ?? line + after;
         return (file, startLine, endLine);
+    }
+
+    /// <summary>
+    /// Installs a thread-level WH_CBT hook that silently dismisses the
+    /// "Cannot navigate to the symbol under the caret" dialog Roslyn shows
+    /// when Go To Definition finds no navigable target at the caret position.
+    /// Must be constructed and disposed on the UI thread.
+    /// </summary>
+    private sealed class GoToDefinitionDialogSuppressor : IDisposable
+    {
+        private const int WH_CBT = 5;
+        private const int HCBT_ACTIVATE = 5;
+        private const uint WM_COMMAND = 0x0111;
+        private const int IDOK = 1;
+        private const string User32 = "user32.dll";
+
+        [DllImport(User32, SetLastError = true)]
+        private static extern IntPtr SetWindowsHookEx(int idHook, CbtProc lpfn, IntPtr hMod, uint dwThreadId);
+
+        [DllImport(User32, SetLastError = true)]
+        private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+        [DllImport(User32)]
+        private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+        [DllImport(User32, CharSet = CharSet.Unicode, SetLastError = false)]
+        private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+        [DllImport(User32, CharSet = CharSet.Unicode, SetLastError = false)]
+        private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+        [DllImport(User32)]
+        private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
+
+        private delegate IntPtr CbtProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+        private readonly CbtProc _proc; // Pinned delegate — must outlive the hook
+        private IntPtr _hook;
+
+        public GoToDefinitionDialogSuppressor()
+        {
+            _proc = HookProc;
+            _hook = SetWindowsHookEx(WH_CBT, _proc, IntPtr.Zero, GetCurrentThreadId());
+        }
+
+        private IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam)
+        {
+            if (nCode == HCBT_ACTIVATE)
+            {
+                StringBuilder classBuf = new(64);
+                GetClassName(wParam, classBuf, 64);
+
+                // #32770 is the standard Windows dialog-box class used by MessageBox
+                if (classBuf.ToString() == "#32770")
+                {
+                    StringBuilder titleBuf = new(256);
+                    GetWindowText(wParam, titleBuf, 256);
+                    string title = titleBuf.ToString();
+
+                    // Roslyn shows this dialog (EditorFeaturesResources.Go_to_Definition)
+                    // when navigation finds no target. Dismiss it silently.
+                    if (title.IndexOf("Go to Definition", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        PostMessage(wParam, WM_COMMAND, new IntPtr(IDOK), IntPtr.Zero);
+                    }
+                }
+            }
+
+            return CallNextHookEx(_hook, nCode, wParam, lParam);
+        }
+
+        public void Dispose()
+        {
+            if (_hook != IntPtr.Zero)
+            {
+                UnhookWindowsHookEx(_hook);
+                _hook = IntPtr.Zero;
+            }
+        }
     }
 }
