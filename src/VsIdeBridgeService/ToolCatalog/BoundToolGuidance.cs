@@ -7,8 +7,8 @@ internal static partial class ToolCatalog
     internal static string BoundSessionHint =>
         "A Visual Studio instance is bound. Prefer bridge MCP tools for this solution; use build, build_solution, " +
         "rebuild_solution, and build_errors to compile instead of running a build script in a shell, use git_restore instead of " +
-        "shell git checkout -- <path> for file restore, and use recommend_tools or list_tools_by_category when a needed tool is " +
-        "not visible.";
+        "shell git checkout -- <path> for file restore, use git_untrack instead of shell git rm --cached to stop tracking files, " +
+        "and use recommend_tools or list_tools_by_category when a needed tool is not visible.";
 
     internal static JsonObject BuildToolDiscoveryGuidance()
     {
@@ -41,6 +41,7 @@ internal static partial class ToolCatalog
             RecommendedTool("build_errors", "Build through Visual Studio and return compiler errors."),
             RecommendedTool("git_status", "Review repository state through the bridge before version-control changes."),
             RecommendedTool("git_restore", "Discard file changes through the bridge instead of shell git checkout -- <path>."),
+            RecommendedTool("git_untrack", "Stop tracking files (git rm --cached) through the bridge instead of shell git rm --cached."),
         ];
     }
 

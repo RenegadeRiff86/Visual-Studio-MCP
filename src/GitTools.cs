@@ -221,6 +221,24 @@ internal static partial class ToolCatalog
                 searchHints: BuildSearchHints(
                     related: [("git_restore", "Discard working-tree changes"), ("git_diff_staged", "Review staged changes before resetting"), ("git_status", "Check resulting state")]));
 
+            yield return new("git_untrack",
+                "Remove files from the git index without deleting them from disk (git rm --cached). " +
+                "Use this to stop tracking files that should be .gitignored.",
+                ObjectSchema(
+                    OptArr(Paths, "Array of file paths to untrack, e.g. [\"bin/\", \"obj/foo.cs\"]."),
+                    Opt("path", PathSingleAliasDesc)),
+                Git,
+                async (id, args, bridge) =>
+                {
+                    string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
+                    IEnumerable<string> paths = GetEffectivePathList(args);
+                    string[] gitArgs = ["rm", "--cached", "--", ..paths];
+                    return await GitRunner.RunArgumentsAsync(id, repo, gitArgs)
+                        .ConfigureAwait(false);
+                },
+                searchHints: BuildSearchHints(
+                    related: [("git_add", "Stage the file again"), (GitStatusTool, "Check resulting state"), ("git_restore", "Discard working-tree changes instead")]));
+
             yield return new(GitCommitTool,
                 "Create a commit with a message. Stage files with git_add first.",
                 ObjectSchema(Req(Message, "Commit message.")),

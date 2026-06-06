@@ -54,7 +54,10 @@ public sealed partial class ToolRegistry
                 "step out", "stack frame", "callstack", "call stack", "locals", "exception"),
             ContainsAny(normalizedTask,
                 "restore", "discard", "revert file", "checkout --", "git checkout --",
-                "corrupted file", "undo file"));
+                "corrupted file", "undo file"),
+            ContainsAny(normalizedTask,
+                "untrack", "git rm", "rm --cached", "stop tracking", "gitignore",
+                "git ignore", "exclude from git"));
     }
 
     private readonly record struct TaskProfile(
@@ -70,5 +73,6 @@ public sealed partial class ToolRegistry
         bool LooksLikeGitTask,
         bool LooksLikeNuGetTask,
         bool LooksLikeDebugTask,
-        bool LooksLikeRestoreTask);
+        bool LooksLikeRestoreTask,
+        bool LooksLikeUntrackTask);
 }

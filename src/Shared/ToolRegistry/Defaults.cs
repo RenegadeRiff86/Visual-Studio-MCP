@@ -51,6 +51,7 @@ public sealed partial class ToolRegistry
         "git_status",
         "git_diff_unstaged",
         "git_restore",
+        "git_untrack",
         "git_checkout",
         "git_branch_list",
         "git_add",

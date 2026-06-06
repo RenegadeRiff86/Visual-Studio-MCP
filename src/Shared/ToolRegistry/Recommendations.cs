@@ -60,9 +60,11 @@ public sealed partial class ToolRegistry
         }
         else if (profile.LooksLikeGitTask)
         {
-            workflowHint = profile.LooksLikeRestoreTask
-                ? "For restoring files in a bound solution, review git_status or git_diff_unstaged, then use git_restore with explicit paths instead of shell git checkout -- <path>."
-                : "For Git work, review status with git_status / git_diff_unstaged before staging with git_add and committing with git_commit.";
+            workflowHint = profile.LooksLikeUntrackTask
+                ? "To stop tracking files, use git_untrack (git rm --cached) through the bridge instead of shell git rm --cached; then update .gitignore."
+                : profile.LooksLikeRestoreTask
+                    ? "For restoring files in a bound solution, review git_status or git_diff_unstaged, then use git_restore with explicit paths instead of shell git checkout -- <path>."
+                    : "For Git work, review status with git_status / git_diff_unstaged before staging with git_add and committing with git_commit.";
         }
         else if (profile.LooksLikeDebugTask)
         {

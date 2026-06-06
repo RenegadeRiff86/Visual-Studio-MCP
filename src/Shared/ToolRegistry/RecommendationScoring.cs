@@ -4,6 +4,7 @@ public sealed partial class ToolRegistry
 {
     private const int StandardRecommendationScore = 45;
     private const int PrimaryRecommendationScore = 70;
+    private const int HighIntentScore = 80;
 
     private (int Score, string Reason) ScoreTool(ToolDefinition tool, TaskProfile profile)
     {
@@ -65,7 +66,7 @@ public sealed partial class ToolRegistry
 
         if (profile.LooksLikeExternalProcessTask && string.Equals(tool.Name, "shell_exec", StringComparison.OrdinalIgnoreCase))
         {
-            score += 80;
+            score += HighIntentScore;
             reason = ChooseReason(reason, "Run shell/Bash commands, scripts, tests, or lint tools");
         }
 
@@ -129,8 +130,14 @@ public sealed partial class ToolRegistry
 
         if (profile.LooksLikeRestoreTask && string.Equals(tool.Name, "git_restore", StringComparison.OrdinalIgnoreCase))
         {
-            score += 80;
+            score += HighIntentScore;
             reason = ChooseReason(reason, "Use bridge git_restore instead of shell git checkout -- <path>");
+        }
+
+        if (profile.LooksLikeUntrackTask && string.Equals(tool.Name, "git_untrack", StringComparison.OrdinalIgnoreCase))
+        {
+            score += HighIntentScore;
+            reason = ChooseReason(reason, "Use bridge git_untrack instead of shell git rm --cached");
         }
 
         return score;
@@ -270,7 +277,7 @@ public sealed partial class ToolRegistry
         }
         else
         {
-            score -= 80;
+            score -= HighIntentScore;
         }
 
         if (profile.LooksLikeBuildTask)
