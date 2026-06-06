@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.0.2
+
+- Added `git_untrack` tool: removes files from the git index without deleting them from disk (`git rm --cached`). Accepts a `paths` array or `path` string shorthand. Use this to stop tracking files that should be `.gitignored`. Wired into task-profile detection (`LooksLikeUntrackTask`) with keywords such as `untrack`, `git rm`, `rm --cached`, `stop tracking`, `gitignore`, and `exclude from git`; appears in `recommend_tools` results and `DefaultRecommendedGitToolNames`. Also mentioned in the bound-session hint so models know to prefer it over shell `git rm --cached`.
+- Fixed bridge silently re-binding to a different VS instance when the previously bound instance closes. `BridgeConnection.RetryAfterFailureAsync` now calls `VsDiscovery.IsProcessGone` after evicting the cached instance on a pipe failure. If the VS process has exited, a `SessionLostError` (-32005) is thrown with the label and PID of the closed instance and instructions to call `bridge_health` then `bind_solution` or `bind_instance` to reconnect — instead of silently auto-discovering and binding to whatever VS instance happens to be open next. Added `SessionLostError = -32005` to `BridgeConnectionDefaults` and `IsProcessGone(int processId)` helper to `VsDiscovery`.
+
 ## 3.0.1
 
 - Added `cmake_configure` tool: runs cmake to configure a project from a source directory. Accepts `preset` (uses `--preset`) or `build_dir` (uses `-S`/`-B`), plus optional `source_dir` (defaults to the bound solution's repository root), `extra_args` string array, and `timeout_seconds` (default 180). Resolves `cmake.exe` from PATH, VS-bundled locations (VS 2026, 2022, and 2019 across Enterprise/Professional/Community/BuildTools), and `C:\Program Files\CMake\bin`. Implemented via the new `CmakeRunner` helper (modelled after `GhRunner`) and registered in the `project` tool category.
