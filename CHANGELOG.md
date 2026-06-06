@@ -1,13 +1,10 @@
 # Changelog
 
-## 3.0.3
-
-- Fixed `set_version` tool silently claiming success when a version regex did not match a target file. `UpdateFile` in `SetVersionTool.cs` was unconditionally adding every existing file to the `updated_files` result, even when the regex found nothing to replace and no write occurred. The method now takes a `hasMatch` predicate; files whose pattern is not found are collected into a `skipped_files` list and surfaced as a `warning` in the tool output rather than being reported as updated.
-
 ## 3.0.2
 
 - Added `git_untrack` tool: removes files from the git index without deleting them from disk (`git rm --cached`). Accepts a `paths` array or `path` string shorthand. Use this to stop tracking files that should be `.gitignored`. Wired into task-profile detection (`LooksLikeUntrackTask`) with keywords such as `untrack`, `git rm`, `rm --cached`, `stop tracking`, `gitignore`, and `exclude from git`; appears in `recommend_tools` results and `DefaultRecommendedGitToolNames`. Also mentioned in the bound-session hint so models know to prefer it over shell `git rm --cached`.
 - Fixed bridge silently re-binding to a different VS instance when the previously bound instance closes. `BridgeConnection.RetryAfterFailureAsync` now calls `VsDiscovery.IsProcessGone` after evicting the cached instance on a pipe failure. If the VS process has exited, a `SessionLostError` (-32005) is thrown with the label and PID of the closed instance and instructions to call `bridge_health` then `bind_solution` or `bind_instance` to reconnect — instead of silently auto-discovering and binding to whatever VS instance happens to be open next. Added `SessionLostError = -32005` to `BridgeConnectionDefaults` and `IsProcessGone(int processId)` helper to `VsDiscovery`.
+- Fixed `set_version` tool silently claiming success when a version regex did not match a target file. `UpdateFile` in `SetVersionTool.cs` was unconditionally adding every existing file to the `updated_files` result, even when the regex found nothing to replace and no write occurred. The method now takes a `hasMatch` predicate; files whose pattern is not found are collected into a `skipped_files` list and surfaced as a `warning` in the tool output rather than being reported as updated.
 
 ## 3.0.1
 
