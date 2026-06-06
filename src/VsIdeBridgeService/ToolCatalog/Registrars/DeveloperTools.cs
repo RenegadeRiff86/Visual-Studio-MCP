@@ -1,3 +1,4 @@
+using System.IO;
 using VsIdeBridgeService.SystemTools;
 using static VsIdeBridgeService.SchemaHelpers;
 
@@ -43,5 +44,41 @@ internal static partial class ToolCatalog
             searchHints: BuildSearchHints(
                 workflow: [("build", "Rebuild after changing the version"), ("errors", "Check for version-related errors")],
                 related: [("bridge_log_summary", "Inspect bridge logs if release tooling misbehaves"), ("git_status", "Review version file changes")]));
+
+        yield return new("build_installer",
+            "Compile the VS IDE Bridge Inno Setup installer script (installer/inno/vs-ide-bridge.iss) " +
+            "using ISCC.exe. Produces installer/output/vs-ide-bridge-setup-{version}.exe. " +
+            "This developer tool is intended for the bridge codebase only. " +
+            "Build and rebuild the solution first, then call this to produce the installer.",
+            ObjectSchema(
+                Opt("configuration", "Build configuration to package: Release or Debug (default Release). Must match the configuration used to build the solution binaries."),
+                Opt("iss_file", "Solution-relative or absolute path to the .iss script (default installer/inno/vs-ide-bridge.iss)."),
+                OptInt("timeout_seconds", "Override the compile timeout in seconds (default 120)."))
+            ,
+            DeveloperToolsCategory,
+            async (id, args, bridge) =>
+            {
+                string solutionDirectory = ServiceToolPaths.ResolveSolutionDirectory(bridge);
+                string issRelative = args?["iss_file"]?.GetValue<string>()
+                    ?? System.IO.Path.Combine("installer", "inno", "vs-ide-bridge.iss");
+                string issPath = System.IO.Path.IsPathRooted(issRelative)
+                    ? issRelative
+                    : System.IO.Path.Combine(solutionDirectory, issRelative);
+
+                if (!System.IO.File.Exists(issPath))
+                    throw new McpRequestException(id, McpErrorCodes.InvalidParams,
+                        $"Installer script not found: {issPath}");
+
+                string? configuration = args?["configuration"]?.GetValue<string>();
+                int timeoutMs = (args?["timeout_seconds"]?.GetValue<int>() ?? 120) * 1000;
+                return await InnoSetupRunner.RunAsync(id, issPath, configuration, timeoutMs).ConfigureAwait(false);
+            },
+            aliases: ["compile_installer", "inno_build", "iscc", "make_installer"],
+            tags: ["bridge", "installer", "inno", "iscc", "developer", "release"],
+            summary: "Compile the bridge installer using Inno Setup (ISCC.exe).",
+            destructive: true,
+            searchHints: BuildSearchHints(
+                workflow: [("set_version", "Bump version before building the installer"), ("rebuild_solution", "Build solution binaries first"), ("git_status", "Verify release state before compiling")],
+                related: [("set_version", "Update version numbers in all release files")]));
     }
 }
