@@ -184,6 +184,15 @@ internal sealed class BridgeConnection
         BridgeInstance? evicted = ClearCached();
         _ = evicted ?? throw new McpRequestException(id, CommError, $"VS bridge communication failed: {ex.Message}");
 
+        // If the VS process is gone this is a session loss, not a transient pipe error.
+        // Don't silently re-discover and bind to a different VS instance.
+        if (VsDiscovery.IsProcessGone(evicted.ProcessId))
+        {
+            throw new McpRequestException(id, SessionLostError,
+                $"VS session lost: '{evicted.Label}' (pid {evicted.ProcessId}) has closed. " +
+                $"Call bridge_health to see available instances, then use bind_solution or bind_instance to reconnect.");
+        }
+
         try
         {
             JsonObject response = await SendPipeAsync(request, ignoreSolutionHint, timeoutProfile).ConfigureAwait(false);

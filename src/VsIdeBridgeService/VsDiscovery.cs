@@ -547,6 +547,25 @@ internal static class VsDiscovery
         }
     }
 
+    internal static bool IsProcessGone(int processId)
+    {
+        if (processId <= 0)
+            return false;
+        try
+        {
+            using Process process = Process.GetProcessById(processId);
+            return process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return true; // Process not found — definitely gone.
+        }
+        catch
+        {
+            return false; // Unknown state — don't assume the session is lost.
+        }
+    }
+
     private static bool HasUsableMainWindow(Process process)
     {
         try

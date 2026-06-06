@@ -13,4 +13,5 @@ internal static class BridgeConnectionDefaults
     public const int TimeoutError = -32002;
     public const int CommError = -32003;
     public const int UnboundError = -32004;
+    public const int SessionLostError = -32005;
 }
