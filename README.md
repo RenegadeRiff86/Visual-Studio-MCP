@@ -6,7 +6,7 @@ VS IDE Bridge connects your AI assistant to Visual Studio. Once connected, your 
 
 - Windows 10 or Windows 11
 - Visual Studio 2022 (17.x) or Visual Studio 2026 (18.x)
-- An AI assistant with MCP support (Claude Code, Cursor, LM Studio, or any MCP-compatible client)
+- An AI assistant with MCP support (Claude Code, Grok, Cursor, Codex, LM Studio, or any MCP-compatible client)
 
 ## Installation
 
@@ -36,7 +36,47 @@ Restart Claude Code after adding. Visual Studio must be running before you start
 
 If the server stops appearing after a reinstall, re-run the command above and restart Claude Code.
 
-### HTTP (Codex, Cursor, and most web-based clients)
+### Grok / xAI (stdio)
+
+Grok uses the same stdio transport as Claude Code. Visual Studio must be running before you start a session.
+
+**Grok CLI** — register globally via command or config:
+
+```bash
+grok mcp add vs-ide-bridge --command "C:\Program Files\VsIdeBridge\service\VsIdeBridgeService.exe" --args mcp-server
+```
+
+```toml
+# ~/.grok/config.toml
+[mcp_servers.vs-ide-bridge]
+command = 'C:\Program Files\VsIdeBridge\service\VsIdeBridgeService.exe'
+args = ["mcp-server"]
+enabled = true
+```
+
+Verify the connection with `grok mcp doctor vs-ide-bridge`, then restart Grok.
+
+**Grok in Cursor** — use the Cursor stdio config in the section below. Restart Cursor after adding the server.
+
+### Cursor (stdio)
+
+Cursor can also connect directly over stdio using the same service executable:
+
+```json
+// ~/.cursor/mcp.json
+{
+  "mcpServers": {
+    "vs-ide-bridge": {
+      "command": "C:\\Program Files\\VsIdeBridge\\service\\VsIdeBridgeService.exe",
+      "args": ["mcp-server"]
+    }
+  }
+}
+```
+
+Restart Cursor after adding. Visual Studio must be running before you start a session.
+
+### HTTP (Codex and most web-based clients)
 
 The bridge listens on `http://localhost:43117/` by default.
 
