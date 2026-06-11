@@ -94,11 +94,17 @@ internal sealed class BreakpointService
         };
     }
 
-    public async Task<JObject> RemoveBreakpointAsync(DTE2 dte, string filePath, int line)
+    public async Task<JObject> RemoveBreakpointAsync(DTE2 dte, string? filePath, int line, string? function = null)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        return !string.IsNullOrWhiteSpace(function)
+            ? RemoveFunctionBreakpoints(dte, function!)
+            : RemoveLocationBreakpoints(dte, ResolveBreakpointPath(filePath!), line);
+    }
 
-        string normalizedPath = ResolveBreakpointPath(filePath);
+    private static JObject RemoveLocationBreakpoints(DTE2 dte, string normalizedPath, int line)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
         Breakpoint[] matches = [..dte.Debugger.Breakpoints
             .Cast<Breakpoint>()
             .Where(breakpoint => MatchesBreakpointLocation(breakpoint, normalizedPath, line))];
@@ -134,26 +140,68 @@ internal sealed class BreakpointService
         };
     }
 
-    public async Task<JObject> EnableBreakpointAsync(DTE2 dte, string filePath, int line)
+    public async Task<JObject> EnableBreakpointAsync(DTE2 dte, string? filePath, int line, string? function = null)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        string normalizedPath = ResolveBreakpointPath(filePath);
+        if (!string.IsNullOrWhiteSpace(function))
+        {
+            Breakpoint functionBp = FindFunctionBreakpointOrThrow(dte, function!);
+            functionBp.Enabled = true;
+            return SerializeBreakpoint(functionBp);
+        }
+
+        string normalizedPath = ResolveBreakpointPath(filePath!);
         Breakpoint bp = FindBreakpoint(dte, normalizedPath, line)
             ?? throw CreateBreakpointNotFound(normalizedPath, line);
         bp.Enabled = true;
         return SerializeBreakpoint(bp, normalizedPath, line);
     }
 
-    public async Task<JObject> DisableBreakpointAsync(DTE2 dte, string filePath, int line)
+    public async Task<JObject> DisableBreakpointAsync(DTE2 dte, string? filePath, int line, string? function = null)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        string normalizedPath = ResolveBreakpointPath(filePath);
+        if (!string.IsNullOrWhiteSpace(function))
+        {
+            Breakpoint functionBp = FindFunctionBreakpointOrThrow(dte, function!);
+            functionBp.Enabled = false;
+            return SerializeBreakpoint(functionBp);
+        }
+
+        string normalizedPath = ResolveBreakpointPath(filePath!);
         Breakpoint bp = FindBreakpoint(dte, normalizedPath, line)
             ?? throw CreateBreakpointNotFound(normalizedPath, line);
         bp.Enabled = false;
         return SerializeBreakpoint(bp, normalizedPath, line);
+    }
+
+    private static Breakpoint FindFunctionBreakpointOrThrow(DTE2 dte, string function)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        return dte.Debugger.Breakpoints.Cast<Breakpoint>().FirstOrDefault(bp => FunctionMatches(bp, function))
+            ?? throw new CommandErrorException(
+                "not_found",
+                $"No breakpoint found for function '{function}'. Call list_breakpoints to see active breakpoints, then retry.");
+    }
+
+    private static JObject RemoveFunctionBreakpoints(DTE2 dte, string function)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        Breakpoint[] functionMatches = [..dte.Debugger.Breakpoints
+            .Cast<Breakpoint>()
+            .Where(breakpoint => FunctionMatches(breakpoint, function))];
+        foreach (var breakpoint in functionMatches)
+        {
+            breakpoint.Delete();
+        }
+
+        return new JObject
+        {
+            ["removedCount"] = functionMatches.Length,
+            ["remainingCount"] = dte.Debugger.Breakpoints.Count,
+            ["function"] = function,
+        };
     }
 
     public async Task<JObject> EnableAllBreakpointsAsync(DTE2 dte)

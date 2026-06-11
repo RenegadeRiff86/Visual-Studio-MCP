@@ -73,11 +73,8 @@ internal static class DebuggerFrameContextResolver
             throw new CommandErrorException("thread_not_found", $"{threadHint} was not found in the current debug program. Call debug_threads to list all active thread IDs, then retry with a valid thread_id.");
         }
 
-        StackFrame? targetFrame = ResolveStackFrame(targetThread, requestedFrameIndex);
-        if (targetFrame is null)
-        {
-            throw new CommandErrorException("frame_not_found", $"Frame index '{requestedFrameIndex}' was not found on thread '{targetThread.ID}'. Call debug_stack with that thread_id to list valid zero-based frame indexes.");
-        }
+        StackFrame targetFrame = ResolveStackFrame(targetThread, requestedFrameIndex)
+            ?? throw new CommandErrorException("frame_not_found", $"Frame index '{requestedFrameIndex}' was not found on thread '{targetThread.ID}'. Call debug_stack with that thread_id to list valid zero-based frame indexes.");
 
         return new DebuggerFrameContext(targetThread, targetFrame, targetThread.ID, requestedFrameIndex);
     }
@@ -250,7 +247,7 @@ internal static class DebuggerFrameContextResolver
                 System.Reflection.BindingFlags.InvokeMethod,
                 binder: null,
                 target: target,
-                args: Array.Empty<object>());
+                args: []);
         }
         catch (MissingMethodException ex)
         {

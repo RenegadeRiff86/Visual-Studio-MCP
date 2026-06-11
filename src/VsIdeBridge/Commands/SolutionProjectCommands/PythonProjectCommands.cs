@@ -254,7 +254,7 @@ internal static partial class SolutionProjectCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            string interpreterPath = PathNormalization.NormalizeFilePath(args.GetRequiredString("path"));
+            string interpreterPath = PathNormalization.NormalizeFilePath(context.Handles.ResolveFilePath(args.GetRequiredString("path")));
             string? projectQuery = args.GetString("project");
             if (!File.Exists(interpreterPath))
             {
@@ -291,7 +291,7 @@ internal static partial class SolutionProjectCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            string requestedFilePath = PathNormalization.NormalizeFilePath(args.GetRequiredString("file"));
+            string requestedFilePath = PathNormalization.NormalizeFilePath(context.Handles.ResolveFilePath(args.GetRequiredString("file")));
             string? projectQuery = args.GetString("project");
             if (!File.Exists(requestedFilePath))
             {

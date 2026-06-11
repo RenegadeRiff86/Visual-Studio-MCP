@@ -33,7 +33,7 @@ internal sealed class DebuggerService
         string? frameFilePath = null;
         int frameLineNumber = 0;
         int frameColumnNumber = 0;
-        int? currentThreadId = null;
+        int? currentThreadId;
 
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
         _exceptionTracker.EnsureSubscribed(dte);

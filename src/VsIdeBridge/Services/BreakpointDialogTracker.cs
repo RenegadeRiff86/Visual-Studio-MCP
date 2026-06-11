@@ -121,7 +121,7 @@ internal sealed class BreakpointDialogTracker
 
         private readonly CbtProc _proc; // Pinned delegate -- must outlive the hook
         private readonly Action<string> _onCapture;
-        private IntPtr _hook;
+        private readonly IntPtr _hook;
 
         public DialogSuppressor(Action<string> onCapture)
         {

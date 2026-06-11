@@ -74,8 +74,9 @@ internal static class BreakpointCommands
         {
             Newtonsoft.Json.Linq.JObject breakpointInfo = await context.Runtime.BreakpointService.RemoveBreakpointAsync(
                 context.Dte,
-                args.GetRequiredString("file"),
-                args.GetInt32("line", 1)).ConfigureAwait(true);
+                args.GetString("file"),
+                args.GetInt32("line", 1),
+                args.GetString("function")).ConfigureAwait(true);
 
             return new CommandExecutionResult(FormatBreakpointCountMessage("Removed", breakpointInfo["removedCount"]), breakpointInfo);
         }
@@ -100,8 +101,9 @@ internal static class BreakpointCommands
         {
             Newtonsoft.Json.Linq.JObject breakpointInfo = await context.Runtime.BreakpointService.EnableBreakpointAsync(
                 context.Dte,
-                args.GetRequiredString("file"),
-                args.GetInt32("line", 1)).ConfigureAwait(true);
+                args.GetString("file"),
+                args.GetInt32("line", 1),
+                args.GetString("function")).ConfigureAwait(true);
 
             return new CommandExecutionResult("Breakpoint enabled.", breakpointInfo);
         }
@@ -115,8 +117,9 @@ internal static class BreakpointCommands
         {
             Newtonsoft.Json.Linq.JObject breakpointInfo = await context.Runtime.BreakpointService.DisableBreakpointAsync(
                 context.Dte,
-                args.GetRequiredString("file"),
-                args.GetInt32("line", 1)).ConfigureAwait(true);
+                args.GetString("file"),
+                args.GetInt32("line", 1),
+                args.GetString("function")).ConfigureAwait(true);
 
             return new CommandExecutionResult("Breakpoint disabled.", breakpointInfo);
         }

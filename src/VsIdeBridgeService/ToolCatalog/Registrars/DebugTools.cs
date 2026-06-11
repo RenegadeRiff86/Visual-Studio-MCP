@@ -15,9 +15,11 @@ internal static partial class ToolCatalog
     private const string ThreadIdArg = "thread_id";
     private const string FrameIndexArg = "frame_index";
     private const string TimeoutMsArg = "timeout_ms";
+    private const string FunctionArg = "function";
 
     private static IEnumerable<ToolEntry> DebugTools() =>
         BreakpointTools()
+            .Concat(BreakpointToggleTools())
             .Concat(DebugSessionTools());
 
     private static IEnumerable<ToolEntry> BreakpointTools()
@@ -29,7 +31,7 @@ internal static partial class ToolCatalog
                 Opt(FileArg, FileDesc + " Omit when using 'function'."),
                 OptInt(Line, LineDesc + " Used with 'file'."),
                 OptInt(Column, "1-based column (default 1)."),
-                Opt("function", "Function/symbol name to break on (e.g. 'Slic3r::FanMover::_process_gcode_line' or 'MyClass::Method'). Binds by symbol so it survives line shifts; use instead of file/line."),
+                Opt(FunctionArg, "Function/symbol name to break on (e.g. 'Slic3r::FanMover::_process_gcode_line' or 'MyClass::Method'). Binds by symbol so it survives line shifts; use instead of file/line."),
                 Opt("condition", "Breakpoint condition expression."),
                 Opt("condition_type", "How to interpret 'condition': 'when-true' (default) or 'changed'."),
                 OptInt("hit_count", "Hit count target (default 0 = always break)."),
@@ -41,7 +43,7 @@ internal static partial class ToolCatalog
                 (FileArg, OptionalString(a, FileArg)),
                 (Line, OptionalText(a, Line)),
                 (Column, OptionalText(a, Column)),
-                ("function", OptionalString(a, "function")),
+                (FunctionArg, OptionalString(a, FunctionArg)),
                 ("condition", OptionalString(a, "condition")),
                 ("condition-type", OptionalString(a, "condition_type")),
                 ("hit-count", OptionalText(a, "hit_count")),
@@ -61,12 +63,16 @@ internal static partial class ToolCatalog
                 related: [("clear_breakpoints", "Remove all breakpoints"), ("remove_breakpoint", "Remove a specific breakpoint")]));
 
         yield return BridgeTool("remove_breakpoint",
-            "Remove a breakpoint by file and line number.",
-            ObjectSchema(Req(FileArg, FileDesc), ReqInt(Line, LineDesc)),
+            "Remove a breakpoint by file and line, OR by function/symbol name (use 'function' for a breakpoint that was set with 'function').",
+            ObjectSchema(
+                Opt(FileArg, FileDesc + " Omit when using 'function'."),
+                OptInt(Line, LineDesc + " Used with 'file'."),
+                Opt(FunctionArg, "Function/symbol name of the breakpoint to remove (as passed to set_breakpoint).")),
             "remove-breakpoint",
             a => Build(
                 (FileArg, OptionalString(a, FileArg)),
-                (Line, OptionalText(a, Line))),
+                (Line, OptionalText(a, Line)),
+                (FunctionArg, OptionalString(a, FunctionArg))),
             Debug,
             searchHints: BuildSearchHints(
                 related: [("clear_breakpoints", "Remove all breakpoints at once"), (ListBreakpointsTool, "List remaining breakpoints"), ("disable_breakpoint", "Disable instead of remove")]));
@@ -76,26 +82,37 @@ internal static partial class ToolCatalog
             EmptySchema(), "clear-breakpoints", _ => Empty(), Debug,
             searchHints: BuildSearchHints(
                 related: [(ListBreakpointsTool, "Verify breakpoints were cleared"), ("set_breakpoint", "Set a new breakpoint")]));
+    }
 
+    private static IEnumerable<ToolEntry> BreakpointToggleTools()
+    {
         yield return BridgeTool("enable_breakpoint",
-            "Enable a disabled breakpoint at file/line.",
-            ObjectSchema(Req(FileArg, FileDesc), ReqInt(Line, LineDesc)),
+            "Enable a disabled breakpoint at file/line, OR by function/symbol name.",
+            ObjectSchema(
+                Opt(FileArg, FileDesc + " Omit when using 'function'."),
+                OptInt(Line, LineDesc + " Used with 'file'."),
+                Opt(FunctionArg, "Function/symbol name of the breakpoint to enable (as passed to set_breakpoint).")),
             "enable-breakpoint",
             a => Build(
                 (FileArg, OptionalString(a, FileArg)),
-                (Line, OptionalText(a, Line))),
+                (Line, OptionalText(a, Line)),
+                (FunctionArg, OptionalString(a, FunctionArg))),
             Debug,
             searchHints: BuildSearchHints(
                 workflow: [(DebugStartTool, "Start debugging after enabling")],
                 related: [("disable_breakpoint", "Disable a breakpoint"), (ListBreakpointsTool, "List all breakpoints")]));
 
         yield return BridgeTool("disable_breakpoint",
-            "Disable a breakpoint at file/line.",
-            ObjectSchema(Req(FileArg, FileDesc), ReqInt(Line, LineDesc)),
+            "Disable a breakpoint at file/line, OR by function/symbol name.",
+            ObjectSchema(
+                Opt(FileArg, FileDesc + " Omit when using 'function'."),
+                OptInt(Line, LineDesc + " Used with 'file'."),
+                Opt(FunctionArg, "Function/symbol name of the breakpoint to disable (as passed to set_breakpoint).")),
             "disable-breakpoint",
             a => Build(
                 (FileArg, OptionalString(a, FileArg)),
-                (Line, OptionalText(a, Line))),
+                (Line, OptionalText(a, Line)),
+                (FunctionArg, OptionalString(a, FunctionArg))),
             Debug,
             searchHints: BuildSearchHints(
                 related: [("enable_breakpoint", "Re-enable the breakpoint"), (ListBreakpointsTool, "List all breakpoints"), ("remove_breakpoint", "Permanently remove instead")]));
