@@ -256,8 +256,6 @@ internal static partial class ToolCatalog
             return BridgeResult(await ApplyMultipleEditsAsync(id, args, editsArray, bridge).ConfigureAwait(false));
 
         // Single-edit form.
-        string? fileArg = args?["file"]?.GetValue<string>();
-
         ApplyDiffRequest request;
         try
         {
@@ -330,7 +328,7 @@ internal static partial class ToolCatalog
                 related: [("activate_document", "Switch to an already-open tab"), ("find_files", "Find the file path first")]));
 
         yield return BridgeTool("close_file",
-            "Close one editor tab by exact FileArg path (preferred) or caption query. Use when you have the FileArg path.",
+            "Close one editor tab by exact FileArg path (preferred) or caption query. Use after list_tabs when trimming inactive tabs.",
             ObjectSchema(Opt(FileArg, "FileArg path to close."), Opt(Query, "Tab caption query.")),
             "close-file",
             a => Build(
@@ -340,7 +338,8 @@ internal static partial class ToolCatalog
                 related: [("close_document", "Close by caption query"), ("close_others", "Close all except active"), (ListTabsTool, "List open tabs first")]));
 
         yield return BridgeTool("close_document",
-            "Close editor tabs matching a caption/name query. Omit query with all: true to close every open tab.",
+            "Close editor tabs matching a caption/name query. Use to trim inactive tabs when list_tabs reports more than 7 open tabs. " +
+            "Omit query with all: true to close every open tab.",
             ObjectSchema(Opt(Query, "Tab caption or name fragment. Omit with all: true to close all open tabs."), OptBool("all", "Close all matching tabs, or all open tabs when query is omitted.")),
             "close-document",
             a => Build(
@@ -350,7 +349,7 @@ internal static partial class ToolCatalog
                 related: [("close_file", "Close by exact path"), ("close_others", "Close all except active"), (ListTabsTool, "List open tabs first")]));
 
         yield return BridgeTool("close_others",
-            "Close all tabs except the active tab.",
+            "Close all tabs except the active tab. Use this when list_tabs shows more than 7 tabs and only the active file is still needed.",
             ObjectSchema(OptBool("save", "Save before closing (default false).")),
             "close-others",
             a => Build(BoolArg("save", a, "save", false, true)),
@@ -385,11 +384,11 @@ internal static partial class ToolCatalog
                 related: [(ListTabsTool, "List open editor tabs")]));
 
         yield return BridgeTool(ListTabsTool,
-            "List open editor tabs and identify the active tab.",
+            "List open editor tabs, identify the active tab, and report whether more than 7 tabs are open.",
             EmptySchema(), "list-tabs", _ => Empty(), Documents,
             searchHints: BuildSearchHints(
-                workflow: [(ReadFileTool, "Read one of the listed files"), ("activate_document", "Switch to a tab")],
-                related: [("list_documents", "List open documents")]));
+                workflow: [("close_file", "Close inactive tabs by path"), ("close_document", "Close matching inactive tabs"), ("close_others", "Keep only the active tab")],
+                related: [("list_documents", "List open documents"), (ReadFileTool, "Read one of the listed files"), ("activate_document", "Switch to a tab")]));
 
         yield return BridgeTool("activate_document",
             "Activate an open document tab by query.",

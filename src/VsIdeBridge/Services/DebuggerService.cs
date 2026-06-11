@@ -16,6 +16,9 @@ internal sealed class DebuggerService
 {
     private const int DefaultBreakWaitTimeoutMilliseconds = 10_000;
     private const int DebuggerPollIntervalMilliseconds = 100;
+    private const string NotInBreakModeCode = "not_in_break_mode";
+
+    private readonly DebuggerExceptionTracker _exceptionTracker = new();
 
     public async Task<JObject> GetStateAsync(DTE2 dte)
     {
@@ -29,14 +32,19 @@ internal sealed class DebuggerService
         string? frameFilePath = null;
         int frameLineNumber = 0;
         int frameColumnNumber = 0;
+        int? currentThreadId = null;
 
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        _exceptionTracker.EnsureSubscribed(dte);
         Debugger debugger = dte.Debugger;
         dbgDebugMode mode = debugger.CurrentMode;
         modeString = mode.ToString();
         processName = debugger.CurrentProcess?.Name ?? string.Empty;
         processes = GetDebuggedProcessNames(debugger);
-        threads = GetThreadSummaries(debugger.CurrentProgram);
+        currentThreadId = mode == dbgDebugMode.dbgBreakMode
+            ? DebuggerFrameContextResolver.TryGetCurrentThread(debugger)?.ID
+            : null;
+        threads = GetThreadSummaries(debugger.CurrentProgram, currentThreadId);
         if (mode == dbgDebugMode.dbgBreakMode && debugger.CurrentStackFrame is StackFrame frame)
         {
             frameFunctionName = frame.FunctionName ?? string.Empty;
@@ -50,6 +58,7 @@ internal sealed class DebuggerService
             ["mode"] = modeString,
             ["currentProcess"] = processName,
             ["processes"] = processes,
+            ["currentThreadId"] = currentThreadId,
             ["threads"] = threads,
         };
 
@@ -68,6 +77,7 @@ internal sealed class DebuggerService
             }
         }
 
+        _exceptionTracker.AddLastException(debugState);
         return debugState;
     }
 
@@ -76,11 +86,15 @@ internal sealed class DebuggerService
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
         Debugger debugger = dte.Debugger;
-        JArray threads = GetThreadSummaries(debugger.CurrentProgram);
+        int? currentThreadId = debugger.CurrentMode == dbgDebugMode.dbgBreakMode
+            ? DebuggerFrameContextResolver.TryGetCurrentThread(debugger)?.ID
+            : null;
+        JArray threads = GetThreadSummaries(debugger.CurrentProgram, currentThreadId);
         return new JObject
         {
             ["mode"] = debugger.CurrentMode.ToString(),
             ["count"] = threads.Count,
+            ["currentThreadId"] = currentThreadId,
             ["threads"] = threads,
         };
     }
@@ -90,22 +104,30 @@ internal sealed class DebuggerService
         // Collect stack frames on the main thread, then build the JObject off it.
         string modeString;
         int targetThreadId;
-        List<(string function, string language, int? line, string? file)> rawFrames;
+        List<(int index, string function, string language, int? line, string? file)> rawFrames;
 
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
         Debugger debugger = dte.Debugger;
         if (debugger.CurrentMode != dbgDebugMode.dbgBreakMode)
         {
-            throw new CommandErrorException("not_in_break_mode", "Debugger is not currently in break mode. Call debug_break to pause execution first, then retry.");
+            throw new CommandErrorException(NotInBreakModeCode, "Debugger is not currently in break mode. Call debug_break to pause execution first, then retry.");
         }
 
         modeString = debugger.CurrentMode.ToString();
-        Thread targetThread = ResolveThread(debugger.CurrentProgram, threadId)
+        // When no thread_id is supplied, default to the thread VS has selected
+        // (debugger.CurrentThread) -- on a breakpoint hit this is the thread that
+        // actually stopped. ResolveThread(..., null) would instead return the first
+        // thread in the program (usually the main/UI thread), which is almost never
+        // the one at the breakpoint.
+        Thread targetThread = (threadId.HasValue
+                ? ResolveThread(debugger.CurrentProgram, threadId)
+                : DebuggerFrameContextResolver.TryGetCurrentThread(debugger) ?? ResolveThread(debugger.CurrentProgram, null))
             ?? throw new CommandErrorException("thread_not_found", $"Thread '{threadId}' was not found in the current debug program. Call debug_threads to list all active thread IDs, then retry with a valid thread_id.");
         targetThreadId = targetThread.ID;
         int limit = maxFrames <= 0 ? 100 : maxFrames;
         rawFrames = [];
 
+        int frameIndex = 0;
         foreach (StackFrame stackFrame in targetThread.StackFrames)
         {
             if (rawFrames.Count >= limit)
@@ -138,15 +160,17 @@ internal sealed class DebuggerService
                 System.Diagnostics.Debug.WriteLine($"Stack frame file read failed: {ex.Message}");
             }
 
-            rawFrames.Add((func, lang, line, file));
+            rawFrames.Add((frameIndex, func, lang, line, file));
+            frameIndex++;
         }
         await Task.Yield(); // release the main thread
 
         JArray frames = [];
-        foreach ((string func, string lang, int? lineNum, string? fileStr) in rawFrames)
+        foreach ((int index, string func, string lang, int? lineNum, string? fileStr) in rawFrames)
         {
             JObject frameInfo = new()
             {
+                ["index"] = index,
                 ["function"] = func,
                 ["language"] = lang,
             };
@@ -166,21 +190,27 @@ internal sealed class DebuggerService
         };
     }
 
-    public async Task<JObject> GetLocalsAsync(DTE2 dte, int maxItems)
+    public async Task<JObject> GetLocalsAsync(DTE2 dte, int maxItems, int? threadId, int? frameIndex, int expandDepth = 0, int maxChildren = 50)
     {
         // Collect locals on the main thread, then build the response off it.
         string modeString;
+        int targetThreadId;
+        int targetFrameIndex;
+        string frameFunction;
+        string frameLanguage;
         JArray locals = [];
         string? enumerationWarning = null;
 
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
         Debugger debugger = dte.Debugger;
-        if (debugger.CurrentMode != dbgDebugMode.dbgBreakMode || debugger.CurrentStackFrame is not StackFrame frame)
-        {
-            throw new CommandErrorException("not_in_break_mode", "Debugger is not currently in break mode. Call debug_break to pause execution first, then retry.");
-        }
+        DebuggerFrameContext frameContext = DebuggerFrameContextResolver.Resolve(debugger, threadId, frameIndex);
+        StackFrame frame = frameContext.Frame;
 
         modeString = debugger.CurrentMode.ToString();
+        targetThreadId = frameContext.ThreadId;
+        targetFrameIndex = frameContext.FrameIndex;
+        frameFunction = frame.FunctionName ?? string.Empty;
+        frameLanguage = frame.Language ?? string.Empty;
         int limit = maxItems <= 0 ? 200 : maxItems;
         int count = 0;
 
@@ -189,7 +219,7 @@ internal sealed class DebuggerService
             foreach (Expression expression in frame.Locals)
             {
                 if (count >= limit) break;
-                locals.Add(SerializeExpression(expression));
+                locals.Add(SerializeExpression(expression, expandDepth, maxChildren));
                 count++;
             }
         }
@@ -202,6 +232,13 @@ internal sealed class DebuggerService
         JObject result = new()
         {
             ["mode"] = modeString,
+            ["threadId"] = targetThreadId,
+            ["frameIndex"] = targetFrameIndex,
+            ["frame"] = new JObject
+            {
+                ["function"] = frameFunction,
+                ["language"] = frameLanguage,
+            },
             ["count"] = locals.Count,
             ["locals"] = locals,
         };
@@ -289,45 +326,92 @@ internal sealed class DebuggerService
         }
     }
 
-    public async Task<JObject> EvaluateWatchAsync(DTE2 dte, string expression, int timeoutMs)
+    public async Task<JObject> EvaluateWatchAsync(DTE2 dte, string expression, int timeoutMs, int? threadId, int? frameIndex, int expandDepth = 0, int maxChildren = 50, string? outFile = null)
     {
         // Perform the evaluation on the main thread; build the result object off it.
         JObject expressionData;
         int timeout;
+        DebuggerFrameContext? frameContext = null;
 
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
         Debugger debugger = dte.Debugger;
         if (debugger.CurrentMode != dbgDebugMode.dbgBreakMode)
         {
-            throw new CommandErrorException("not_in_break_mode", "Debugger is not currently in break mode. Call debug_break to pause execution first, then retry.");
+            throw new CommandErrorException(NotInBreakModeCode, "Debugger is not currently in break mode. Call debug_break to pause execution first, then retry.");
+        }
+
+        if (threadId.HasValue || frameIndex.HasValue)
+        {
+            frameContext = DebuggerFrameContextResolver.Resolve(debugger, threadId, frameIndex);
+            DebuggerFrameContextResolver.Activate(frameContext);
         }
 
         timeout = timeoutMs <= 0 ? 1000 : timeoutMs;
         Expression debugResult = debugger.GetExpression(expression, true, timeout);
-        expressionData = SerializeExpression(debugResult);
+        expressionData = SerializeExpression(debugResult, expandDepth, maxChildren);
         await Task.Yield(); // release the main thread
 
         expressionData["expression"] = expression;
         expressionData["timeoutMs"] = timeout;
+        if (frameContext != null)
+        {
+            expressionData["threadId"] = frameContext.ThreadId;
+            expressionData["frameIndex"] = frameContext.FrameIndex;
+            expressionData["frame"] = new JObject
+            {
+                ["function"] = frameContext.Function,
+                ["language"] = frameContext.Language,
+            };
+        }
+
+        if (!string.IsNullOrWhiteSpace(outFile))
+        {
+            // Write the full (possibly large, fully expanded) result to disk and return a
+            // compact pointer instead of flooding the response -- handy for big containers or
+            // long string values. Pass an absolute path; relative paths resolve against the
+            // Visual Studio process working directory.
+            string json = expressionData.ToString(Newtonsoft.Json.Formatting.Indented);
+            try
+            {
+                System.IO.File.WriteAllText(outFile, json);
+                expressionData.Remove("members");
+                expressionData["savedTo"] = outFile;
+                expressionData["savedBytes"] = json.Length;
+            }
+            catch (System.IO.IOException ex)
+            {
+                expressionData["saveError"] = ex.Message;
+            }
+            catch (System.UnauthorizedAccessException ex)
+            {
+                expressionData["saveError"] = ex.Message;
+            }
+        }
         return expressionData;
     }
 
     public async Task<JObject> GetExceptionsAsync(DTE2 dte)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-        (JArray groups, string reason) = CollectExceptionGroupsOnUiThread(dte.Debugger);
+        (JArray groups, string reason, string lastBreakReason, bool brokeOnException) =
+            CollectExceptionInfoOnUiThread(dte.Debugger);
         await Task.Yield(); // release the main thread
 
-        return new JObject
+        JObject result = new()
         {
             ["count"] = groups.Count,
             ["groups"] = groups,
             ["featureNotSupported"] = groups.Count == 0 && !string.IsNullOrWhiteSpace(reason),
             ["reason"] = reason,
+            ["lastBreakReason"] = lastBreakReason,
+            ["brokeOnException"] = brokeOnException,
         };
+
+        _exceptionTracker.AddLastException(result);
+        return result;
     }
 
-    private static (JArray Groups, string Reason) CollectExceptionGroupsOnUiThread(Debugger debugger)
+    private static (JArray Groups, string Reason, string LastBreakReason, bool BrokeOnException) CollectExceptionInfoOnUiThread(Debugger debugger)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -346,12 +430,30 @@ internal sealed class DebuggerService
             reason = ex.Message;
         }
 
-        return (groups, reason);
+        // Exception-group settings are not exposed by the EnvDTE engine, but the reason the
+        // debugger last entered break mode IS -- report it so callers can tell whether the
+        // current break was a breakpoint, a thrown/unhandled exception, a step, or a user pause.
+        string lastBreakReason = string.Empty;
+        bool brokeOnException = false;
+        try
+        {
+            dbgEventReason breakReason = debugger.LastBreakReason;
+            lastBreakReason = breakReason.ToString();
+            brokeOnException = breakReason is dbgEventReason.dbgEventReasonExceptionThrown
+                or dbgEventReason.dbgEventReasonExceptionNotHandled;
+        }
+        catch (COMException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"LastBreakReason read failed: {ex.Message}");
+        }
+
+        return (groups, reason, lastBreakReason, brokeOnException);
     }
 
     public async Task<JObject> StartAsync(DTE2 dte, bool waitForBreak, int timeoutMs)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        _exceptionTracker.PrepareForRun(dte);
         dte.Debugger.Go(false);
         return waitForBreak
             ? await WaitForBreakOrDesignModeAsync(dte, timeoutMs, throwOnTimeout: true).ConfigureAwait(true)
@@ -375,6 +477,7 @@ internal sealed class DebuggerService
     public async Task<JObject> ContinueAsync(DTE2 dte, bool waitForBreak, int timeoutMs)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        _exceptionTracker.PrepareForRun(dte);
         dte.Debugger.Go(false);
         return waitForBreak
             ? await WaitForBreakOrDesignModeAsync(dte, timeoutMs, throwOnTimeout: true).ConfigureAwait(true)
@@ -384,6 +487,7 @@ internal sealed class DebuggerService
     public async Task<JObject> StepOverAsync(DTE2 dte, int timeoutMs)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        _exceptionTracker.PrepareForRun(dte);
         EnsureBreakMode(dte);
         dte.Debugger.StepOver(false);
         return await WaitForBreakOrDesignModeAsync(dte, timeoutMs, throwOnTimeout: true).ConfigureAwait(true);
@@ -392,6 +496,7 @@ internal sealed class DebuggerService
     public async Task<JObject> StepIntoAsync(DTE2 dte, int timeoutMs)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        _exceptionTracker.PrepareForRun(dte);
         EnsureBreakMode(dte);
         dte.Debugger.StepInto(false);
         return await WaitForBreakOrDesignModeAsync(dte, timeoutMs, throwOnTimeout: true).ConfigureAwait(true);
@@ -400,6 +505,7 @@ internal sealed class DebuggerService
     public async Task<JObject> StepOutAsync(DTE2 dte, int timeoutMs)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        _exceptionTracker.PrepareForRun(dte);
         EnsureBreakMode(dte);
         dte.Debugger.StepOut(false);
         return await WaitForBreakOrDesignModeAsync(dte, timeoutMs, throwOnTimeout: true).ConfigureAwait(true);
@@ -411,7 +517,7 @@ internal sealed class DebuggerService
 
         if (dte.Debugger.CurrentMode != dbgDebugMode.dbgBreakMode)
         {
-            throw new CommandErrorException("not_in_break_mode", "Debugger is not currently in break mode. Call debug_break to pause execution first, then retry.");
+            throw new CommandErrorException(NotInBreakModeCode, "Debugger is not currently in break mode. Call debug_break to pause execution first, then retry.");
         }
     }
 
@@ -428,7 +534,7 @@ internal sealed class DebuggerService
         return items;
     }
 
-    private static JArray GetThreadSummaries(Program? program)
+    private static JArray GetThreadSummaries(Program? program, int? currentThreadId = null)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -444,6 +550,9 @@ internal sealed class DebuggerService
             {
                 ["id"] = thread.ID,
                 ["name"] = thread.Name ?? string.Empty,
+                // True for the thread VS has selected -- on a breakpoint hit this is the
+                // thread that actually stopped, so callers can jump straight to it.
+                ["isCurrent"] = currentThreadId.HasValue && thread.ID == currentThreadId.Value,
             });
         }
 
@@ -470,7 +579,7 @@ internal sealed class DebuggerService
         return null;
     }
 
-    private static JObject SerializeExpression(Expression expression)
+    private static JObject SerializeExpression(Expression expression, int expandDepth = 0, int maxChildren = 50)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -482,13 +591,49 @@ internal sealed class DebuggerService
             ["isValid"] = expression.IsValidValue,
         };
 
+        // Capture DataMembers once -- it is a COM property whose evaluation can be costly,
+        // and re-reading it would re-walk the child tree.
+        Expressions? dataMembers = null;
+        int memberCount;
         try
         {
-            expressionData["dataMemberCount"] = expression.DataMembers?.Count ?? 0;
+            dataMembers = expression.DataMembers;
+            memberCount = dataMembers?.Count ?? 0;
         }
         catch
         {
-            expressionData["dataMemberCount"] = 0;
+            memberCount = 0;
+        }
+        expressionData["dataMemberCount"] = memberCount;
+
+        // When expandDepth > 0, recurse into the expression's child members -- the same
+        // natvis-expanded tree the VS Watch window shows. This lets callers inspect the
+        // contents of a container or struct (e.g. every element of a std::vector/list and
+        // its fields) instead of only the summary string. maxChildren caps each level so a
+        // large container can't flood the response; expandDepth bounds the nesting.
+        if (expandDepth > 0 && dataMembers != null && memberCount > 0)
+        {
+            JArray members = [];
+            try
+            {
+                int emitted = 0;
+                foreach (Expression member in dataMembers)
+                {
+                    if (emitted >= maxChildren)
+                    {
+                        expressionData["membersTruncated"] = true;
+                        expressionData["membersOmitted"] = memberCount - emitted;
+                        break;
+                    }
+                    members.Add(SerializeExpression(member, expandDepth - 1, maxChildren));
+                    emitted++;
+                }
+            }
+            catch (COMException ex)
+            {
+                expressionData["membersError"] = ex.Message;
+            }
+            expressionData["members"] = members;
         }
 
         return expressionData;

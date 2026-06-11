@@ -48,6 +48,24 @@ public sealed class McpToolSurfaceTests
         Assert.True(versionTool.Definition.Mutating);
     }
 
+    [Theory]
+    [InlineData("git_log_range", true, false)]
+    [InlineData("git_compare_refs", true, false)]
+    [InlineData("git_diff_range", true, false)]
+    [InlineData("git_rebase", false, true)]
+    [InlineData("git_rebase_continue", false, true)]
+    [InlineData("git_rebase_abort", false, true)]
+    [InlineData("git_rebase_skip", false, true)]
+    public void GitCategoryIncludesRangeCompareAndRebaseTools(string toolName, bool expectedReadOnly, bool expectedMutating)
+    {
+        ToolExecutionRegistry registry = ToolCatalog.CreateRegistry();
+
+        Assert.True(registry.TryGet(toolName, out ToolEntry? entry));
+        Assert.Equal("git", entry.Definition.Category);
+        Assert.Equal(expectedReadOnly, entry.Definition.ReadOnly);
+        Assert.Equal(expectedMutating, entry.Definition.Mutating);
+    }
+
     [Fact]
     public void DefaultCategoriesIncludeDeveloperTools()
     {
@@ -118,6 +136,31 @@ public sealed class McpToolSurfaceTests
         Assert.Equal("call_hierarchy", tool["name"]!.GetValue<string>());
         Assert.Contains(aliases, alias => alias?.GetValue<string>() == "caller_hierarchy");
         Assert.DoesNotContain(aliases, alias => alias?.GetValue<string>() == "call_hierachy");
+    }
+
+    [Fact]
+    public void DebugInspectionHelpExposesThreadFrameAndTimeoutOptions()
+    {
+        JsonObject localsHelp = ToolCatalog.CreateRegistry().Definitions.BuildToolHelp("debug_locals");
+        JsonObject localsTool = Assert.IsType<JsonObject>(localsHelp["tool"]);
+        JsonObject localsSchema = Assert.IsType<JsonObject>(localsTool["inputSchema"]);
+        JsonObject localsProperties = Assert.IsType<JsonObject>(localsSchema["properties"]);
+        string localsDescription = localsTool["description"]!.GetValue<string>();
+
+        Assert.Contains("selected stack frame", localsDescription);
+        Assert.Contains("thread_id", localsProperties.Select(property => property.Key));
+        Assert.Contains("frame_index", localsProperties.Select(property => property.Key));
+
+        JsonObject watchHelp = ToolCatalog.CreateRegistry().Definitions.BuildToolHelp("debug_watch");
+        JsonObject watchTool = Assert.IsType<JsonObject>(watchHelp["tool"]);
+        JsonObject watchSchema = Assert.IsType<JsonObject>(watchTool["inputSchema"]);
+        JsonObject watchProperties = Assert.IsType<JsonObject>(watchSchema["properties"]);
+        string watchDescription = watchTool["description"]!.GetValue<string>();
+
+        Assert.Contains("selected thread and stack frame", watchDescription);
+        Assert.Contains("thread_id", watchProperties.Select(property => property.Key));
+        Assert.Contains("frame_index", watchProperties.Select(property => property.Key));
+        Assert.Contains("timeout_ms", watchProperties.Select(property => property.Key));
     }
 
     [Fact]

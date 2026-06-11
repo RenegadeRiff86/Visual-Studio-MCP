@@ -133,7 +133,7 @@ internal static partial class SearchNavigationCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
-            string filePath = args.GetRequiredString("file");
+            string filePath = context.Handles.ResolveFilePath(args.GetRequiredString("file"));
             JObject commandData = await context.Runtime.DocumentService
                 .ReloadDocumentAsync(filePath)
                 .ConfigureAwait(true);

@@ -31,7 +31,19 @@ public sealed partial class ToolRegistry
         }
 
         string workflowHint = string.Empty;
-        if (profile.LooksLikeEditTask)
+        if (profile.LooksLikeGitTask)
+        {
+            workflowHint = profile.LooksLikeUntrackTask
+                ? "To stop tracking files, use git_untrack (git rm --cached) through the bridge instead of shell git rm --cached; then update .gitignore."
+                : profile.LooksLikeRestoreTask
+                    ? "For restoring files in a bound solution, review git_status or git_diff_unstaged, then use git_restore with explicit paths instead of shell git checkout -- <path>."
+                    : profile.LooksLikeRebaseTask
+                        ? "For rebasing, fetch first, compare refs with git_compare_refs / git_log_range, then use git_rebase and finish conflicts with git_rebase_continue, git_rebase_abort, or git_rebase_skip."
+                        : profile.LooksLikeCompareRefsTask
+                            ? "For upstream comparisons, use git_compare_refs for ahead/behind counts, git_log_range for commits, and git_diff_range for changed files or patches."
+                            : "For Git work, review status with git_status / git_diff_unstaged before staging with git_add and committing with git_commit.";
+        }
+        else if (profile.LooksLikeEditTask)
         {
             if (includesReadFile && includesApplyDiff)
             {
@@ -57,14 +69,6 @@ public sealed partial class ToolRegistry
         else if (profile.LooksLikeNuGetTask)
         {
             workflowHint = "For package management, use nuget_add_package / nuget_remove_package against a specific project; review query_project_references afterward.";
-        }
-        else if (profile.LooksLikeGitTask)
-        {
-            workflowHint = profile.LooksLikeUntrackTask
-                ? "To stop tracking files, use git_untrack (git rm --cached) through the bridge instead of shell git rm --cached; then update .gitignore."
-                : profile.LooksLikeRestoreTask
-                    ? "For restoring files in a bound solution, review git_status or git_diff_unstaged, then use git_restore with explicit paths instead of shell git checkout -- <path>."
-                    : "For Git work, review status with git_status / git_diff_unstaged before staging with git_add and committing with git_commit.";
         }
         else if (profile.LooksLikeDebugTask)
         {

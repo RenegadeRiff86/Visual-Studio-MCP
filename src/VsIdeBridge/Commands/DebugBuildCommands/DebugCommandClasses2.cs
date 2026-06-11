@@ -42,7 +42,11 @@ internal static partial class DebugBuildCommands
         {
             JObject commandData = await context.Runtime.DebuggerService.GetLocalsAsync(
                 context.Dte,
-                args.GetInt32("max", 200)).ConfigureAwait(true);
+                args.GetInt32("max", 200),
+                args.GetNullableInt32("thread-id"),
+                args.GetNullableInt32("frame-index"),
+                args.GetInt32("expand-depth", 0),
+                args.GetInt32("max-children", 50)).ConfigureAwait(true);
             return CreateCapturedResult("local variable(s)", commandData);
         }
     }
@@ -67,7 +71,12 @@ internal static partial class DebugBuildCommands
             JObject commandData = await context.Runtime.DebuggerService.EvaluateWatchAsync(
                 context.Dte,
                 args.GetRequiredString("expression"),
-                args.GetInt32("timeout-ms", 1000)).ConfigureAwait(true);
+                args.GetInt32("timeout-ms", 1000),
+                args.GetNullableInt32("thread-id"),
+                args.GetNullableInt32("frame-index"),
+                args.GetInt32("expand-depth", 0),
+                args.GetInt32("max-children", 50),
+                args.GetString("out-file")).ConfigureAwait(true);
             return new CommandExecutionResult("Debugger watch expression evaluated.", commandData);
         }
     }

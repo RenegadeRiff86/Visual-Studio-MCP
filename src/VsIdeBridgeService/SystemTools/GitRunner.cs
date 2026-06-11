@@ -65,10 +65,13 @@ internal static class GitRunner
             CreateNoWindow = true,
         };
 
-        // Prevent git from opening a credential dialog or SSH prompt.
+        // Prevent git from opening a credential dialog, SSH prompt, pager, or editor.
         psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
         psi.Environment["GIT_NO_PAGER"] = "1";
         psi.Environment["GIT_ASKPASS"] = "echo";
+        psi.Environment["GIT_EDITOR"] = "true";
+        psi.Environment["GIT_SEQUENCE_EDITOR"] = "true";
+        psi.Environment["GIT_MERGE_AUTOEDIT"] = "no";
 
         return psi;
     }

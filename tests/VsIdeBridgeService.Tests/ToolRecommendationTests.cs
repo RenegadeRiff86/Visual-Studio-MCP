@@ -20,6 +20,32 @@ public sealed class ToolRecommendationTests
     }
 
     [Fact]
+    public void GitRebaseTaskRecommendsBridgeRebaseWorkflow()
+    {
+        JsonObject recommendation = ToolCatalog.CreateRegistry().Definitions.RecommendTools(
+            "fetch upstream then rebase this branch onto upstream master");
+        JsonArray tools = Assert.IsType<JsonArray>(recommendation["recommendations"]);
+
+        Assert.Contains(tools, item => HasName(item, "git_rebase"));
+        Assert.Contains(tools, item => HasName(item, "git_compare_refs"));
+        Assert.Contains(tools, item => HasName(item, "git_log_range"));
+        Assert.Contains("git_rebase", recommendation["workflowHint"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void GitCompareTaskRecommendsBridgeRangeTools()
+    {
+        JsonObject recommendation = ToolCatalog.CreateRegistry().Definitions.RecommendTools(
+            "compare my branch with upstream and show ahead behind commits and changed files");
+        JsonArray tools = Assert.IsType<JsonArray>(recommendation["recommendations"]);
+
+        Assert.Contains(tools, item => HasName(item, "git_compare_refs"));
+        Assert.Contains(tools, item => HasName(item, "git_log_range"));
+        Assert.Contains(tools, item => HasName(item, "git_diff_range"));
+        Assert.Contains("git_compare_refs", recommendation["workflowHint"]!.GetValue<string>());
+    }
+
+    [Fact]
     public void BuildDiagnosticsTaskPrioritizesBuildAndDiagnosticTools()
     {
         JsonObject recommendation = ToolCatalog.CreateRegistry().Definitions.RecommendTools(
@@ -76,15 +102,20 @@ public sealed class ToolRecommendationTests
     }
 
     [Fact]
-    public void BoundSessionGuidanceIncludesDiscoveryAndGitRestoreTools()
+    public void BoundSessionGuidanceIncludesGitAndTabManagementTools()
     {
         JsonObject target = [];
         ToolCatalog.AttachBoundSessionGuidance(target);
         JsonArray tools = Assert.IsType<JsonArray>(target["recommendedTools"]);
+        string guidance = target["modelGuidance"]!.GetValue<string>();
 
         Assert.Contains(tools, item => HasName(item, "list_tools"));
         Assert.Contains(tools, item => HasName(item, "git_restore"));
-        Assert.Contains("git_restore", target["modelGuidance"]!.GetValue<string>());
+        Assert.Contains(tools, item => HasName(item, "list_tabs"));
+        Assert.Contains(tools, item => HasName(item, "close_others"));
+        Assert.Contains("git_restore", guidance);
+        Assert.Contains("more than 7 tabs", guidance);
+        Assert.Contains("close_file", guidance);
     }
 
     private static bool HasName(JsonNode? item, string name)

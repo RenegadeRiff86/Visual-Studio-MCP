@@ -49,6 +49,12 @@ public sealed partial class ToolRegistry
     private static readonly string[] DefaultRecommendedGitToolNames =
     [
         "git_status",
+        "git_compare_refs",
+        "git_log_range",
+        "git_diff_range",
+        "git_rebase",
+        "git_rebase_continue",
+        "git_rebase_abort",
         "git_diff_unstaged",
         "git_restore",
         "git_untrack",

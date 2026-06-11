@@ -248,8 +248,12 @@ internal static class McpServerMode
             "Never output JSON in your response to the user unless the task itself is about writing or editing JSON — " +
             "tool results arrive as JSON internally but must always be translated into plain language before replying. " +
             surfaceText +
+            "Visual Studio tab pressure rule: call list_tabs when the active instance may be sluggish or after opening several files. " +
+            "If list_tabs reports more than 7 open tabs, close inactive tabs you no longer need with close_file, close_document, or close_others. " +
             "In lazy mode, ALL bridge tools must be called through call_tool with an arguments object — " +
-            "including apply_diff, read_file, read_file_batch, write_file, find_text, find_text_batch, search_symbols, file_outline, errors, build, build_solution, rebuild_solution, build_errors, and git_status. " +
+            "including apply_diff, read_file, read_file_batch, write_file, list_tabs, close_file, close_document, close_others, " +
+            "find_text, find_text_batch, search_symbols, file_outline, errors, build, build_solution, rebuild_solution, " +
+            "build_errors, and git_status. " +
             "Use the wrapper shape " + CallToolPrefix + "\"name\":\"read_file\",\"arguments\":{\"file\":\"h:2\",\"start_line\":260,\"end_line\":360}}); " +
             "never pass raw strings as arguments. " +
             "Exact parameter names for the most-used tools (do NOT guess — use tool_help if unsure): " +

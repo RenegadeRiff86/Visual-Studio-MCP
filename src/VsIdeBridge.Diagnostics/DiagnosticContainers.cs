@@ -411,10 +411,41 @@ public sealed class DiagnosticCollection
             // sampleMessage, sampleFile, sampleCode) is all a model needs to orient itself.
             // To drill into a specific group's rows, call again with a path/code/project filter
             // and no group_by.
-            JsonArray groupArray = sorted.GroupBy(options);
-            target[DiagnosticJsonNames.Groups] = groupArray;
+            JsonArray allGroups = sorted.GroupBy(options);
+            int groupCount = allGroups.Count;
+
+            // Paginate the groups themselves by chunk_size / chunk_index.
+            // The row-level pagination written above is based on individual rows, so override
+            // every pagination field here so the caller sees group-level pagination.
+            int effectiveChunkSize = options.ChunkSize;
+            int groupChunkCount = groupCount == 0 ? 0
+                : effectiveChunkSize == 0 ? 1
+                : (int)Math.Ceiling(groupCount / (double)effectiveChunkSize);
+            int groupChunkStart = effectiveChunkSize == 0 ? 0
+                : Math.Min(options.ChunkIndex * effectiveChunkSize, groupCount);
+            int groupChunkEnd = effectiveChunkSize == 0 ? groupCount
+                : Math.Min(groupChunkStart + effectiveChunkSize, groupCount);
+            bool groupHasMoreChunks = effectiveChunkSize > 0 && options.ChunkIndex + 1 < groupChunkCount;
+
+            JsonArray pagedGroups = [];
+            foreach (JsonNode? node in allGroups.Skip(groupChunkStart).Take(groupChunkEnd - groupChunkStart))
+            {
+                pagedGroups.Add(node?.DeepClone());
+            }
+
+            target[DiagnosticJsonNames.Groups] = pagedGroups;
             target[DiagnosticJsonNames.Rows] = new JsonArray();
-            target[DiagnosticJsonNames.Count] = groupArray.Count;
+            target[DiagnosticJsonNames.Count] = groupCount;
+            target[DiagnosticJsonNames.TotalCount] = groupCount;
+            target[DiagnosticJsonNames.FilteredCount] = groupCount;
+            target[DiagnosticJsonNames.ChunkIndex] = options.ChunkIndex;
+            target[DiagnosticJsonNames.ChunkSize] = effectiveChunkSize;
+            target[DiagnosticJsonNames.ChunkCount] = groupChunkCount;
+            target[DiagnosticJsonNames.ChunkStart] = groupChunkStart;
+            target[DiagnosticJsonNames.ChunkEnd] = groupChunkEnd;
+            target[DiagnosticJsonNames.HasMoreChunks] = groupHasMoreChunks;
+            target[DiagnosticJsonNames.Truncated] = groupHasMoreChunks;
+            target.Remove(DiagnosticJsonNames.ChunkOutOfRange);
         }
     }
 

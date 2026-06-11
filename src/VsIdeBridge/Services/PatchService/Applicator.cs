@@ -9,6 +9,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using VsIdeBridge.Tooling.Patches;
 using VsIdeBridge.Infrastructure;
 using VsIdeBridge.Diagnostics;
 using VsIdeBridge.Shared;
@@ -166,6 +167,21 @@ internal sealed partial class PatchService
         ref int matchedLineCount,
         ref int mutationLineCount)
     {
+        if (TryApplySimpleInlineReplace(
+                existingLines,
+                resultLines,
+                ref sourceIndex,
+                block,
+                repeatBlock,
+                ref firstChangedLine,
+                ref firstChangeCaptured,
+                changedRanges,
+                ref matchedLineCount,
+                ref mutationLineCount))
+        {
+            return;
+        }
+
         bool matchedAtLeastOnce = false;
         while (TryGetNextSearchBlockStart(path, existingLines, sourceIndex, block, matchedAtLeastOnce, out int targetIndex))
         {
@@ -191,6 +207,93 @@ internal sealed partial class PatchService
                 break;
             }
         }
+    }
+
+    private static bool TryApplySimpleInlineReplace(
+        IReadOnlyList<string> existingLines,
+        List<string> resultLines,
+        ref int sourceIndex,
+        SearchBlock block,
+        bool replaceAll,
+        ref int firstChangedLine,
+        ref bool firstChangeCaptured,
+        List<ChangedRange> changedRanges,
+        ref int matchedLineCount,
+        ref int mutationLineCount)
+    {
+        if (!TryGetSimpleInlineReplacement(block, out string oldText, out string newText))
+        {
+            return false;
+        }
+
+        List<int> matchedLineIndexes = [];
+        for (int lineIndex = Math.Max(0, sourceIndex); lineIndex < existingLines.Count; lineIndex++)
+        {
+            if (existingLines[lineIndex].IndexOf(oldText, StringComparison.Ordinal) < 0)
+            {
+                continue;
+            }
+
+            matchedLineIndexes.Add(lineIndex);
+            if (!replaceAll)
+            {
+                break;
+            }
+        }
+
+        if (matchedLineIndexes.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (int targetIndex in matchedLineIndexes)
+        {
+            CopyLinesToTarget(existingLines, resultLines, ref sourceIndex, targetIndex);
+            string updatedLine = SimpleReplacePatch.ReplaceInline(
+                existingLines[targetIndex],
+                oldText,
+                newText,
+                replaceAll,
+                out int replacementCount);
+
+            if (replacementCount == 0)
+            {
+                continue;
+            }
+
+            CaptureFirstSearchBlockChange(resultLines, ref firstChangedLine, ref firstChangeCaptured);
+            int changedLine = Math.Max(1, resultLines.Count + 1);
+            resultLines.Add(updatedLine);
+            sourceIndex = targetIndex + 1;
+            matchedLineCount++;
+            mutationLineCount += replacementCount * 2;
+            changedRanges.Add(new ChangedRange { StartLine = changedLine, EndLine = changedLine });
+        }
+
+        return true;
+    }
+
+    private static bool TryGetSimpleInlineReplacement(SearchBlock block, out string oldText, out string newText)
+    {
+        oldText = string.Empty;
+        newText = string.Empty;
+
+        if (!SimpleReplacePatch.IsHeader(block.Header)
+            || block.Lines.Any(line => line.Kind == ' '))
+        {
+            return false;
+        }
+
+        List<string> oldLines = [.. block.Lines.Where(line => line.Kind == '-').Select(line => line.Text)];
+        List<string> newLines = [.. block.Lines.Where(line => line.Kind == '+').Select(line => line.Text)];
+        if (oldLines.Count != 1 || newLines.Count != 1)
+        {
+            return false;
+        }
+
+        oldText = oldLines[0];
+        newText = newLines[0];
+        return oldText.Length > 0;
     }
 
     private static bool TryGetNextSearchBlockStart(

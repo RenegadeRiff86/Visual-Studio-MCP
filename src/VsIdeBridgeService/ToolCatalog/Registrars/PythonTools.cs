@@ -80,28 +80,7 @@ internal static partial class ToolCatalog
                 workflow: [("python_env_info", "Get version and site-packages for a discovered interpreter"), ("python_set_project_env", "Set the active VS Python interpreter")],
                 related: [("python_eval", "Run a quick expression"), ("python_exec", "Execute a snippet")]));
 
-        yield return new("python_env_info",
-            "Return version, executable path, and site-packages directory for a Python interpreter.",
-            ObjectSchema(Req(Path, "Absolute path to the python.exe / python3 interpreter.")),
-            Python,
-            async (id, args, bridge) =>
-            {
-                string python = RequireArg(id, args, Path);
-                string script =
-                    "import sys, json; " +
-                    "import site; " +
-                    "print(json.dumps({" +
-                    "'executable': sys.executable," +
-                    "'version': sys.version," +
-                    "'version_info': list(sys.version_info[:3])," +
-                    "'site_packages': site.getsitepackages() if hasattr(site,'getsitepackages') else []" +
-                    "}))";
-                return await RunPythonScriptAsync(id, python, script, timeoutMs: 15_000)
-                    .ConfigureAwait(false);
-            },
-            searchHints: BuildSearchHints(
-                workflow: [(PythonListPackagesTool, "List installed packages for this interpreter")],
-                related: [(PythonListEnvsTool, "Discover available interpreters"), ("python_create_env", "Create a new virtual environment")]));
+        yield return BuildPythonEnvInfoTool();
 
         yield return new(PythonListPackagesTool,
             "List installed packages in a Python environment using pip list --format=json.",
@@ -117,6 +96,37 @@ internal static partial class ToolCatalog
             searchHints: BuildSearchHints(
                 workflow: [("python_install_package", "Install a missing package"), ("python_remove_package", "Remove an unused package")],
                 related: [("python_env_info", "Get interpreter version info"), ("scan_project_dependencies", "Check NuGet and project-level dependency health")]));
+    }
+
+    private static ToolEntry BuildPythonEnvInfoTool()
+    {
+        return new("python_env_info",
+            "Return version, executable path, and site-packages directory for a Python interpreter.",
+            ObjectSchema(
+                Req(Path, "Absolute path to the python.exe / python3 interpreter."),
+                OptInt("timeout_ms", "Timeout in milliseconds for slow interpreter startup (default 30000, max 120000).")),
+            Python,
+            async (id, args, bridge) =>
+            {
+                string python = RequireArg(id, args, Path);
+                int timeoutMs = args?["timeout_ms"]?.GetValue<int?>() ?? 30_000;
+                timeoutMs = Math.Max(1_000, Math.Min(timeoutMs, 120_000));
+                string script =
+                    "import sys, json; " +
+                    "import sysconfig; " +
+                    "paths = sysconfig.get_paths(); " +
+                    "print(json.dumps({" +
+                    "'executable': sys.executable," +
+                    "'version': sys.version," +
+                    "'version_info': list(sys.version_info[:3])," +
+                    "'site_packages': [p for p in (paths.get('purelib'), paths.get('platlib')) if p]" +
+                    "}))";
+                return await RunPythonScriptAsync(id, python, script, timeoutMs)
+                    .ConfigureAwait(false);
+            },
+            searchHints: BuildSearchHints(
+                workflow: [(PythonListPackagesTool, "List installed packages for this interpreter")],
+                related: [(PythonListEnvsTool, "Discover available interpreters"), ("python_create_env", "Create a new virtual environment")]));
     }
 
     private static IEnumerable<ToolEntry> PythonMutationTools()

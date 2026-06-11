@@ -91,16 +91,16 @@ public static partial class BridgeCommandCatalog
                 detail = ("List debugger threads for the active debug session.", commandName);
                 return true;
             case "debug-stack":
-                detail = ("Capture stack frames for the current or selected debugger thread.", ExampleCommand("debug-stack", @"{""thread_id"":1,""max_frames"":50}"));
+                detail = ("Capture stack frames for the current or selected debugger thread; returned frames include zero-based indexes.", ExampleCommand("debug-stack", @"{""thread_id"":1,""max_frames"":50}"));
                 return true;
             case "debug-locals":
-                detail = ("Capture local variables for the active stack frame.", ExampleCommand("debug-locals", @"{""max"":200}"));
+                detail = ("Capture local variables for the active or selected stack frame.", ExampleCommand("debug-locals", @"{""thread_id"":1,""frame_index"":0,""max"":200}"));
                 return true;
             case "debug-modules":
                 detail = ("Capture debugger module snapshot (best effort by debugger engine).", commandName);
                 return true;
             case "debug-watch":
-                detail = ("Evaluate one debugger watch expression in break mode.", ExampleCommand("debug-watch", @"{""expression"":""count""}"));
+                detail = ("Evaluate one debugger watch expression in break mode, optionally targeting a thread and frame.", ExampleCommand("debug-watch", @"{""expression"":""count"",""thread_id"":1,""frame_index"":0}"));
                 return true;
             case "debug-exceptions":
                 detail = ("Capture debugger exception group/settings snapshot (best effort).", commandName);

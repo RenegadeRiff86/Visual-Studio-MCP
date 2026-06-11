@@ -20,9 +20,12 @@ internal static class BreakpointCommands
 
         protected override async Task<CommandExecutionResult> ExecuteAsync(IdeCommandContext context, CommandArguments args)
         {
+            string? file = args.GetString("file");
+            string? function = args.GetString("function");
+
             Newtonsoft.Json.Linq.JObject breakpointInfo = await context.Runtime.BreakpointService.SetBreakpointAsync(
                 context.Dte,
-                args.GetRequiredString("file"),
+                file,
                 args.GetInt32("line", 1),
                 args.GetInt32("column", 1),
                 args.GetString("condition"),
@@ -30,13 +33,15 @@ internal static class BreakpointCommands
                 args.GetInt32("hit-count", 0),
                 args.GetEnum("hit-type", "none", "none", "equal", "multiple", "greater-or-equal"),
                 args.GetString("trace-message"),
-                args.GetBoolean("continue-execution", false)).ConfigureAwait(true);
+                args.GetBoolean("continue-execution", false),
+                function).ConfigureAwait(true);
 
-            if (args.GetBoolean("reveal", true))
+            // Only reveal a file:line breakpoint; a function breakpoint has no source location to jump to.
+            if (string.IsNullOrWhiteSpace(function) && !string.IsNullOrWhiteSpace(file) && args.GetBoolean("reveal", true))
             {
                 Newtonsoft.Json.Linq.JObject reveal = await context.Runtime.DocumentService.PositionTextSelectionAsync(
                     context.Dte,
-                    args.GetRequiredString("file"),
+                    file!,
                     documentQuery: null,
                     args.GetInt32("line", 1),
                     args.GetInt32("column", 1),

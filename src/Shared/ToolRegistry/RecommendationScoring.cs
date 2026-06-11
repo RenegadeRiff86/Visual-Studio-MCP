@@ -140,6 +140,21 @@ public sealed partial class ToolRegistry
             reason = ChooseReason(reason, "Use bridge git_untrack instead of shell git rm --cached");
         }
 
+        if (profile.LooksLikeRebaseTask && tool.Name.StartsWith("git_rebase", StringComparison.OrdinalIgnoreCase))
+        {
+            score += HighIntentScore;
+            reason = ChooseReason(reason, "Primary bridge rebase workflow tool");
+        }
+
+        if (profile.LooksLikeCompareRefsTask
+            && (string.Equals(tool.Name, "git_compare_refs", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(tool.Name, "git_log_range", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(tool.Name, "git_diff_range", StringComparison.OrdinalIgnoreCase)))
+        {
+            score += HighIntentScore;
+            reason = ChooseReason(reason, "Primary bridge ref comparison tool");
+        }
+
         return score;
     }
 

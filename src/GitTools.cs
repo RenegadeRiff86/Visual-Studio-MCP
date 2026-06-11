@@ -15,17 +15,28 @@ internal static partial class ToolCatalog
     private const string GitCheckoutTool = "git_checkout";
     private const string GitPullTool = "git_pull";
     private const string GitPushTool = "git_push";
+    private const string GitFetchTool = "git_fetch";
     private const string GitBranchListTool = "git_branch_list";
+    private const string GitLogRangeTool = "git_log_range";
+    private const string GitCompareRefsTool = "git_compare_refs";
+    private const string GitDiffRangeTool = "git_diff_range";
+    private const string GitRebaseTool = "git_rebase";
+    private const string GitRebaseContinueTool = "git_rebase_continue";
+    private const string GitRebaseAbortTool = "git_rebase_abort";
+    private const string GitRebaseSkipTool = "git_rebase_skip";
     private const string PathSingleAliasDesc = "Single file path — shorthand for paths:[\"...\"].";
 
     private static IEnumerable<ToolEntry> GitTools()
         =>
         GitStatusAndHistoryTools()
+            .Concat(GitRangeHistoryTools())
             .Concat(GitDiffAndMetaTools())
+            .Concat(GitRangeDiffTools())
             .Concat(GitStagingCommitTools())
             .Concat(GitBranchTools())
             .Concat(GitNetworkTools())
             .Concat(GitMergeTools())
+            .Concat(GitRebaseTools())
             .Concat(GitStashTools());
 
     private static IEnumerable<ToolEntry> GitStatusAndHistoryTools()
@@ -99,7 +110,61 @@ internal static partial class ToolCatalog
                     .ConfigureAwait(false);
             },
             searchHints: BuildSearchHints(
-                related: [("git_log", "Browse commit history"), (GitDiffUnstagedTool, "See current uncommitted changes")]));
+                related: [(GitLogRangeTool, "Browse commits in a specific revision range"), (GitDiffUnstagedTool, "See current uncommitted changes")]));
+    }
+
+    private static IEnumerable<ToolEntry> GitRangeHistoryTools()
+    {
+        yield return new(GitLogRangeTool,
+            "Show commits reachable from a revision range such as base..head or base...head.",
+            ObjectSchema(
+                Req("range", "Git revision range, for example upstream/master_27..HEAD or base...head."),
+                OptInt("max_count", "Max number of commits to show (default 50)."),
+                Opt("path", "Optional file or directory path; limits results to commits that touched it.")),
+            Git,
+            async (id, args, bridge) =>
+            {
+                string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
+                string range = RequiredString(id, args, "range");
+                int max = Math.Max(1, args?["max_count"]?.GetValue<int?>() ?? 50);
+                string? path = args?["path"]?.GetValue<string>();
+                List<string> gitArgs = ["log", "--no-color", "--date=iso", "--pretty=format:%H%x09%ad%x09%an%x09%s", $"--max-count={max}", range];
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    gitArgs.Add("--");
+                    gitArgs.Add(path);
+                }
+
+                return await GitRunner.RunArgumentsAsync(id, repo, gitArgs).ConfigureAwait(false);
+            },
+            readOnly: true,
+            mutating: false,
+            destructive: false,
+            searchHints: BuildSearchHints(
+                workflow: [("git_show", "Inspect a specific commit from the range")],
+                related: [(GitCompareRefsTool, "Count ahead and behind commits between refs"), (GitDiffRangeTool, "Inspect file changes between refs")]));
+
+        yield return new(GitCompareRefsTool,
+            "Count commits unique to each side of two refs using git rev-list --left-right --count base...head.",
+            ObjectSchema(
+                Req("base", "Base ref, usually the target branch or upstream ref."),
+                Opt("head", "Head ref to compare against base (default HEAD).")),
+            Git,
+            async (id, args, bridge) =>
+            {
+                string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
+                string baseRef = RequiredString(id, args, "base");
+                string headRef = args?["head"]?.GetValue<string>() ?? "HEAD";
+                return await GitRunner.RunArgumentsAsync(id, repo,
+                    ["rev-list", "--left-right", "--count", $"{baseRef}...{headRef}"])
+                    .ConfigureAwait(false);
+            },
+            readOnly: true,
+            mutating: false,
+            destructive: false,
+            searchHints: BuildSearchHints(
+                workflow: [(GitLogRangeTool, "List commits on either side after comparing refs")],
+                related: [(GitDiffRangeTool, "Inspect changed files between refs"), (GitRebaseTool, "Rebase the current branch onto a target ref")]));
     }
 
     private static IEnumerable<ToolEntry> GitDiffAndMetaTools()
@@ -155,7 +220,7 @@ internal static partial class ToolCatalog
                 return await GitSdkReader.GetRemoteListAsync(id, repo).ConfigureAwait(false);
             },
             searchHints: BuildSearchHints(
-                related: [("git_fetch", "Fetch from a remote"), (GitPushTool, "Push to a remote"), (GitPullTool, "Pull from a remote")]));
+                related: [(GitFetchTool, "Fetch from a remote"), (GitPushTool, "Push to a remote"), (GitPullTool, "Pull from a remote")]));
 
         yield return new("git_tag_list",
             "List tags sorted by version (newest first).",
@@ -169,6 +234,52 @@ internal static partial class ToolCatalog
             searchHints: BuildSearchHints(
                 related: [("git_log", "Browse commit history"), ("git_show", "Inspect a tag's commit")]));
 
+    }
+
+    private static IEnumerable<ToolEntry> GitRangeDiffTools()
+    {
+        yield return new(GitDiffRangeTool,
+            "Show file changes between two refs, with patch, --stat, or --name-status output.",
+            ObjectSchema(
+                Req("base", "Base ref, usually the target branch or upstream ref."),
+                Opt("head", "Head ref to compare against base (default HEAD)."),
+                OptInt("context", "Lines of context around each patch hunk (default 3)."),
+                OptBool("stat", "Include --stat output."),
+                OptBool("name_status", "Include --name-status output."),
+                OptArr(Paths, "Optional list of file paths to scope the diff."),
+                Opt("path", PathSingleAliasDesc)),
+            Git,
+            async (id, args, bridge) =>
+            {
+                string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
+                string baseRef = RequiredString(id, args, "base");
+                string headRef = args?["head"]?.GetValue<string>() ?? "HEAD";
+                int ctx = args?["context"]?.GetValue<int?>() ?? DefaultDiffContext;
+                bool stat = args?["stat"]?.GetValue<bool?>() ?? false;
+                bool nameStatus = args?["name_status"]?.GetValue<bool?>() ?? false;
+                IEnumerable<string>? paths = GetEffectivePathListOrNull(args);
+                List<string> gitArgs = ["diff", "--no-color"];
+                if (stat)
+                    gitArgs.Add("--stat");
+                if (nameStatus)
+                    gitArgs.Add("--name-status");
+                if (!stat && !nameStatus)
+                    gitArgs.Add($"--unified={ctx}");
+                gitArgs.Add($"{baseRef}..{headRef}");
+                if (paths is not null)
+                {
+                    gitArgs.Add("--");
+                    gitArgs.AddRange(paths);
+                }
+
+                return await GitRunner.RunArgumentsAsync(id, repo, gitArgs).ConfigureAwait(false);
+            },
+            readOnly: true,
+            mutating: false,
+            destructive: false,
+            searchHints: BuildSearchHints(
+                workflow: [(GitLogRangeTool, "Inspect commits behind the changed files")],
+                related: [(GitCompareRefsTool, "Count ahead and behind commits between refs"), (GitDiffUnstagedTool, "See current uncommitted changes")]));
     }
 
     private static IEnumerable<ToolEntry> GitStagingCommitTools()
@@ -311,7 +422,7 @@ internal static partial class ToolCatalog
 
     private static IEnumerable<ToolEntry> GitNetworkTools()
     {
-        yield return new("git_fetch",
+        yield return new(GitFetchTool,
             "Fetch from a remote without merging. Defaults to all remotes.",
             ObjectSchema(
                 Opt("remote", "Remote name (default: all remotes)."),
@@ -354,7 +465,7 @@ internal static partial class ToolCatalog
             },
             searchHints: BuildSearchHints(
                 workflow: [(GitStatusTool, "Check state after pulling"), ("git_merge", "Resolve conflicts if pull created a merge")],
-                related: [("git_fetch", "Fetch without merging"), (GitPushTool, "Push after pulling")]));
+                related: [(GitFetchTool, "Fetch without merging"), (GitPushTool, "Push after pulling")]));
 
         yield return new(GitPushTool,
             "Push commits to a remote branch.",
@@ -415,7 +526,99 @@ internal static partial class ToolCatalog
             },
             searchHints: BuildSearchHints(
                 workflow: [(GitStatusTool, "Check for merge conflicts after merging")],
-                related: [("git_fetch", "Fetch before merging"), (GitPullTool, "Fetch and merge in one step"), (GitCommitTool, "Commit after resolving conflicts")]));
+                related: [(GitFetchTool, "Fetch before merging"), (GitPullTool, "Fetch and merge in one step"), (GitCommitTool, "Commit after resolving conflicts")]));
+    }
+
+    private static IEnumerable<ToolEntry> GitRebaseTools()
+    {
+        yield return new(GitRebaseTool,
+            "Rebase the current branch, or an optional named branch, onto another ref. Non-interactive only.",
+            ObjectSchema(
+                Req("upstream", "Upstream ref to rebase onto, such as upstream/master_27."),
+                Opt("branch", "Optional branch to rebase instead of the current branch."),
+                Opt("onto", "Optional --onto ref for advanced rebases."),
+                OptBool("autostash", "Automatically stash and reapply local changes during the rebase."),
+                OptBool("rebase_merges", "Preserve merge commits with --rebase-merges.")),
+            Git,
+            async (id, args, bridge) =>
+            {
+                string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
+                string upstream = RequiredString(id, args, "upstream");
+                string? branch = args?["branch"]?.GetValue<string>();
+                string? onto = args?["onto"]?.GetValue<string>();
+                bool autostash = args?["autostash"]?.GetValue<bool?>() ?? false;
+                bool rebaseMerges = args?["rebase_merges"]?.GetValue<bool?>() ?? false;
+                List<string> gitArgs = ["rebase"];
+                if (autostash)
+                    gitArgs.Add("--autostash");
+                if (rebaseMerges)
+                    gitArgs.Add("--rebase-merges");
+                if (!string.IsNullOrWhiteSpace(onto))
+                {
+                    gitArgs.Add("--onto");
+                    gitArgs.Add(onto);
+                }
+                gitArgs.Add(upstream);
+                if (!string.IsNullOrWhiteSpace(branch))
+                    gitArgs.Add(branch);
+
+                return await GitRunner.RunArgumentsAsync(id, repo, gitArgs, timeoutMs: 120_000)
+                    .ConfigureAwait(false);
+            },
+            readOnly: false,
+            mutating: true,
+            destructive: true,
+            searchHints: BuildSearchHints(
+                workflow: [(GitStatusTool, "Check for conflicts after the rebase"), (GitRebaseContinueTool, "Continue after resolving conflicts"), (GitRebaseAbortTool, "Abort a conflicted rebase")],
+                related: [(GitFetchTool, "Fetch the target ref first"), (GitCompareRefsTool, "Compare refs before rebasing"), (GitLogRangeTool, "Inspect commits before rebasing")]));
+
+        yield return new(GitRebaseContinueTool,
+            "Continue an in-progress rebase after conflicts have been resolved and staged.",
+            EmptySchema(), Git,
+            async (id, _, bridge) =>
+            {
+                string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
+                return await GitRunner.RunArgumentsAsync(id, repo, ["rebase", "--continue"], timeoutMs: 120_000)
+                    .ConfigureAwait(false);
+            },
+            readOnly: false,
+            mutating: true,
+            destructive: true,
+            searchHints: BuildSearchHints(
+                workflow: [(GitStatusTool, "Check whether the rebase completed or needs more conflict resolution")],
+                related: [(GitRebaseAbortTool, "Abort the in-progress rebase"), (GitRebaseSkipTool, "Skip the current commit")]));
+
+        yield return new(GitRebaseAbortTool,
+            "Abort an in-progress rebase and return to the pre-rebase state.",
+            EmptySchema(), Git,
+            async (id, _, bridge) =>
+            {
+                string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
+                return await GitRunner.RunArgumentsAsync(id, repo, ["rebase", "--abort"], timeoutMs: 120_000)
+                    .ConfigureAwait(false);
+            },
+            readOnly: false,
+            mutating: true,
+            destructive: true,
+            searchHints: BuildSearchHints(
+                workflow: [(GitStatusTool, "Confirm the working tree after aborting the rebase")],
+                related: [(GitRebaseTool, "Start a new rebase after reviewing status")]));
+
+        yield return new(GitRebaseSkipTool,
+            "Skip the current commit in an in-progress rebase.",
+            EmptySchema(), Git,
+            async (id, _, bridge) =>
+            {
+                string repo = ServiceToolPaths.ResolveRepoRootDirectory(bridge);
+                return await GitRunner.RunArgumentsAsync(id, repo, ["rebase", "--skip"], timeoutMs: 120_000)
+                    .ConfigureAwait(false);
+            },
+            readOnly: false,
+            mutating: true,
+            destructive: true,
+            searchHints: BuildSearchHints(
+                workflow: [(GitStatusTool, "Check whether the rebase completed or needs another action")],
+                related: [(GitRebaseContinueTool, "Continue after resolving conflicts"), (GitRebaseAbortTool, "Abort the in-progress rebase")]));
     }
 
     private static IEnumerable<ToolEntry> GitStashTools()

@@ -390,7 +390,7 @@ public sealed class ApplyDiffRequest
         StringBuilder diffBuilder = new();
         diffBuilder.Append("*** Begin Patch\n");
         diffBuilder.Append("*** Update File: ").Append(path).Append('\n');
-        diffBuilder.Append("@@\n");
+        diffBuilder.Append("@@ ").Append(SimpleReplacePatch.Header).Append('\n');
         AppendPatchLines(diffBuilder, '-', oldLines);
         AppendPatchLines(diffBuilder, '+', newLines);
         diffBuilder.Append("*** End Patch");

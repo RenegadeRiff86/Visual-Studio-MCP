@@ -45,13 +45,13 @@ internal static partial class ToolCatalog
                 workflow: [("activate_document", "Switch to one of the open documents"), (HintReadFileTool, "Read the file behind an open document")],
                 related: [("list_tabs", "See open tabs and the active tab"), (HintOpenFileTool, "Open another file by path")]),
             "list_tabs" => BuildSearchHints(
-                workflow: [("activate_document", "Switch to a tab you want to inspect"), (HintReadFileTool, "Read the file behind a selected tab")],
-                related: [("list_documents", "List open documents with paths"), ("close_document", "Close a specific tab")]),
+                workflow: [("close_file", "Close inactive tabs by path when more than 7 are open"), ("close_document", "Close matching inactive tabs"), ("close_others", "Keep only the active tab")],
+                related: [("list_documents", "List open documents with paths"), ("activate_document", "Switch to a tab you want to inspect"), (HintReadFileTool, "Read the file behind a selected tab")]),
             "activate_document" => BuildSearchHints(
                 workflow: [(HintReadFileTool, "Read the active document after switching"), ("file_outline", "Inspect the active file structure")],
                 related: [("list_tabs", "See which tabs are currently open"), (HintOpenFileTool, "Open a file by path instead")]),
             "close_document" => BuildSearchHints(
-                related: [("list_tabs", "Inspect current open tabs"), ("activate_document", "Focus the tab before closing it")]),
+                related: [("list_tabs", "Inspect current open tabs"), ("close_file", "Close by exact path"), ("close_others", "Close all except active"), ("activate_document", "Focus the tab before closing it")]),
             "save_document" => BuildSearchHints(
                 workflow: [("reload_document", "Reload if the file was also changed outside VS"), ("errors", "Check diagnostics after saving")],
                 related: [("format_document", "Format before saving"), ("apply_diff", "Make targeted edits first")]),

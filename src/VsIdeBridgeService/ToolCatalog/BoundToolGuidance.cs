@@ -7,8 +7,10 @@ internal static partial class ToolCatalog
     internal static string BoundSessionHint =>
         "A Visual Studio instance is bound. Prefer bridge MCP tools for this solution; use build, build_solution, " +
         "rebuild_solution, and build_errors to compile instead of running a build script in a shell, use git_restore instead of " +
-        "shell git checkout -- <path> for file restore, use git_untrack instead of shell git rm --cached to stop tracking files, " +
-        "and use recommend_tools or list_tools_by_category when a needed tool is not visible.";
+        "shell git checkout -- <path> for file restore, and use git_untrack instead of shell git rm --cached to stop tracking files. " +
+        "To keep VS responsive, call list_tabs when the editor has many open files; if more than 7 tabs are open, close inactive " +
+        "tabs you no longer need with close_file, close_document, or close_others. Use recommend_tools or list_tools_by_category " +
+        "when a needed tool is not visible.";
 
     internal static JsonObject BuildToolDiscoveryGuidance()
     {
@@ -31,6 +33,10 @@ internal static partial class ToolCatalog
             RecommendedTool("list_tools_by_category", "Load a focused group of tools (search, git, project, debug, etc.) instead of the full catalog."),
             RecommendedTool("bridge_health", "Confirm the bound instance and rediscover bridge guidance."),
             RecommendedTool("vs_state", "Inspect the active solution, document, build state, and debugger state."),
+            RecommendedTool("list_tabs", "Check editor tab count; close inactive tabs when more than 7 are open."),
+            RecommendedTool("close_file", "Close a specific editor tab when you have its path or caption."),
+            RecommendedTool("close_document", "Close matching editor tabs by caption query."),
+            RecommendedTool("close_others", "Close every editor tab except the active one when the inactive set is no longer needed."),
             RecommendedTool("find_files", "Locate files through the bound solution instead of shell directory crawling."),
             RecommendedTool("read_file", "Inspect current editor-backed content before editing."),
             RecommendedTool("apply_diff", "Apply targeted in-solution edits through the live editor."),

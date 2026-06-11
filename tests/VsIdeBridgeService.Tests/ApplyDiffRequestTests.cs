@@ -55,10 +55,38 @@ public sealed class ApplyDiffRequestTests
         ApplyDiffRequest request = ApplyDiffRequest.FromJsonObject(args);
 
         Assert.Equal(2, request.MutationLineCount);
-        Assert.Contains("*** Update File: CodeMaidShared/Helpers/TypeFormatHelper.cs\n@@\n", request.Diff);
+        Assert.Contains("*** Update File: CodeMaidShared/Helpers/TypeFormatHelper.cs\n@@ simple-replace\n", request.Diff);
         Assert.Contains("-" + OldContent + "\n", request.Diff);
         Assert.Contains("+" + NewContent + "\n", request.Diff);
         Assert.DoesNotContain("*** Replace in File:", request.Diff);
+    }
+
+    [Fact]
+    public void SimpleReplaceHelperReplacesInlineSubstring()
+    {
+        string updated = SimpleReplacePatch.ReplaceInline(
+            "    p.add_argument('--output')",
+            "    p.add_argument(",
+            "    parser.add_argument(",
+            replaceAll: false,
+            out int replacementCount);
+
+        Assert.Equal("    parser.add_argument('--output')", updated);
+        Assert.Equal(1, replacementCount);
+    }
+
+    [Fact]
+    public void SimpleReplaceHelperCanReplaceAllOccurrencesOnLine()
+    {
+        string updated = SimpleReplacePatch.ReplaceInline(
+            "old old old",
+            "old",
+            "new",
+            replaceAll: true,
+            out int replacementCount);
+
+        Assert.Equal("new new new", updated);
+        Assert.Equal(3, replacementCount);
     }
 
     [Fact]

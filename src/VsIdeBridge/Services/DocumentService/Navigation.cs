@@ -169,22 +169,11 @@ internal sealed partial class DocumentService
         string? activePath = TryGetDocumentFullName(dte.ActiveDocument);
         (List<Document> documents, string matchedBy) = ResolveDocumentMatches(dte, query, fallbackToActive: true, allowMultiple: closeAllMatches);
         JArray closed = [];
+        JArray skipped = [];
         foreach (Document document in documents)
         {
-            JObject info = TryCreateDocumentInfo(document, activePath)
-                ?? new JObject
-                {
-                    ["name"] = TryGetDocumentName(document) ?? string.Empty,
-                    ["path"] = TryGetDocumentFullName(document) ?? string.Empty,
-                    ["tabIndex"] = JValue.CreateNull(),
-                    ["isActive"] = false,
-                    ["project"] = TryGetDocumentProjectUniqueName(document) ?? string.Empty,
-                    ["isProjectBacked"] = IsProjectBackedDocument(document),
-                    ["isReviewArtifact"] = IsReviewArtifactDocument(document),
-                    ["saved"] = JValue.CreateNull(),
-                };
-            document.Close(saveChanges ? vsSaveChanges.vsSaveChangesYes : vsSaveChanges.vsSaveChangesNo);
-            closed.Add(info);
+            JObject info = CreateDocumentInfoOrFallback(document, activePath);
+            TryCloseDocument(document, saveChanges, info, closed, skipped);
         }
 
         return new JObject
@@ -194,6 +183,8 @@ internal sealed partial class DocumentService
             ["saveChanges"] = saveChanges,
             ["count"] = closed.Count,
             ["items"] = closed,
+            ["skippedCount"] = skipped.Count,
+            ["skipped"] = skipped,
         };
     }
 
@@ -220,7 +211,7 @@ internal sealed partial class DocumentService
 
     public async Task<JObject> CloseAllExceptCurrentAsync(DTE2 dte, bool saveChanges)
     {
-        (string activePath, JArray closed) = await CloseAllExceptCurrentOnMainThreadAsync(dte, saveChanges).ConfigureAwait(false);
+        (string activePath, JArray closed, JArray skipped) = await CloseAllExceptCurrentOnMainThreadAsync(dte, saveChanges).ConfigureAwait(false);
 
         return new JObject
         {
@@ -228,7 +219,95 @@ internal sealed partial class DocumentService
             ["saveChanges"] = saveChanges,
             ["count"] = closed.Count,
             ["items"] = closed,
+            ["skippedCount"] = skipped.Count,
+            ["skipped"] = skipped,
         };
+    }
+
+    private static JObject CreateDocumentInfoOrFallback(Document document, string? activePath)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        return TryCreateDocumentInfo(document, activePath)
+            ?? new JObject
+            {
+                ["name"] = TryGetDocumentName(document) ?? string.Empty,
+                ["path"] = TryGetDocumentFullName(document) ?? string.Empty,
+                ["tabIndex"] = JValue.CreateNull(),
+                ["isActive"] = false,
+                ["project"] = TryGetDocumentProjectUniqueName(document) ?? string.Empty,
+                ["isProjectBacked"] = IsProjectBackedDocument(document),
+                ["isReviewArtifact"] = IsReviewArtifactDocument(document),
+                ["saved"] = JValue.CreateNull(),
+            };
+    }
+
+    private static void TryCloseDocument(Document document, bool saveChanges, JObject info, JArray closed, JArray skipped)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        vsSaveChanges saveMode = saveChanges ? vsSaveChanges.vsSaveChangesYes : vsSaveChanges.vsSaveChangesNo;
+        try
+        {
+            CloseDocumentWithWindowFallback(document, saveMode);
+            closed.Add(info);
+        }
+        catch (COMException ex)
+        {
+            skipped.Add(CreateSkippedCloseInfo(info, ex));
+        }
+        catch (Exception ex) when (IsDeferredDocumentLoadFailure(ex))
+        {
+            skipped.Add(CreateSkippedCloseInfo(info, ex));
+        }
+    }
+
+    private static void CloseDocumentWithWindowFallback(Document document, vsSaveChanges saveMode)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        try
+        {
+            document.Close(saveMode);
+        }
+        catch (COMException) when (TryCloseDocumentWindow(document, saveMode))
+        {
+        }
+        catch (Exception ex) when (IsDeferredDocumentLoadFailure(ex) && TryCloseDocumentWindow(document, saveMode))
+        {
+        }
+    }
+
+    private static bool TryCloseDocumentWindow(Document document, vsSaveChanges saveMode)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        try
+        {
+            foreach (Window window in document.Windows)
+            {
+                window.Close(saveMode);
+                return true;
+            }
+        }
+        catch (COMException)
+        {
+            return false;
+        }
+        catch (Exception ex) when (IsDeferredDocumentLoadFailure(ex))
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private static JObject CreateSkippedCloseInfo(JObject info, Exception ex)
+    {
+        JObject skipped = (JObject)info.DeepClone();
+        skipped["closeError"] = ex.Message;
+        skipped["closeErrorType"] = ex.GetType().FullName ?? ex.GetType().Name;
+        return skipped;
     }
 
     private async Task<(string NormalizedPath, bool Navigated, string WindowCaption)> OpenDocumentOnMainThreadAsync(
@@ -266,7 +345,7 @@ internal sealed partial class DocumentService
         return (normalizedPath, navigated, windowCaption);
     }
 
-    private static async Task<(string ActivePath, JArray Closed)> CloseAllExceptCurrentOnMainThreadAsync(DTE2 dte, bool saveChanges)
+    private static async Task<(string ActivePath, JArray Closed, JArray Skipped)> CloseAllExceptCurrentOnMainThreadAsync(DTE2 dte, bool saveChanges)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
@@ -284,26 +363,15 @@ internal sealed partial class DocumentService
                 StringComparison.OrdinalIgnoreCase))];
 
         JArray closed = [];
+        JArray skipped = [];
         foreach (Document document in documentsToClose)
         {
-            closed.Add(
-                TryCreateDocumentInfo(document, activePath)
-                ?? new JObject
-                {
-                    ["name"] = TryGetDocumentName(document) ?? string.Empty,
-                    ["path"] = TryGetDocumentFullName(document) ?? string.Empty,
-                    ["tabIndex"] = JValue.CreateNull(),
-                    ["isActive"] = false,
-                    ["project"] = TryGetDocumentProjectUniqueName(document) ?? string.Empty,
-                    ["isProjectBacked"] = IsProjectBackedDocument(document),
-                    ["isReviewArtifact"] = IsReviewArtifactDocument(document),
-                    ["saved"] = JValue.CreateNull(),
-                });
-            document.Close(saveChanges ? vsSaveChanges.vsSaveChangesYes : vsSaveChanges.vsSaveChangesNo);
+            JObject info = CreateDocumentInfoOrFallback(document, activePath);
+            TryCloseDocument(document, saveChanges, info, closed, skipped);
         }
 
         await Task.Yield();
-        return (activePath!, closed);
+        return (activePath!, closed, skipped);
     }
 
     public async Task<(string Path, string Text)> GetActiveDocumentTextAsync(DTE2 dte)

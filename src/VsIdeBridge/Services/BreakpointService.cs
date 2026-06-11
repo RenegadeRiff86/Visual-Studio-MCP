@@ -15,7 +15,7 @@ internal sealed class BreakpointService
 
     public async Task<JObject> SetBreakpointAsync(
         DTE2 dte,
-        string filePath,
+        string? filePath,
         int line,
         int column,
         string? condition,
@@ -23,11 +23,27 @@ internal sealed class BreakpointService
         int hitCount,
         string hitType,
         string? traceMessage,
-        bool continueExecution)
+        bool continueExecution,
+        string? function = null)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        string normalizedPath = ResolveBreakpointPath(filePath);
+        // Function (symbol) breakpoint: bind by function name instead of file:line. These
+        // survive source edits/line shifts, which file:line breakpoints do not.
+        if (!string.IsNullOrWhiteSpace(function))
+        {
+            return SetFunctionBreakpointOnUiThread(
+                dte, function!, condition, conditionType, hitCount, hitType, traceMessage, continueExecution);
+        }
+
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            throw new CommandErrorException(
+                "invalid_request",
+                "set_breakpoint requires either 'file' (with 'line') or 'function'.");
+        }
+
+        string normalizedPath = ResolveBreakpointPath(filePath!);
         Breakpoint? existing = FindBreakpoint(dte, normalizedPath, line);
         existing?.Delete();
 
@@ -303,6 +319,85 @@ internal sealed class BreakpointService
             "not_found",
             $"No breakpoint found at {normalizedPath}:{line}. " +
             "Call list_breakpoints to see all active breakpoints, then retry with a valid location.");
+    }
+
+    private static JObject SetFunctionBreakpointOnUiThread(
+        DTE2 dte,
+        string function,
+        string? condition,
+        string conditionType,
+        int hitCount,
+        string hitType,
+        string? traceMessage,
+        bool continueExecution)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        // Drop any existing breakpoint already bound to this function so repeated calls
+        // update in place instead of stacking duplicates.
+        foreach (Breakpoint duplicate in dte.Debugger.Breakpoints.Cast<Breakpoint>()
+                     .Where(bp => FunctionMatches(bp, function)).ToList())
+        {
+            duplicate.Delete();
+        }
+
+        dte.Debugger.Breakpoints.Add(
+            Function: function,
+            Condition: condition ?? string.Empty,
+            ConditionType: MapConditionType(conditionType),
+            HitCount: hitCount,
+            HitCountType: MapHitCountType(hitType));
+
+        Breakpoint? created = dte.Debugger.Breakpoints.Cast<Breakpoint>()
+            .FirstOrDefault(bp => FunctionMatches(bp, function));
+
+        if (created is null)
+        {
+            // Created but not yet bound (e.g. module not loaded). Report pending rather than failing.
+            return new JObject
+            {
+                ["file"] = string.Empty,
+                ["line"] = 0,
+                ["column"] = 0,
+                ["status"] = "pending",
+                ["resolved"] = false,
+                ["function"] = function,
+                ["enabled"] = true,
+                ["condition"] = condition ?? string.Empty,
+                ["conditionType"] = conditionType,
+                ["hitCountTarget"] = hitCount,
+                ["hitCountType"] = hitType,
+                ["name"] = string.Empty,
+                ["traceMessage"] = string.IsNullOrWhiteSpace(traceMessage) ? JValue.CreateNull() : traceMessage,
+                ["breakWhenHit"] = !continueExecution,
+            };
+        }
+
+        created.Enabled = true;
+        if (created is Breakpoint2 advanced)
+        {
+            advanced.Message = traceMessage ?? string.Empty;
+            advanced.BreakWhenHit = !continueExecution;
+        }
+
+        return SerializeBreakpoint(created);
+    }
+
+    private static bool FunctionMatches(Breakpoint breakpoint, string function)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        try
+        {
+            string name = breakpoint.FunctionName ?? string.Empty;
+            return name.Length > 0
+                && (string.Equals(name, function, StringComparison.Ordinal)
+                    || name.EndsWith(function, StringComparison.Ordinal));
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            // Some breakpoint kinds (data, address) throw when FunctionName is read.
+            return false;
+        }
     }
 
     private static dbgBreakpointConditionType MapConditionType(string value)

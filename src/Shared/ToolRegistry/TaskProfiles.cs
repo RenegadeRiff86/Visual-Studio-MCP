@@ -46,7 +46,9 @@ public sealed partial class ToolRegistry
                 "interpreter"),
             ContainsAny(normalizedTask,
                 "git", "commit", "branch", "stash", "merge", "rebase", "checkout",
-                "push", "pull", "fetch", "remote", "staged", "unstaged"),
+                "push", "pull", "fetch", "remote", "staged", "unstaged", "upstream",
+                "ahead", "behind", "revision range", "rev range", "compare refs", "compare branches",
+                "cherry pick", "cherry-pick"),
             ContainsAny(normalizedTask,
                 "nuget", "dotnet add", "dotnet remove", "dotnet package"),
             ContainsAny(normalizedTask,
@@ -57,7 +59,12 @@ public sealed partial class ToolRegistry
                 "corrupted file", "undo file"),
             ContainsAny(normalizedTask,
                 "untrack", "git rm", "rm --cached", "stop tracking", "gitignore",
-                "git ignore", "exclude from git"));
+                "git ignore", "exclude from git"),
+            ContainsAny(normalizedTask,
+                "rebase", "rebase continue", "rebase abort", "rebase skip"),
+            ContainsAny(normalizedTask,
+                "compare refs", "compare branches", "ahead", "behind", "revision range",
+                "rev range", "upstream", "cherry pick", "cherry-pick"));
     }
 
     private readonly record struct TaskProfile(
@@ -74,5 +81,7 @@ public sealed partial class ToolRegistry
         bool LooksLikeNuGetTask,
         bool LooksLikeDebugTask,
         bool LooksLikeRestoreTask,
-        bool LooksLikeUntrackTask);
+        bool LooksLikeUntrackTask,
+        bool LooksLikeRebaseTask,
+        bool LooksLikeCompareRefsTask);
 }
