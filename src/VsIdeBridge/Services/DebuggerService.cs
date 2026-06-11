@@ -19,6 +19,7 @@ internal sealed class DebuggerService
     private const string NotInBreakModeCode = "not_in_break_mode";
 
     private readonly DebuggerExceptionTracker _exceptionTracker = new();
+    private readonly BreakpointDialogTracker _breakpointDialogTracker = new();
 
     public async Task<JObject> GetStateAsync(DTE2 dte)
     {
@@ -36,6 +37,7 @@ internal sealed class DebuggerService
 
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
         _exceptionTracker.EnsureSubscribed(dte);
+        _breakpointDialogTracker.EnsureInstalled(dte);
         Debugger debugger = dte.Debugger;
         dbgDebugMode mode = debugger.CurrentMode;
         modeString = mode.ToString();
@@ -78,6 +80,7 @@ internal sealed class DebuggerService
         }
 
         _exceptionTracker.AddLastException(debugState);
+        _breakpointDialogTracker.AddLastDialog(debugState);
         return debugState;
     }
 
@@ -326,7 +329,7 @@ internal sealed class DebuggerService
         }
     }
 
-    public async Task<JObject> EvaluateWatchAsync(DTE2 dte, string expression, int timeoutMs, int? threadId, int? frameIndex, int expandDepth = 0, int maxChildren = 50, string? outFile = null)
+    public async Task<JObject> EvaluateWatchAsync(DTE2 dte, string expression, int timeoutMs, int? threadId, int? frameIndex, int expandDepth = 0, int maxChildren = 50, int chunkLines = 0, int chunkIndex = 0)
     {
         // Perform the evaluation on the main thread; build the result object off it.
         JObject expressionData;
@@ -364,28 +367,28 @@ internal sealed class DebuggerService
             };
         }
 
-        if (!string.IsNullOrWhiteSpace(outFile))
+        if (chunkLines > 0 && expressionData["members"] is JArray)
         {
-            // Write the full (possibly large, fully expanded) result to disk and return a
-            // compact pointer instead of flooding the response -- handy for big containers or
-            // long string values. Pass an absolute path; relative paths resolve against the
-            // Visual Studio process working directory.
-            string json = expressionData.ToString(Newtonsoft.Json.Formatting.Indented);
-            try
-            {
-                System.IO.File.WriteAllText(outFile, json);
-                expressionData.Remove("members");
-                expressionData["savedTo"] = outFile;
-                expressionData["savedBytes"] = json.Length;
-            }
-            catch (System.IO.IOException ex)
-            {
-                expressionData["saveError"] = ex.Message;
-            }
-            catch (System.UnauthorizedAccessException ex)
-            {
-                expressionData["saveError"] = ex.Message;
-            }
+            // Page the expanded member tree in memory (no disk), the same way read_output pages
+            // a pane: serialize it to indented JSON and return the requested line-chunk plus
+            // chunk metadata so a large container/struct can be pulled piecewise instead of
+            // flooding the reply. Re-evaluating the expression reproduces the same chunking, so
+            // the caller advances chunk_index across calls with no server-side cursor state.
+            string membersJson = expressionData["members"]!.ToString(Newtonsoft.Json.Formatting.Indented);
+            string[] lines = membersJson.Replace("\r\n", "\n").Split('\n');
+            int totalLines = lines.Length;
+            int chunkCount = Math.Max(1, (int)Math.Ceiling(totalLines / (double)chunkLines));
+            int selected = Math.Min(Math.Max(chunkIndex, 0), chunkCount - 1);
+            int start = selected * chunkLines;
+            int count = Math.Min(chunkLines, totalLines - start);
+
+            expressionData.Remove("members");
+            expressionData["membersJson"] = string.Join("\n", lines, start, count);
+            expressionData["chunkIndex"] = selected;
+            expressionData["chunkCount"] = chunkCount;
+            expressionData["chunkLines"] = chunkLines;
+            expressionData["totalLines"] = totalLines;
+            expressionData["hasMoreChunks"] = selected + 1 < chunkCount;
         }
         return expressionData;
     }
@@ -408,6 +411,7 @@ internal sealed class DebuggerService
         };
 
         _exceptionTracker.AddLastException(result);
+        _breakpointDialogTracker.AddLastDialog(result);
         return result;
     }
 

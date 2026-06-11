@@ -76,7 +76,8 @@ internal static partial class DebugBuildCommands
                 args.GetNullableInt32("frame-index"),
                 args.GetInt32("expand-depth", 0),
                 args.GetInt32("max-children", 50),
-                args.GetString("out-file")).ConfigureAwait(true);
+                args.GetInt32("chunk-lines", 0),
+                args.GetInt32("chunk-index", 0)).ConfigureAwait(true);
             return new CommandExecutionResult("Debugger watch expression evaluated.", commandData);
         }
     }

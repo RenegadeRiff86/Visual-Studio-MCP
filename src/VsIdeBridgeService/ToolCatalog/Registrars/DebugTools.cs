@@ -180,8 +180,9 @@ internal static partial class ToolCatalog
                 OptInt(TimeoutMsArg, "Optional evaluation timeout in milliseconds."),
                 OptInt("expand_depth", "Optional depth to expand child members (containers/structs). 0 = summary only (default); 1-3 walks the value tree like the Watch window, e.g. a std::vector/list to its elements and their fields."),
                 OptInt("max_children", "Optional cap on child members serialized per level when expand_depth > 0 (default 50)."),
-                Opt("out_file", "Optional absolute path. When set, the full (expanded) result is written to this file as JSON and the inline response returns just a pointer " +
-                    "(savedTo/savedBytes) plus the summary -- use for large containers or long string values that would otherwise flood the reply.")),
+                OptInt("chunk_lines", "Optional. Page the expanded member tree in memory instead of returning it all inline: lines per chunk. Omit or 0 returns the full structured members[]. " +
+                    "When > 0 the response returns membersJson (the selected chunk as text) plus chunkIndex/chunkCount/totalLines/hasMoreChunks; advance chunk_index to read more. Nothing is written to disk."),
+                OptInt("chunk_index", "Optional zero-based chunk to return when chunk_lines > 0 (default 0).")),
             "debug-watch",
             a => Build(
                 ("expression", OptionalString(a, "expression")),
@@ -190,7 +191,8 @@ internal static partial class ToolCatalog
                 ("timeout-ms", OptionalText(a, TimeoutMsArg)),
                 ("expand-depth", OptionalText(a, "expand_depth")),
                 ("max-children", OptionalText(a, "max_children")),
-                ("out-file", OptionalString(a, "out_file"))),
+                ("chunk-lines", OptionalText(a, "chunk_lines")),
+                ("chunk-index", OptionalText(a, "chunk_index"))),
             Debug,
             searchHints: BuildSearchHints(
                 workflow: [(DebugStackTool, "Get frame indexes before targeting a watch expression")],
