@@ -26,10 +26,10 @@ Pick the connection method that matches your client.
 
 ```bash
 # Register for the current project
-claude mcp add --transport stdio --scope project vs-ide-bridge "C:\Program Files\VsIdeBridge\service\VsIdeBridgeService.exe" mcp-server
+claude mcp add --transport stdio --scope project vs-ide-bridge -- "C:\Program Files\VsIdeBridge\service\VsIdeBridgeService.exe" mcp-server
 
 # Or register globally (available from any project)
-claude mcp add --transport stdio --scope user vs-ide-bridge "C:\Program Files\VsIdeBridge\service\VsIdeBridgeService.exe" mcp-server
+claude mcp add --transport stdio --scope user vs-ide-bridge -- "C:\Program Files\VsIdeBridge\service\VsIdeBridgeService.exe" mcp-server
 ```
 
 Restart Claude Code after adding. Visual Studio must be running before you start a session.
