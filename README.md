@@ -10,9 +10,13 @@ VS IDE Bridge connects your AI assistant to Visual Studio. Once connected, your 
 
 ## Installation
 
-1. Download and run the latest installer.
-2. Open Visual Studio. The extension activates automatically on startup.
-3. Connect your AI assistant using the setup below.
+1. **Download the installer.** Get the latest `vs-ide-bridge-setup-<version>.exe` from the [Releases page](https://github.com/RenegadeRiff86/Visual-Studio-MCP/releases/latest).
+2. **Close Visual Studio.** The installer replaces the VS extension, which can't be updated while VS is running.
+3. **Run the installer** (it asks for administrator rights). It installs three things: the Visual Studio extension, the background MCP service (**VS IDE Bridge Service**, a Windows service), and a bundled Python runtime — no separate Python install needed.
+4. **Open Visual Studio** and load your solution. The extension activates automatically. To confirm it's installed, check **Extensions → Manage Extensions → Installed**, or look for the **Tools → VS IDE Bridge** menu.
+5. **Connect your AI assistant** using the setup below.
+
+> **Upgrading** is the same steps: close Visual Studio, run the newer installer, reopen. Your assistant's connection settings carry over — if the tools stop appearing after an upgrade, re-run the registration command for your client and restart it.
 
 ## Connecting Your AI Assistant
 
