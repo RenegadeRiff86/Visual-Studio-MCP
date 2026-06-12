@@ -5,6 +5,7 @@ using Newtonsoft.Json.Linq;
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
+using VsIdeBridge.Infrastructure;
 
 namespace VsIdeBridge.Services;
 
@@ -127,7 +128,10 @@ internal sealed class BreakpointDialogTracker
         {
             _onCapture = onCapture;
             _proc = HookProc;
-            _hook = SetWindowsHookEx(WH_CBT, _proc, IntPtr.Zero, GetCurrentThreadId());
+            uint threadId = GetCurrentThreadId();
+            _hook = SetWindowsHookEx(WH_CBT, _proc, IntPtr.Zero, threadId);
+            BridgeActivityLog.LogInfo(nameof(BreakpointDialogTracker),
+                $"WH_CBT hook installed on thread {threadId} (handle={(_hook == IntPtr.Zero ? "NULL-FAILED" : "ok")}).");
         }
 
         private IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam)
@@ -136,17 +140,29 @@ internal sealed class BreakpointDialogTracker
             {
                 StringBuilder classBuf = new(64);
                 GetClassName(wParam, classBuf, classBuf.Capacity);
+                string className = classBuf.ToString();
 
-                // #32770 is the standard Windows dialog-box class used by the VS message box.
-                // The breakpoint condition dialog's title is the generic "Microsoft Visual
-                // Studio", so match on the body text instead to avoid touching other dialogs.
-                if (classBuf.ToString() == "#32770")
+                StringBuilder titleBuf = new(256);
+                GetWindowText(wParam, titleBuf, titleBuf.Capacity);
+                string title = titleBuf.ToString();
+
+                // Consider classic dialog boxes (#32770) and any window whose title is exactly
+                // "Microsoft Visual Studio" (the breakpoint dialog's title; the main IDE window
+                // is "<solution> - Microsoft Visual Studio", so exact match excludes it). Then
+                // match the body text. Logged at INFO so the failure mode is visible in the log.
+                bool isDialogBox = className == "#32770";
+                bool isVsDialogTitle = string.Equals(title, "Microsoft Visual Studio", StringComparison.OrdinalIgnoreCase);
+                if (isDialogBox || isVsDialogTitle)
                 {
                     string text = ReadDialogText(wParam);
-                    if (text.IndexOf("breakpoint", StringComparison.OrdinalIgnoreCase) >= 0)
+                    bool isBreakpoint = text.IndexOf("breakpoint", StringComparison.OrdinalIgnoreCase) >= 0;
+                    BridgeActivityLog.LogInfo(nameof(BreakpointDialogTracker),
+                        $"activate class='{className}' title='{title}' isBreakpoint={isBreakpoint} textLen={text.Length} text='{Snippet(text)}'");
+                    if (isBreakpoint)
                     {
                         _onCapture(text.Trim());
                         PostMessage(wParam, WM_COMMAND, new IntPtr(IDOK), IntPtr.Zero);
+                        BridgeActivityLog.LogInfo(nameof(BreakpointDialogTracker), "posted WM_COMMAND/IDOK to dismiss the breakpoint dialog.");
                     }
                 }
             }
@@ -167,6 +183,12 @@ internal sealed class BreakpointDialogTracker
                 return true;
             }, IntPtr.Zero);
             return all.ToString();
+        }
+
+        private static string Snippet(string text)
+        {
+            string oneLine = text.Replace("\r", " ").Replace("\n", " ");
+            return oneLine.Length > 200 ? oneLine.Substring(0, 200) : oneLine;
         }
     }
 }

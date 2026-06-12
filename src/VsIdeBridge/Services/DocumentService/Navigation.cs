@@ -577,7 +577,7 @@ internal sealed partial class DocumentService
         }
         catch (COMException ex)
         {
-            BridgeActivityLog.LogWarning(nameof(DocumentService), "Failed to move the editor selection to the requested start position", ex);
+            BridgeActivityLog.LogVerbose(nameof(DocumentService), "Editor selection fallback could not position the caret (document not ready or not a text view)", ex);
         }
     }
 

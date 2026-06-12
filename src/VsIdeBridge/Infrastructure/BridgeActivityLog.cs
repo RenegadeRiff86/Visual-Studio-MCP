@@ -26,6 +26,16 @@ internal static class BridgeActivityLog
         Debug.WriteLine($"{source} verbose: {context}: {ex.Message}");
     }
 
+    /// <summary>
+    /// Logs an informational message to the debugger output and the shared log file (no VS
+    /// ActivityLog entry). Use for diagnostics that should be readable from the log file.
+    /// </summary>
+    public static void LogInfo(string source, string context)
+    {
+        Debug.WriteLine($"{source} info: {context}");
+        WriteToFile("INFO", source, context, string.Empty);
+    }
+
     private static void WriteToFile(string level, string source, string context, string detail)
     {
         try
