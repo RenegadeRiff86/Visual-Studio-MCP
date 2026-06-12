@@ -30,9 +30,3 @@ Temp.txt
 
 # Local SDK research scratch
 codex/sdk-cache/
-
-# Local debug scratch (test artifacts that land in the repo root during slicer debugging)
-*.gcode
-fanmover_trace*.txt
-overhang_test_*
-superslicer_*.png

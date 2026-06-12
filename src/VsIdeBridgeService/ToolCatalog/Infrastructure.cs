@@ -506,6 +506,12 @@ internal static class ToolResultFormatter
             return bindingNoticePrefix + diagnosticsText;
         }
 
+        string? debugText = CreateDebugInspectionSuccessText(response);
+        if (!string.IsNullOrWhiteSpace(debugText))
+        {
+            return bindingNoticePrefix + debugText;
+        }
+
         string? summary = response["Summary"]?.GetValue<string>();
         if (!string.IsNullOrWhiteSpace(summary))
         {
@@ -583,8 +589,19 @@ internal static class ToolResultFormatter
 
         string? file = obj["file"]?.GetValue<string>() ?? obj["path"]?.GetValue<string>();
         string? lineVal = obj["line"]?.ToString();
+        string? exprName = obj["name"]?.GetValue<string>();
+        string? exprValue = obj["value"]?.GetValue<string>();
+        string? exprType = obj["type"]?.GetValue<string>();
+        if (exprName != null && exprValue != null)
+        {
+            string typeSuffix = string.IsNullOrWhiteSpace(exprType) ? string.Empty : $" ({exprType})";
+            string invalidSuffix = obj["isValid"]?.GetValue<bool?>() == false ? " [invalid]" : string.Empty;
+            return $"{exprName} = {exprValue}{typeSuffix}{invalidSuffix}";
+        }
+
         string? text = obj["text"]?.GetValue<string>()
-            ?? obj["name"]?.GetValue<string>()
+            ?? exprName
+            ?? obj["function"]?.GetValue<string>()
             ?? obj["message"]?.GetValue<string>()
             ?? obj["displayName"]?.GetValue<string>();
         string? kind = obj["kind"]?.GetValue<string>();
@@ -601,6 +618,30 @@ internal static class ToolResultFormatter
             return file;
 
         return obj.ToJsonString();
+    }
+
+    private static string? CreateDebugInspectionSuccessText(JsonObject response)
+    {
+        string? command = response["Command"]?.GetValue<string>();
+        if (response["Data"] is not JsonObject data)
+            return null;
+
+        if (command == "debug-watch")
+        {
+            string expression = data["expression"]?.GetValue<string>() ?? data["name"]?.GetValue<string>() ?? string.Empty;
+            string value = data["value"]?.GetValue<string>() ?? string.Empty;
+            string type = data["type"]?.GetValue<string>() ?? string.Empty;
+            string invalidSuffix = data["isValid"]?.GetValue<bool?>() == false ? " [invalid]" : string.Empty;
+            string typeSuffix = string.IsNullOrWhiteSpace(type) ? string.Empty : $" ({type})";
+            string header = $"debug-watch: {expression} = {value}{typeSuffix}{invalidSuffix}";
+            if (data["members"] is JsonArray members && members.Count > 0)
+                return header + "\n" + RenderDataList(members, maxItems: 50);
+            if (!string.IsNullOrWhiteSpace(data["membersJson"]?.GetValue<string>()))
+                return header + "\n" + data["membersJson"]!.GetValue<string>();
+            return header;
+        }
+
+        return null;
     }
 
     private static string CreateBindingNoticePrefix(JsonObject response)

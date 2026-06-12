@@ -135,14 +135,14 @@ Once connected, describe what you want in plain language. The assistant figures 
 
 **Debug**
 - "Set a breakpoint on line 42 and start the debugger."
-- "Break when execution reaches the function `FanMover::_process_gcode_line`."
-- "Log `fan_speed` every time that line runs, but don't stop."
+- "Break when execution reaches the function `ToolResultFormatter.StructuredToolResult`."
+- "Log `requestId` every time that line runs, but don't stop."
 - "What are the local variables at the current line?"
 - "Show me the call stack."
 - "Expand `m_buffer` and show me every element and its fields."
 - "Show me the exception the debugger just hit."
 
-Breakpoints can target a function or symbol name instead of a file and line — these survive source edits and line shifts — and can log a message and keep running instead of pausing (tracepoints/logpoints). `debug_locals` and `debug_watch` can expand a container or struct into its elements and fields, and can write a large result to a file instead of returning it inline. Debugger run and step tools include `lastException` when Visual Studio reports a thrown or unhandled exception. Ask for `debug_exceptions` when you need the exception settings snapshot and the latest captured exception details.
+Breakpoints can target a function or symbol name instead of a file and line — these survive source edits and line shifts — and can log a message and keep running instead of pausing (tracepoints/logpoints). `debug_locals` and `debug_watch` can expand a container or struct into its elements and fields; use `chunk_lines` on `debug_watch` to page large expansions in memory without flooding the reply. Debugger run and step tools include `lastException` when Visual Studio reports a thrown or unhandled exception. Ask for `debug_exceptions` when you need the exception settings snapshot and the latest captured exception details.
 
 **Git**
 - "What files have I changed since the last commit?"

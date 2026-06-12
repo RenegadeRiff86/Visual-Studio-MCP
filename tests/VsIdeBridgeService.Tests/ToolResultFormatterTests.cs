@@ -28,6 +28,55 @@ public sealed class ToolResultFormatterTests
         Assert.True(result["isError"]!.GetValue<bool>());
     }
 
+    [Fact]
+    public void DebugLocalsRendersNamesAndValues()
+    {
+        JsonObject response = new()
+        {
+            ["Command"] = "debug-locals",
+            ["Summary"] = "Captured 2 local variable(s).",
+            ["Data"] = new JsonObject
+            {
+                ["count"] = 2,
+                ["locals"] = new JsonArray
+                {
+                    new JsonObject { ["name"] = "totalCount", ["type"] = "int", ["value"] = "2", ["isValid"] = true },
+                    new JsonObject { ["name"] = "toolName", ["type"] = "string", ["value"] = "\"debug_locals\"", ["isValid"] = true },
+                },
+            },
+        };
+
+        JsonObject result = Assert.IsType<JsonObject>(ToolResultFormatter.StructuredToolResult(response));
+        string text = result["content"]![0]!["text"]!.GetValue<string>();
+
+        Assert.Contains("totalCount = 2 (int)", text);
+        Assert.Contains("toolName = \"debug_locals\" (string)", text);
+    }
+
+    [Fact]
+    public void DebugWatchRendersExpressionValue()
+    {
+        JsonObject response = new()
+        {
+            ["Command"] = "debug-watch",
+            ["Summary"] = "Debugger watch expression evaluated.",
+            ["Data"] = new JsonObject
+            {
+                ["expression"] = "response.Command",
+                ["name"] = "response.Command",
+                ["type"] = "string",
+                ["value"] = "\"debug-watch\"",
+                ["isValid"] = true,
+            },
+        };
+
+        JsonObject result = Assert.IsType<JsonObject>(ToolResultFormatter.StructuredToolResult(response));
+        string text = result["content"]![0]!["text"]!.GetValue<string>();
+
+        Assert.Contains("debug-watch: response.Command = \"debug-watch\" (string)", text);
+        Assert.DoesNotContain("Debugger watch expression evaluated.", text);
+    }
+
     private static JsonObject CreateWarningsResponse(bool success)
         => new()
         {
