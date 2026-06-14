@@ -53,6 +53,9 @@ internal sealed class DebuggerService
             frameLanguage = frame.Language ?? string.Empty;
             TryGetActiveSourceLocation(dte, out frameFilePath, out frameLineNumber, out frameColumnNumber);
         }
+
+        // Read the exception the debugger is stopped on (if any) while still on the UI thread.
+        _exceptionTracker.CaptureFromDebugger(debugger);
         await Task.Yield(); // release the main thread before building the response
 
         JObject debugState = new()
@@ -396,6 +399,8 @@ internal sealed class DebuggerService
     public async Task<JObject> GetExceptionsAsync(DTE2 dte)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+        _exceptionTracker.EnsureSubscribed(dte);
+        _exceptionTracker.CaptureFromDebugger(dte.Debugger);
         (JArray groups, string reason, string lastBreakReason, bool brokeOnException) =
             CollectExceptionInfoOnUiThread(dte.Debugger);
         await Task.Yield(); // release the main thread

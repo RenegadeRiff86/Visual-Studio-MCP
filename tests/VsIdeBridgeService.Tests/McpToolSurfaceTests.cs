@@ -180,6 +180,18 @@ public sealed class McpToolSurfaceTests
         Assert.Contains("explicit file", replaceAll["description"]!.GetValue<string>());
         Assert.Contains("4 or fewer", edits["description"]!.GetValue<string>());
         Assert.DoesNotContain(required, item => item?.GetValue<string>() == "replace_all");
+
+        JsonObject projectHelp = ToolCatalog.CreateRegistry().Definitions.BuildToolHelp("query_project_items");
+        JsonObject projectTool = Assert.IsType<JsonObject>(projectHelp["tool"]);
+        string projectDescription = projectTool["description"]!.GetValue<string>();
+        JsonObject file = Assert.IsType<JsonObject>(properties["file"]);
+        string applyDescription = tool["description"]!.GetValue<string>();
+
+        Assert.Contains("project file itself", projectDescription);
+        Assert.Contains("read_file or apply_diff", projectDescription);
+        Assert.Contains("Project/MSBuild files", applyDescription);
+        Assert.Contains("query_project_items", applyDescription);
+        Assert.Contains("Project/MSBuild files", file["description"]!.GetValue<string>());
     }
 
     [Fact]

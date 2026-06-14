@@ -48,6 +48,10 @@
   <ItemGroup>
     <Reference Include="System.ComponentModel.Composition" />
     <Reference Include="PresentationCore" />
+    <!-- UI Automation: read/dismiss WPF Visual Studio dialogs (e.g. the breakpoint
+         condition-failure popup) whose controls are not child HWNDs. -->
+    <Reference Include="UIAutomationClient" />
+    <Reference Include="UIAutomationTypes" />
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="Microsoft.VisualStudio.Language.CallHierarchy">
       <HintPath>$(DevEnvDir)CommonExtensions\Microsoft\CallHierarchy\Microsoft.VisualStudio.Language.CallHierarchy.dll</HintPath>

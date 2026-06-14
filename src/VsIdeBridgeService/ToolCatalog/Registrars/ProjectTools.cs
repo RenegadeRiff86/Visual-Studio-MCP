@@ -28,10 +28,10 @@ internal static partial class ToolCatalog
                 related: [(QueryProjectItemsTool, "List files in a project"), ("query_project_references", "List references for a project")]));
 
         yield return BridgeTool(QueryProjectItemsTool,
-            "List items in a project with FileArg paths, kinds, and item types.",
+            "List items in a project with file paths, kinds, item types, and the project file itself. Use the returned project-file row with read_file or apply_diff when editing .csproj, .vcxproj, .props, or .targets XML.",
             ObjectSchema(
                 Req(Project, ProjectDesc),
-                Opt(Path, "Optional path filter."),
+                Opt(Path, "Optional path filter. Matches project item paths and the project file path."),
                 OptInt(Max, "Max items to return (default 200).")),
             "query-project-items",
             a => Build(
@@ -236,10 +236,10 @@ internal static partial class ToolCatalog
     private static IEnumerable<ToolEntry> ProjectFileTools()
     {
         yield return BridgeTool("add_file_to_project",
-            "Add an existing FileArg to a project.",
+            "Add an existing file to a project as a project item. For editing the project file XML itself, use query_project_items to find the project-file row, then read_file and apply_diff.",
             ObjectSchema(
                 Req(Project, ProjectDesc),
-                Req(FileArg, "Absolute path to the FileArg.")),
+                Req(FileArg, "Absolute path to the file to add.")),
             "add-file-to-project",
             a => Build(
                 (Project, OptionalString(a, Project)),
@@ -250,10 +250,10 @@ internal static partial class ToolCatalog
                 related: [("remove_file_from_project", "Remove a file from the project"), ("query_project_items", "List current project files")]));
 
         yield return BridgeTool("remove_file_from_project",
-            "Remove a FileArg from a project.",
+            "Remove a project item from a project without deleting the file from disk. For editing the project file XML itself, use query_project_items to find the project-file row, then read_file and apply_diff.",
             ObjectSchema(
                 Req(Project, ProjectDesc),
-                Req(FileArg, "FileArg path to remove.")),
+                Req(FileArg, "File path or project item path to remove.")),
             "remove-file-from-project",
             a => Build(
                 (Project, OptionalString(a, Project)),

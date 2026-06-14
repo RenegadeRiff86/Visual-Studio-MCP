@@ -242,6 +242,14 @@ internal sealed partial class PatchService
 
         try
         {
+            string? projectFilePath = TryGetProjectFullName(project);
+            if (!string.IsNullOrWhiteSpace(projectFilePath) &&
+                string.Equals(Path.GetFileName(projectFilePath), targetFileName, StringComparison.OrdinalIgnoreCase) &&
+                File.Exists(projectFilePath))
+            {
+                matches.Add(projectFilePath!);
+            }
+
             if (project.ProjectItems is not null)
             {
                 CollectMatchingProjectItemPaths(project.ProjectItems, targetFileName, matches);
@@ -251,6 +259,21 @@ internal sealed partial class PatchService
         catch (COMException ex)
         {
             BridgeActivityLog.LogWarning(nameof(PatchService), $"Failed to expand project items while searching for '{targetFileName}'", ex);
+        }
+    }
+
+    private static string? TryGetProjectFullName(Project project)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        try
+        {
+            string fullName = project.FullName;
+            return string.IsNullOrWhiteSpace(fullName) ? null : fullName;
+        }
+        catch (COMException ex)
+        {
+            BridgeActivityLog.LogWarning(nameof(PatchService), "Failed to inspect project file path while resolving patch target", ex);
+            return null;
         }
     }
 

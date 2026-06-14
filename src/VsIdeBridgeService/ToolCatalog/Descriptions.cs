@@ -15,7 +15,8 @@ internal static partial class ToolCatalog
         "or a plain path (absolute or solution-relative). " +
         "Prefer a handle — pass the h:/f: handle returned by find_text, find_files, errors, or read_file " +
         "so the bridge resolves the file without ambiguity. " +
-        "Plain paths work too: 'CHANGELOG.md', 'src/Foo.cs', or a full absolute path.";
+        "Plain paths work too: 'CHANGELOG.md', 'src/Foo.cs', or a full absolute path. " +
+        "Project/MSBuild files (.csproj, .vcxproj, .props, .targets, .sln) are editable and are written through the bridge's disk-backed project-file path.";
 
     private const string LineDesc = "1-based line number.";
     private const string ColumnDesc = "1-based column number.";

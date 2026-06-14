@@ -12,6 +12,7 @@ public static partial class ToolDefinitionCatalog
             "Bridge catalog tool — must be called through call_tool: " +
             "call_tool({\"name\":\"apply_diff\",\"arguments\":{\"file\":\"h:1\",\"old_content\":\"exact old text\",\"new_content\":\"replacement\"}}) " +
             "The 'file' argument accepts a handle (h:N, f:N, e:N, w:N, m:N) OR a plain path (absolute or solution-relative like 'CHANGELOG.md' or 'src/Foo.cs'). " +
+            "Project/MSBuild files (.csproj, .vcxproj, .props, .targets, .sln) are editable; call query_project_items to find the project-file row, then read_file and apply_diff. " +
             "To create a handle first, call find_text or search_symbols for h:N, find_files or glob for f:N, read_file for f:N, or errors/warnings/messages for e:/w:/m:. " +
             "Prefer a handle when available and pass it straight through. Then read_file to get the exact current text, copy that text verbatim as old_content, " +
             "write your replacement as new_content, and call apply_diff. For a single edit use file + old_content + new_content. " +

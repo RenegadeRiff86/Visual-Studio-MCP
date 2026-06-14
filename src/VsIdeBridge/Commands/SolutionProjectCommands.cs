@@ -23,7 +23,14 @@ internal static partial class SolutionProjectCommands
     private static readonly string[] PreferredOutputExtensions = [".vsix", ".exe", ".dll", ".winmd"];
 
     // Data class for extracted project item info (no COM dependencies)
-    private sealed class ProjectItemData(string name, string[] paths, bool isFolder, string kind, string? itemType, string? subType)
+    private sealed class ProjectItemData(
+        string name,
+        string[] paths,
+        bool isFolder,
+        string kind,
+        string? itemType,
+        string? subType,
+        bool isProjectFile = false)
     {
         public string Name { get; } = name;
         public string[] Paths { get; } = paths;
@@ -31,6 +38,7 @@ internal static partial class SolutionProjectCommands
         public string Kind { get; } = kind;
         public string? ItemType { get; } = itemType;
         public string? SubType { get; } = subType;
+        public bool IsProjectFile { get; } = isProjectFile;
     }
 
     private static void EnsureSolutionOpen(DTE2 dte)
@@ -192,6 +200,23 @@ internal static partial class SolutionProjectCommands
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
+        string? projectFilePath = TryGetProjectFullName(project);
+        if (!string.IsNullOrWhiteSpace(projectFilePath))
+        {
+            string[] projectFilePaths = [PathNormalization.NormalizeFilePath(projectFilePath)];
+            if (string.IsNullOrEmpty(pathFilter) || MatchesPathFilter(projectFilePaths, pathFilter, solutionDirectory))
+            {
+                yield return new ProjectItemData(
+                    Path.GetFileName(projectFilePath),
+                    projectFilePaths,
+                    isFolder: false,
+                    project.Kind ?? string.Empty,
+                    "ProjectFile",
+                    subType: null,
+                    isProjectFile: true);
+            }
+        }
+
         foreach (ProjectItem item in EnumerateProjectItems(project.ProjectItems))
         {
             string[] paths = GetProjectItemPaths(item);
@@ -206,6 +231,21 @@ internal static partial class SolutionProjectCommands
             string? itemType = TryGetPropertyString(item.Properties, "ItemType");
             string? subType = TryGetPropertyString(item.Properties, "SubType");
             yield return new ProjectItemData(item.Name, paths, item.FileCount == 0, kind, itemType, subType);
+        }
+    }
+
+    private static string? TryGetProjectFullName(Project project)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        try
+        {
+            string fullName = project.FullName;
+            return string.IsNullOrWhiteSpace(fullName) ? null : fullName;
+        }
+        catch (COMException ex)
+        {
+            BridgeActivityLog.LogWarning(nameof(SolutionProjectCommands), $"Failed to read project file path for '{project.Name}'", ex);
+            return null;
         }
     }
 
@@ -294,6 +334,7 @@ internal static partial class SolutionProjectCommands
             ["path"] = primaryPath,
             ["paths"] = new JArray(data.Paths),
             ["isFolder"] = data.IsFolder,
+            ["isProjectFile"] = data.IsProjectFile,
             ["extension"] = data.IsFolder ? string.Empty : Path.GetExtension(primaryPath ?? string.Empty).ToLowerInvariant(),
             ["kind"] = data.Kind,
             ["itemType"] = data.ItemType ?? string.Empty,

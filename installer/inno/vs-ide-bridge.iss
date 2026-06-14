@@ -2,7 +2,7 @@
 #define MyAppFolderName "VsIdeBridge"
 #define MyAppPublisher "RenegadeRiff86"
 #define MyAppURL "https://github.com/RenegadeRiff86/Visual-Studio-MCP"
-#define MyAppVersion "3.0.5"
+#define MyAppVersion "3.0.3"
 #define ServiceName "VsIdeBridgeService"
 #define VsixId "RenegadeRiff86.VsIdeBridge"
 #define LegacyVsixId "StanElston.VsIdeBridge"

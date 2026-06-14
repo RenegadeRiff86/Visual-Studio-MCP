@@ -7,7 +7,7 @@ These notes capture official Microsoft guidance that matters for the bridge debu
 - `EnvDTE.Debugger.Breakpoints.Add(...)` creates a breakpoint request, but that does not guarantee the breakpoint is already bound to executable code.
 - In the Visual Studio debugger model, a breakpoint can be `pending`, `bound`, or `error`.
 - The bridge should not treat "created but not yet resolved" as the same thing as "failed to create".
-- `EnvDTE.DebuggerEvents.OnExceptionThrown` and `OnExceptionNotHandled` are the DTE events to capture model-visible exception details from a running debug session.
+- The legacy `EnvDTE.DebuggerEvents.OnExceptionThrown` / `OnExceptionNotHandled` event sinks are **unreliable** in modern Visual Studio: they only fire for the exception categories the user configured to break on (managed code defaults to user-unhandled only) and carry only a thin type/code/description. The reliable, modern way to read the current exception is to evaluate the `$exception` pseudovariable via `EnvDTE.Debugger.GetExpression` while in break mode.
 
 ## Relevant APIs
 
@@ -16,12 +16,14 @@ These notes capture official Microsoft guidance that matters for the bridge debu
   - Supports file, line, column, condition, and hit count.
 - `EnvDTE80.Debugger2.Breakpoints`
   - Lets the extension inspect the current breakpoint collection after adding one.
-- `EnvDTE.DebuggerEvents.OnExceptionThrown`
-  - Reports exceptions thrown while the debugger is running.
-  - Use this to populate `lastException` in debugger tool responses when Visual Studio observes a thrown exception.
-- `EnvDTE.DebuggerEvents.OnExceptionNotHandled`
-  - Reports exceptions that Visual Studio sees as not handled.
-  - Use this to update `lastException` with the stronger `notHandled` event kind.
+- `EnvDTE.Debugger.GetExpression("$exception", ...)`
+  - The reliable way to read the exception the debugger is currently stopped on -- the same object the Exception Helper shows.
+  - Evaluate sub-expressions (`$exception.Message`, `$exception.StackTrace`, `$exception.HResult`, `$exception.InnerException`) to populate a rich `lastException`.
+  - Works whenever `Debugger.CurrentMode == dbgBreakMode` and an exception is in flight, regardless of the user's Exception Settings.
+- `EnvDTE.Debugger.LastBreakReason`
+  - Tells you *why* the debugger entered break mode (`dbgEventReasonExceptionThrown` / `dbgEventReasonExceptionNotHandled` vs breakpoint / step / user-break), used to classify the captured exception as `thrown` / `notHandled` / `inFlight`.
+- `EnvDTE.DebuggerEvents.OnExceptionThrown` / `OnExceptionNotHandled` (legacy -- avoid as a capture source)
+  - Only fire for exception categories configured to break on, and carry no message or stack trace; not dependable. Kept only historically.
 - `IDebugBreakpointBoundEvent2`
   - Reports that a pending breakpoint has bound to code.
 - `IDebugBreakpointErrorEvent2`

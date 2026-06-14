@@ -13,12 +13,18 @@ namespace VsIdeBridge.Services;
 /// Captures and auto-dismisses the modal Visual Studio dialog shown during debugging when a
 /// breakpoint condition or tracepoint expression cannot be evaluated -- e.g. it calls a
 /// function the expression evaluator treats as having side effects ("This expression has side
-/// effects and will not be evaluated"). That dialog ("The following breakpoint cannot be set...
-/// The condition for a breakpoint failed to execute...") is modal and otherwise blocks the
+/// effects and will not be evaluated"), or the condition fails at runtime ("The condition for
+/// breakpoint ... could not be evaluated"). That dialog is modal and otherwise blocks the
 /// bridge until a human clicks OK. We read its text, dismiss it with OK, and surface the text
 /// on debugger responses as 'lastBreakpointDialog' so the caller learns the condition was
 /// rejected instead of hanging on a hidden popup.
-/// All install/dismiss work happens on the Visual Studio UI thread.
+///
+/// Modern Visual Studio renders this dialog as a WPF window (window class "HwndWrapper..."),
+/// whose controls are NOT child HWNDs, so Win32 EnumChildWindows reads no text from it. For
+/// that case we fall back to UI Automation, which reads WPF content and invokes the OK button.
+/// UI Automation client calls against a window owned by the same thread can deadlock, so the
+/// UIA read/dismiss runs on a short-lived background thread while the Visual Studio UI thread
+/// pumps the dialog's modal loop. The classic #32770 Win32 dialog is still handled inline.
 /// </summary>
 internal sealed class BreakpointDialogTracker
 {
@@ -138,36 +144,58 @@ internal sealed class BreakpointDialogTracker
         {
             if (nCode == HCBT_ACTIVATE)
             {
-                StringBuilder classBuf = new(64);
-                GetClassName(wParam, classBuf, classBuf.Capacity);
-                string className = classBuf.ToString();
-
-                StringBuilder titleBuf = new(256);
-                GetWindowText(wParam, titleBuf, titleBuf.Capacity);
-                string title = titleBuf.ToString();
-
-                // Consider classic dialog boxes (#32770) and any window whose title is exactly
-                // "Microsoft Visual Studio" (the breakpoint dialog's title; the main IDE window
-                // is "<solution> - Microsoft Visual Studio", so exact match excludes it). Then
-                // match the body text. Logged at INFO so the failure mode is visible in the log.
-                bool isDialogBox = className == "#32770";
-                bool isVsDialogTitle = string.Equals(title, "Microsoft Visual Studio", StringComparison.OrdinalIgnoreCase);
-                if (isDialogBox || isVsDialogTitle)
-                {
-                    string text = ReadDialogText(wParam);
-                    bool isBreakpoint = text.IndexOf("breakpoint", StringComparison.OrdinalIgnoreCase) >= 0;
-                    BridgeActivityLog.LogInfo(nameof(BreakpointDialogTracker),
-                        $"activate class='{className}' title='{title}' isBreakpoint={isBreakpoint} textLen={text.Length} text='{Snippet(text)}'");
-                    if (isBreakpoint)
-                    {
-                        _onCapture(text.Trim());
-                        PostMessage(wParam, WM_COMMAND, new IntPtr(IDOK), IntPtr.Zero);
-                        BridgeActivityLog.LogInfo(nameof(BreakpointDialogTracker), "posted WM_COMMAND/IDOK to dismiss the breakpoint dialog.");
-                    }
-                }
+                HandleActivation(wParam);
             }
 
             return CallNextHookEx(_hook, nCode, wParam, lParam);
+        }
+
+        private void HandleActivation(IntPtr hwnd)
+        {
+            StringBuilder classBuf = new(64);
+            GetClassName(hwnd, classBuf, classBuf.Capacity);
+            string className = classBuf.ToString();
+
+            StringBuilder titleBuf = new(256);
+            GetWindowText(hwnd, titleBuf, titleBuf.Capacity);
+            string title = titleBuf.ToString();
+
+            // Consider classic dialog boxes (#32770) and any window whose title is exactly
+            // "Microsoft Visual Studio" (the breakpoint dialog's title; the main IDE window is
+            // "<solution> - Microsoft Visual Studio", so exact match excludes it).
+            bool isDialogBox = className == "#32770";
+            bool isVsDialogTitle = string.Equals(title, "Microsoft Visual Studio", StringComparison.OrdinalIgnoreCase);
+            if (!isDialogBox && !isVsDialogTitle)
+            {
+                return;
+            }
+
+            string text = ReadDialogText(hwnd);
+            if (text.Length == 0)
+            {
+                // WPF dialog (e.g. class "HwndWrapper...") -- its controls are not child HWNDs, so
+                // EnumChildWindows reads nothing. Read and dismiss via UI Automation on a background
+                // thread; doing UIA against a window owned by this (the UI) thread can deadlock.
+                BridgeActivityLog.LogInfo(nameof(BreakpointDialogTracker),
+                    $"activate(wpf) class='{className}' title='{title}' textLen=0 -> scheduling UI Automation read/dismiss.");
+                WpfDialogAutomation.ScheduleDismiss(hwnd, _onCapture);
+                return;
+            }
+
+            // Classic Win32 dialog -- its child controls carry the text. Read, match, and dismiss
+            // inline (PostMessage from the UI thread to itself is safe). Logged at INFO so the
+            // failure mode is visible in the log.
+            bool isBreakpoint = text.IndexOf("breakpoint", StringComparison.OrdinalIgnoreCase) >= 0;
+            BridgeActivityLog.LogInfo(nameof(BreakpointDialogTracker),
+                $"activate(win32) class='{className}' title='{title}' isBreakpoint={isBreakpoint} textLen={text.Length} text='{Snippet(text)}'");
+            if (!isBreakpoint)
+            {
+                return;
+            }
+
+            _onCapture(text.Trim());
+            PostMessage(hwnd, WM_COMMAND, new IntPtr(IDOK), IntPtr.Zero);
+            BridgeActivityLog.LogInfo(nameof(BreakpointDialogTracker), "posted WM_COMMAND/IDOK to dismiss the breakpoint dialog.");
         }
 
         private static string ReadDialogText(IntPtr dialog)
