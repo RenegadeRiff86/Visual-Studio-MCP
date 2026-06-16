@@ -349,21 +349,10 @@ public sealed class ToolDefinition(
                 or "list_tool_categories"
                 or "list_tools_by_category"
                 or "recommend_tools"
+                or "memory_search"
+                or "memory_read"
                 or "python_env_info"
-                or "git_status"
-                or "git_diff_staged"
-                or "git_diff_unstaged"
-                or "git_log"
-                or "git_current_branch"
-                or "git_branch_list"
-                or "git_remote_list"
-                or "git_show"
-                or "git_stash_list"
-                or "git_tag_list"
-                or "github_issue_search"
-                or "github_pr_list"
-                or "github_pr_view"
-                or "github_pr_diff";
+                or "bridge_installed_version";
     }
 
     private static bool InferDestructive(string name)
@@ -374,7 +363,12 @@ public sealed class ToolDefinition(
             or "clear_breakpoints"
             or "github_issue_close"
             or "vs_close"
-            || name.StartsWith("git_", StringComparison.Ordinal)
+            or "git_commit_amend"
+            or "git_rebase"
+            or "git_rebase_abort"
+            or "git_rebase_skip"
+            or "git_restore"
+            or "git_stash_pop"
             || name.StartsWith("nuget_", StringComparison.Ordinal)
             || name.StartsWith("conda_", StringComparison.Ordinal)
             || name.StartsWith("python_install_", StringComparison.Ordinal)
@@ -408,6 +402,22 @@ public sealed class ToolDefinition(
                 or "vs_open"
                 or "wait_for_instance"
                 or "execute_command"
-                or "shell_exec";
+                or "shell_exec"
+                or "git_add"
+                or "git_checkout"
+                or "git_commit"
+                or "git_create_branch"
+                or "git_fetch"
+                or "git_merge"
+                or "git_pull"
+                or "git_push"
+                or "git_rebase_continue"
+                or "git_reset"
+                or "git_stash_push"
+                or "git_untrack"
+                or "github_issue_comment"
+                or "github_issue_reopen"
+                or "github_issue_edit"
+                or "github_issue_create";
     }
 }

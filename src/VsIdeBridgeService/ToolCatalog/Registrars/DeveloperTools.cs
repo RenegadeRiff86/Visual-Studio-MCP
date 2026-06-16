@@ -30,6 +30,21 @@ internal static partial class ToolCatalog
             searchHints: BuildSearchHints(
                 related: [("bridge_health", "Confirm the active bridge binding"), ("errors", "Check current solution diagnostics"), ("read_output", "Inspect Visual Studio output panes")]));
 
+        yield return new("bridge_installed_version",
+            "Inspect source version files and the installed VS IDE Bridge payload under Program Files. " +
+            "This read-only developer tool helps compare repo source with the active installed bridge stack.",
+            ObjectSchema(
+                Opt("root", "Optional installed bridge root (default C:\\Program Files\\VsIdeBridge).")),
+            DeveloperToolsCategory,
+            (id, args, bridge) => BridgeInstalledVersionTool.ExecuteAsync(id, args, bridge),
+            aliases: ["installed_bridge_version", "bridge_version", "bridge_install_info"],
+            tags: ["bridge", "installed", "version", "developer", "release"],
+            summary: "Inspect source and installed bridge versions.",
+            readOnly: true,
+            searchHints: BuildSearchHints(
+                workflow: [("bridge_log_summary", "Inspect installed bridge logs"), ("git_status", "Check source changes before packaging")],
+                related: [("set_version", "Update source version files"), ("build_installer", "Package the bridge installer")]));
+
         yield return new("set_version",
             "Update VS IDE Bridge release version files. " +
             "This developer tool is intended for the bridge codebase only.",

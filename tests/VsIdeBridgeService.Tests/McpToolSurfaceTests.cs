@@ -43,20 +43,54 @@ public sealed class McpToolSurfaceTests
         Assert.False(logTool.Definition.Mutating);
         Assert.Contains("parse_bridge_logs", logTool.Definition.Aliases);
 
+        Assert.True(registry.TryGet("bridge_installed_version", out ToolEntry? installedTool));
+        Assert.Equal("developer_tools", installedTool.Definition.Category);
+        Assert.True(installedTool.Definition.ReadOnly);
+        Assert.False(installedTool.Definition.Mutating);
+
         Assert.True(registry.TryGet("set_version", out ToolEntry? versionTool));
         Assert.Equal("developer_tools", versionTool.Definition.Category);
         Assert.True(versionTool.Definition.Mutating);
     }
 
     [Theory]
-    [InlineData("git_log_range", true, false)]
-    [InlineData("git_compare_refs", true, false)]
-    [InlineData("git_diff_range", true, false)]
-    [InlineData("git_rebase", false, true)]
-    [InlineData("git_rebase_continue", false, true)]
-    [InlineData("git_rebase_abort", false, true)]
-    [InlineData("git_rebase_skip", false, true)]
-    public void GitCategoryIncludesRangeCompareAndRebaseTools(string toolName, bool expectedReadOnly, bool expectedMutating)
+    [InlineData("git_status", false, false, false)]
+    [InlineData("git_add", false, true, false)]
+    [InlineData("git_fetch", false, true, false)]
+    [InlineData("git_reset", false, true, false)]
+    [InlineData("git_restore", false, true, true)]
+    [InlineData("git_commit_amend", false, true, true)]
+    [InlineData("git_stash_push", false, true, false)]
+    [InlineData("git_log", false, false, false)]
+    [InlineData("git_log_range", false, false, false)]
+    [InlineData("git_compare_refs", false, false, false)]
+    [InlineData("git_diff_range", false, false, false)]
+    [InlineData("git_file_history", false, false, false)]
+    [InlineData("git_blame", false, false, false)]
+    [InlineData("git_merge_base", false, false, false)]
+    [InlineData("git_cherry", false, false, false)]
+    [InlineData("git_conflicts", false, false, false)]
+    [InlineData("git_rebase", false, true, true)]
+    [InlineData("git_rebase_continue", false, true, false)]
+    [InlineData("git_rebase_abort", false, true, true)]
+    [InlineData("git_rebase_skip", false, true, true)]
+    [InlineData("github_issue_list", false, false, false)]
+    [InlineData("github_issue_search", false, false, false)]
+    [InlineData("github_issue_view", false, false, false)]
+    [InlineData("github_issue_comment", false, true, false)]
+    [InlineData("github_issue_close", false, true, true)]
+    [InlineData("github_issue_reopen", false, true, false)]
+    [InlineData("github_issue_edit", false, true, false)]
+    [InlineData("github_issue_create", false, true, false)]
+    [InlineData("github_pr_list", false, false, false)]
+    [InlineData("github_pr_view", false, false, false)]
+    [InlineData("github_pr_diff", false, false, false)]
+    [InlineData("github_pr_comments", false, false, false)]
+    [InlineData("github_pr_reviews", false, false, false)]
+    [InlineData("github_pr_review_threads", false, false, false)]
+    [InlineData("github_pr_checks", false, false, false)]
+    [InlineData("github_actions_failed_logs", false, false, false)]
+    public void GitCategoryIncludesUsableHistoryRebaseAndGitHubIssueTools(string toolName, bool expectedReadOnly, bool expectedMutating, bool expectedDestructive)
     {
         ToolExecutionRegistry registry = ToolCatalog.CreateRegistry();
 
@@ -64,6 +98,19 @@ public sealed class McpToolSurfaceTests
         Assert.Equal("git", entry.Definition.Category);
         Assert.Equal(expectedReadOnly, entry.Definition.ReadOnly);
         Assert.Equal(expectedMutating, entry.Definition.Mutating);
+        Assert.Equal(expectedDestructive, entry.Definition.Destructive);
+
+        if (toolName == "github_issue_view")
+        {
+            JsonObject help = registry.Definitions.BuildToolHelp(toolName);
+            JsonObject tool = Assert.IsType<JsonObject>(help["tool"]);
+            string description = tool["description"]!.GetValue<string>();
+            JsonObject schema = Assert.IsType<JsonObject>(tool["inputSchema"]);
+            JsonObject properties = Assert.IsType<JsonObject>(schema["properties"]);
+
+            Assert.Contains("not saved to disk", description);
+            Assert.Contains("comments", properties.Select(property => property.Key));
+        }
     }
 
     [Fact]
@@ -71,9 +118,19 @@ public sealed class McpToolSurfaceTests
     {
         ToolCategoryDefinition category = ToolRegistry.DefaultCategoryDefinitions.Single(category =>
             category.Name == "developer_tools");
+        ToolCategoryDefinition memoryCategory = ToolRegistry.DefaultCategoryDefinitions.Single(category =>
+            category.Name == "memory");
+        ToolExecutionRegistry registry = ToolCatalog.CreateRegistry();
 
         Assert.Equal("Bridge development", category.Summary);
         Assert.Contains("Bridge-code-only", category.Description);
+        Assert.Equal("Codex memory", memoryCategory.Summary);
+        Assert.True(registry.TryGet("memory_search", out ToolEntry? searchTool));
+        Assert.Equal("memory", searchTool.Definition.Category);
+        Assert.True(searchTool.Definition.ReadOnly);
+        Assert.True(registry.TryGet("memory_read", out ToolEntry? readTool));
+        Assert.Equal("memory", readTool.Definition.Category);
+        Assert.True(readTool.Definition.ReadOnly);
     }
 
     [Fact]

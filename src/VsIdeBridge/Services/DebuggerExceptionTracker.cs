@@ -1,6 +1,9 @@
 using EnvDTE;
 using EnvDTE80;
+using Microsoft.VisualStudio;
+using Microsoft.VisualStudio.Debugger.Interop;
 using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Runtime.InteropServices;
@@ -9,19 +12,22 @@ namespace VsIdeBridge.Services;
 
 /// <summary>
 /// Surfaces the exception the debugger is currently stopped on as 'lastException' on debugger
-/// responses. Instead of relying on the legacy DTE OnExceptionThrown/OnExceptionNotHandled event
-/// sinks -- which only fire for the exception categories the user configured to break on and carry
-/// only a thin type/code/description -- this actively evaluates the $exception pseudovariable while
-/// in break mode. $exception is the same object the Visual Studio Exception Helper shows, so we get
-/// the real runtime type, message, stack trace, HResult, and inner exception. All evaluation runs
-/// on the Visual Studio UI thread and never throws.
+/// responses. Managed debug engines usually expose the Visual Studio Exception Helper object through
+/// the $exception pseudovariable, which gives us the runtime type, message, stack trace, HResult,
+/// and inner exception. Native C++ exceptions often do not expose $exception, so this tracker also
+/// subscribes to lower-level debugger events and records IDebugExceptionEvent2 details as a fallback.
+/// All DTE expression evaluation runs on the Visual Studio UI thread and all callbacks swallow errors.
 /// </summary>
-internal sealed class DebuggerExceptionTracker
+[ComVisible(true)]
+[ClassInterface(ClassInterfaceType.None)]
+internal sealed class DebuggerExceptionTracker : IDebugEventCallback2
 {
     private const int EvaluateTimeoutMilliseconds = 2000;
 
     private readonly object _exceptionLock = new();
     private DebuggerEvents? _debuggerEvents;
+    private IVsDebugger? _nativeDebugger;
+    private bool _nativeCallbackSubscribed;
     private JObject? _lastException;
 
     public void PrepareForRun(DTE2 dte)
@@ -36,16 +42,16 @@ internal sealed class DebuggerExceptionTracker
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        if (_debuggerEvents is not null)
+        if (_debuggerEvents is null)
         {
-            return;
+            // Keep the events object alive on the field; DTE event sinks stop firing when only held in
+            // a local. OnEnterRunMode is the reliable signal that execution resumed, so a stale
+            // exception from the previous break is never reported as the current one.
+            _debuggerEvents = dte.Events.DebuggerEvents;
+            _debuggerEvents.OnEnterRunMode += OnEnterRunMode;
         }
 
-        // Keep the events object alive on the field; DTE event sinks stop firing when only held in
-        // a local. OnEnterRunMode is the reliable signal that execution resumed, so a stale
-        // exception from the previous break is never reported as the current one.
-        _debuggerEvents = dte.Events.DebuggerEvents;
-        _debuggerEvents.OnEnterRunMode += OnEnterRunMode;
+        EnsureNativeCallbackSubscribed();
     }
 
     public void AddLastException(JObject target)
@@ -127,6 +133,169 @@ internal sealed class DebuggerExceptionTracker
         lock (_exceptionLock)
         {
             _lastException = exception;
+        }
+    }
+
+    int IDebugEventCallback2.Event(
+        IDebugEngine2 pEngine,
+        IDebugProcess2 pProcess,
+        IDebugProgram2 pProgram,
+        IDebugThread2 pThread,
+        IDebugEvent2 pEvent,
+        ref Guid riidEvent,
+        uint dwAttrib)
+    {
+        try
+        {
+            if (pEvent is IDebugExceptionEvent2 exceptionEvent)
+            {
+                CaptureNativeException(exceptionEvent);
+            }
+        }
+        catch (COMException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Native debugger exception capture failed: {ex.Message}");
+        }
+        catch (InvalidCastException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Native debugger exception capture failed: {ex.Message}");
+        }
+        catch (ArgumentException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Native debugger exception capture failed: {ex.Message}");
+        }
+        finally
+        {
+            SafeRelease(pEvent);
+            SafeRelease(pThread);
+            SafeRelease(pProgram);
+            SafeRelease(pProcess);
+            SafeRelease(pEngine);
+        }
+
+        return VSConstants.S_OK;
+    }
+
+    private void EnsureNativeCallbackSubscribed()
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+
+        if (_nativeCallbackSubscribed)
+        {
+            return;
+        }
+
+        try
+        {
+            if (Package.GetGlobalService(typeof(SVsShellDebugger)) is not IVsDebugger debugger)
+            {
+                return;
+            }
+
+            int hr = debugger.AdviseDebugEventCallback(this);
+            if (ErrorHandler.Succeeded(hr))
+            {
+                _nativeDebugger = debugger;
+                _nativeCallbackSubscribed = true;
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine($"AdviseDebugEventCallback failed: 0x{hr:X8}");
+            }
+        }
+        catch (COMException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"AdviseDebugEventCallback failed: {ex.Message}");
+        }
+    }
+
+    private void CaptureNativeException(IDebugExceptionEvent2 exceptionEvent)
+    {
+        EXCEPTION_INFO[] exceptionInfo = new EXCEPTION_INFO[1];
+        int hr = exceptionEvent.GetException(exceptionInfo);
+        if (ErrorHandler.Failed(hr))
+        {
+            return;
+        }
+
+        EXCEPTION_INFO info = exceptionInfo[0];
+        string? description;
+        try
+        {
+            hr = exceptionEvent.GetExceptionDescription(out description);
+        }
+        catch (COMException)
+        {
+            description = null;
+            hr = VSConstants.E_FAIL;
+        }
+
+        if (ErrorHandler.Failed(hr))
+        {
+            description = null;
+        }
+
+        string exceptionName = string.IsNullOrWhiteSpace(info.bstrExceptionName)
+            ? "(native exception)"
+            : info.bstrExceptionName;
+        string message = string.IsNullOrWhiteSpace(description) ? exceptionName : description!;
+
+        JObject exception = new()
+        {
+            ["event"] = NativeEventKind(info.dwState),
+            ["source"] = "nativeDebugEvent",
+            ["type"] = exceptionName,
+            ["message"] = message,
+            ["nativeCode"] = info.dwCode,
+            ["nativeCodeHex"] = $"0x{info.dwCode:X8}",
+            ["nativeState"] = info.dwState.ToString(),
+            ["nativeStateValue"] = Convert.ToInt64(info.dwState),
+            ["guidType"] = info.guidType.ToString("D"),
+            ["capturedAtUtc"] = DateTimeOffset.UtcNow.ToString("O"),
+        };
+
+        if (!string.IsNullOrWhiteSpace(info.bstrProgramName))
+        {
+            exception["program"] = info.bstrProgramName;
+        }
+
+        lock (_exceptionLock)
+        {
+            _lastException = exception;
+        }
+    }
+
+    private static string NativeEventKind(enum_EXCEPTION_STATE state)
+    {
+        if (state.HasFlag(enum_EXCEPTION_STATE.EXCEPTION_STOP_SECOND_CHANCE)
+            || state.HasFlag(enum_EXCEPTION_STATE.EXCEPTION_STOP_USER_UNCAUGHT))
+        {
+            return "notHandled";
+        }
+
+        if (state.HasFlag(enum_EXCEPTION_STATE.EXCEPTION_STOP_FIRST_CHANCE)
+            || state.HasFlag(enum_EXCEPTION_STATE.EXCEPTION_STOP_USER_FIRST_CHANCE))
+        {
+            return "thrown";
+        }
+
+        return "native";
+    }
+
+    private static void SafeRelease(object? comObject)
+    {
+        if (comObject is null || !Marshal.IsComObject(comObject))
+        {
+            return;
+        }
+
+        try
+        {
+            Marshal.ReleaseComObject(comObject);
+        }
+        catch (ArgumentException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"ReleaseComObject skipped during debugger callback cleanup: {ex.Message}");
         }
     }
 

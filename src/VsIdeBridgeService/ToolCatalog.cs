@@ -45,6 +45,8 @@ internal static partial class ToolCatalog
             .. NugetTools(),
             // ── cmake project configuration (service-native subprocess) ─────────
             .. CmakeTools(),
+            // -- codex memory (read-only local snippets) ------------------------
+            .. MemoryTools(),
             // ── bridge development / release maintenance ───────────────────────
             .. DeveloperTools(),
         ];

@@ -7,7 +7,7 @@ These notes capture official Microsoft guidance that matters for the bridge debu
 - `EnvDTE.Debugger.Breakpoints.Add(...)` creates a breakpoint request, but that does not guarantee the breakpoint is already bound to executable code.
 - In the Visual Studio debugger model, a breakpoint can be `pending`, `bound`, or `error`.
 - The bridge should not treat "created but not yet resolved" as the same thing as "failed to create".
-- The legacy `EnvDTE.DebuggerEvents.OnExceptionThrown` / `OnExceptionNotHandled` event sinks are **unreliable** in modern Visual Studio: they only fire for the exception categories the user configured to break on (managed code defaults to user-unhandled only) and carry only a thin type/code/description. The reliable, modern way to read the current exception is to evaluate the `$exception` pseudovariable via `EnvDTE.Debugger.GetExpression` while in break mode.
+- The legacy `EnvDTE.DebuggerEvents.OnExceptionThrown` / `OnExceptionNotHandled` event sinks are **unreliable** in modern Visual Studio: they only fire for the exception categories the user configured to break on (managed code defaults to user-unhandled only) and carry only a thin type/code/description. The managed-path read should evaluate the `$exception` pseudovariable via `EnvDTE.Debugger.GetExpression` while in break mode. Native C++ exceptions can break without a useful `$exception`, so the bridge also subscribes to lower-level `IDebugExceptionEvent2` notifications through `IVsDebugger.AdviseDebugEventCallback`.
 
 ## Relevant APIs
 
@@ -17,11 +17,15 @@ These notes capture official Microsoft guidance that matters for the bridge debu
 - `EnvDTE80.Debugger2.Breakpoints`
   - Lets the extension inspect the current breakpoint collection after adding one.
 - `EnvDTE.Debugger.GetExpression("$exception", ...)`
-  - The reliable way to read the exception the debugger is currently stopped on -- the same object the Exception Helper shows.
+  - The reliable managed-code way to read the exception the debugger is currently stopped on -- the same object the Exception Helper shows.
   - Evaluate sub-expressions (`$exception.Message`, `$exception.StackTrace`, `$exception.HResult`, `$exception.InnerException`) to populate a rich `lastException`.
   - Works whenever `Debugger.CurrentMode == dbgBreakMode` and an exception is in flight, regardless of the user's Exception Settings.
 - `EnvDTE.Debugger.LastBreakReason`
   - Tells you *why* the debugger entered break mode (`dbgEventReasonExceptionThrown` / `dbgEventReasonExceptionNotHandled` vs breakpoint / step / user-break), used to classify the captured exception as `thrown` / `notHandled` / `inFlight`.
+- `IVsDebugger.AdviseDebugEventCallback(...)` + `IDebugEventCallback2`
+  - Subscribes the VSIX to lower-level debugger events from native/debug-engine layers.
+- `IDebugExceptionEvent2`
+  - Provides native exception information through `GetException(EXCEPTION_INFO[])` and `GetExceptionDescription(out string)`, including the exception name, code, state flags, GUID type, and program name.
 - `EnvDTE.DebuggerEvents.OnExceptionThrown` / `OnExceptionNotHandled` (legacy -- avoid as a capture source)
   - Only fire for exception categories configured to break on, and carry no message or stack trace; not dependable. Kept only historically.
 - `IDebugBreakpointBoundEvent2`
@@ -58,6 +62,12 @@ These notes capture official Microsoft guidance that matters for the bridge debu
   - https://learn.microsoft.com/en-us/dotnet/api/envdte.events.debuggerevents?view=visualstudiosdk-2022
 - DebuggerEventsClass.OnExceptionNotHandled Event (EnvDTE)
   - https://learn.microsoft.com/en-us/dotnet/api/envdte.debuggereventsclass.onexceptionnothandled?view=visualstudiosdk-2015
+- IVsDebugger.AdviseDebugEventCallback Method
+  - https://learn.microsoft.com/en-us/dotnet/api/microsoft.visualstudio.shell.interop.ivsdebugger.advisedebugeventcallback?view=visualstudiosdk-2022
+- IDebugEventCallback2 Interface
+  - https://learn.microsoft.com/en-us/dotnet/api/microsoft.visualstudio.debugger.interop.idebugeventcallback2?view=visualstudiosdk-2022
+- IDebugExceptionEvent2 Interface
+  - https://learn.microsoft.com/en-us/dotnet/api/microsoft.visualstudio.debugger.interop.idebugexceptionevent2?view=visualstudiosdk-2022
 - Breakpoints.Add Method (EnvDTE)
   - https://learn.microsoft.com/en-us/dotnet/api/envdte.breakpoints.add?view=visualstudiosdk-2022
 - Debugger2.Breakpoints Property

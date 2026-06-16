@@ -142,12 +142,18 @@ Once connected, describe what you want in plain language. The assistant figures 
 - "Expand `m_buffer` and show me every element and its fields."
 - "Show me the exception the debugger just hit."
 
-Breakpoints can target a function or symbol name instead of a file and line — these survive source edits and line shifts — and can log a message and keep running instead of pausing (tracepoints/logpoints). `debug_locals` and `debug_watch` can expand a container or struct into its elements and fields; use `chunk_lines` on `debug_watch` to page large expansions in memory without flooding the reply. Debugger run and step tools include `lastException` when Visual Studio reports a thrown or unhandled exception. Ask for `debug_exceptions` when you need the exception settings snapshot and the latest captured exception details.
+Breakpoints can target a function or symbol name instead of a file and line — these survive source edits and line shifts — and can log a message and keep running instead of pausing (tracepoints/logpoints). `debug_locals` and `debug_watch` can expand a container or struct into its elements and fields; use `chunk_lines` on `debug_watch` to page large expansions in memory without flooding the reply. Debugger run and step tools include `lastException` when Visual Studio reports a thrown or unhandled exception; for native C++ exceptions, the VSIX also listens for lower-level debugger exception events. Ask for `debug_exceptions` when you need the exception settings snapshot and the latest captured exception details.
 
 **Git**
 - "What files have I changed since the last commit?"
 - "Commit everything with a sensible message."
 - "Show me the diff for this file."
+
+**GitHub** (requires the `gh` CLI, authenticated)
+- "List the open issues and show me issue 42."
+- "Comment on issue 42, add the `bug` label, and close it as completed."
+- "Open an issue titled 'Fix flaky cooling test' with the `bug` label."
+- "Show me the open pull requests and the diff for PR 17."
 
 **Project and packages**
 - "What NuGet packages does this project reference?"

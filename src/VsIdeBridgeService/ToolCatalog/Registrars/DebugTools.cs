@@ -216,8 +216,8 @@ internal static partial class ToolCatalog
                 related: [(DebugLocalsTool, "Inspect all locals without an expression"), (DebugThreadsTool, "Choose a thread ID"), ("batch", "Evaluate several watch expressions in one round-trip")]));
 
         yield return BridgeTool("debug_exceptions",
-            "Capture debugger exception group/settings snapshot, plus the last thrown or unhandled debugger " +
-            "exception when one was observed. Also returns 'lastBreakReason' (e.g. dbgEventReasonBreakpoint, " +
+            "Capture debugger exception group/settings snapshot, plus the last exception captured from DTE $exception " +
+            "or native IDebugExceptionEvent2 events. Also returns 'lastBreakReason' (e.g. dbgEventReasonBreakpoint, " +
             "dbgEventReasonExceptionThrown, dbgEventReasonUserBreak) and a 'brokeOnException' flag, so you can " +
             "tell why the debugger is stopped -- a breakpoint, a thrown/unhandled exception, a step, or a manual pause.",
             EmptySchema(), "debug-exceptions", _ => Empty(), Debug,
